@@ -21,6 +21,22 @@ export interface DecodedImage {
 
 export type ImageInputStatus = 'empty' | 'loading' | 'ready' | 'error';
 
+export interface LocalImageReadyPayload {
+  readonly file: File;
+  readonly image: DecodedImage;
+  readonly dimensions: ImageDimensions;
+}
+
+export interface LocalImageClearedPayload {
+  readonly previousImage: DecodedImage | null;
+  readonly reason: 'replacement-started' | 'reset';
+}
+
+export interface LocalImageInputLifecycle {
+  readonly onImageReady?: (payload: LocalImageReadyPayload) => void;
+  readonly onImageCleared?: (payload: LocalImageClearedPayload) => void;
+}
+
 export interface ImageInputState {
   readonly status: ImageInputStatus;
   readonly selectedImage: DecodedImage | null;

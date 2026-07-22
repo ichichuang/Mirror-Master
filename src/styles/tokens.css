@@ -27,6 +27,10 @@
   --color-code-text: #9f1239;
   --color-selection: #164e63;
   --color-selection-text: #ffffff;
+  --color-success: #0f766e;
+  --color-info: #2563eb;
+  --color-overlay: #d9464d;
+  --color-overlay-soft: rgba(217, 70, 77, 0.2);
 
   --content-max: 1120px;
   --radius-small: 4px;

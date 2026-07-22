@@ -1,7 +1,15 @@
 import { decodeImageFromObjectUrl } from './imageDecoder';
 import { createObjectUrlStore } from './objectUrlStore';
 import { toDecodedImage, validateSingleImageFile } from './fileValidation';
-import { ACCEPTED_IMAGE_ACCEPT, type ImageInputState } from './types';
+import {
+  ACCEPTED_IMAGE_ACCEPT,
+  type ImageInputState,
+  type LocalImageInputLifecycle,
+} from './types';
+import {
+  renderGridDetectionOverlay,
+  renderGridDetectionPanel,
+} from '../grid-detection/gridDetectionPanel';
 
 const EMPTY_MESSAGE = '尚未选择图片。请选择一张本地 PNG、JPEG 或 WebP 图片。';
 
@@ -12,6 +20,7 @@ interface LocalImageInputElements {
   readonly resetButton: HTMLButtonElement;
   readonly status: HTMLElement;
   readonly previewFrame: HTMLElement;
+  readonly previewStage: HTMLElement;
   readonly previewImage: HTMLImageElement;
   readonly emptyPreview: HTMLElement;
   readonly loadingPreview: HTMLElement;
@@ -75,7 +84,10 @@ export function renderLocalImageInput(): string {
             <p class="preview-loading" data-loading-preview hidden>
               正在本地解码 <span data-loading-file-name></span>...
             </p>
-            <img class="preview-image" alt="" data-preview-image hidden />
+            <div class="preview-stage" data-preview-stage hidden>
+              <img class="preview-image" alt="" data-preview-image />
+              ${renderGridDetectionOverlay()}
+            </div>
           </div>
         </figure>
 
@@ -100,12 +112,17 @@ export function renderLocalImageInput(): string {
             </div>
           </dl>
         </section>
+
+        ${renderGridDetectionPanel()}
       </div>
     </section>
   `;
 }
 
-export function mountLocalImageInput(root: HTMLElement): void {
+export function mountLocalImageInput(
+  root: HTMLElement,
+  lifecycle: LocalImageInputLifecycle = {},
+): void {
   const elements = getLocalImageInputElements(root);
   const objectUrls = createObjectUrlStore();
 
@@ -146,6 +163,11 @@ export function mountLocalImageInput(root: HTMLElement): void {
     const objectUrl = objectUrls.create(file);
     const previousImage = state.selectedImage;
 
+    lifecycle.onImageCleared?.({
+      previousImage,
+      reason: 'replacement-started',
+    });
+
     setState({
       status: 'loading',
       selectedImage: previousImage,
@@ -182,6 +204,12 @@ export function mountLocalImageInput(root: HTMLElement): void {
         )} 像素。`,
         pendingFileName: null,
       });
+
+      lifecycle.onImageReady?.({
+        file,
+        image: decodedImage,
+        dimensions,
+      });
     } catch {
       objectUrls.revoke(objectUrl);
 
@@ -199,6 +227,11 @@ export function mountLocalImageInput(root: HTMLElement): void {
     if (state.selectedImage) {
       objectUrls.revoke(state.selectedImage.objectUrl);
     }
+
+    lifecycle.onImageCleared?.({
+      previousImage: state.selectedImage,
+      reason: 'reset',
+    });
 
     elements.input.value = '';
 
@@ -280,6 +313,7 @@ function renderState(elements: LocalImageInputElements, state: ImageInputState):
   elements.resetButton.disabled = !hasImage;
   elements.replaceButton.textContent = hasImage ? '更换图片' : '选择图片';
   elements.emptyPreview.hidden = hasImage || state.status === 'loading';
+  elements.previewStage.hidden = !hasImage || state.status === 'loading';
   elements.previewImage.hidden = !hasImage || state.status === 'loading';
   elements.metadataList.dataset.state = hasImage ? 'ready' : 'empty';
 
@@ -311,6 +345,7 @@ function getLocalImageInputElements(root: HTMLElement): LocalImageInputElements 
     resetButton: getRequiredElement(root, '[data-reset-button]', HTMLButtonElement),
     status: getRequiredElement(root, '[data-status]', HTMLElement),
     previewFrame: getRequiredElement(root, '[data-preview-frame]', HTMLElement),
+    previewStage: getRequiredElement(root, '[data-preview-stage]', HTMLElement),
     previewImage: getRequiredElement(root, '[data-preview-image]', HTMLImageElement),
     emptyPreview: getRequiredElement(root, '[data-empty-preview]', HTMLElement),
     loadingPreview: getRequiredElement(root, '[data-loading-preview]', HTMLElement),
