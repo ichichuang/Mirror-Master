@@ -19,14 +19,14 @@ export function renderApp(): string {
       <main id="main-content" class="page-main" tabindex="-1">
         <section id="top" class="hero" aria-labelledby="page-title">
           <div class="hero-copy">
-            <p class="eyebrow">GRID-001</p>
+            <p class="eyebrow">GRID-CORRECTION-001</p>
             <h1 id="page-title">Mirror Master</h1>
             <p class="hero-description">
-              现在可以选择一张本地 PNG、JPEG 或 WebP 图片，并在浏览器内尝试自动检测完整的
-              34 × 27 Pixelanim 主网格。
+              现在可以选择一张本地 PNG、JPEG 或 WebP 图片，在浏览器内自动检测完整的
+              34 × 27 Pixelanim 主网格，并在检测不足时手动校正外框。
             </p>
             <p class="foundation-note">
-              检测只使用本地 Canvas 2D 像素分析；本节点不包含 OCR、OpenCV、用户校正、镜像处理、
+              检测和校正只使用本地 Canvas 2D 与浏览器交互；本节点不包含 OCR、OpenCV、镜像处理、
               图片导出或远程上传。
             </p>
           </div>
@@ -56,11 +56,11 @@ export function renderApp(): string {
           <div class="status-grid">
             <article>
               <h3>已经完成</h3>
-              <p>本地单图输入、原图预览、文件元数据展示、资源清理，以及 34 × 27 网格自动检测原型。</p>
+              <p>本地单图输入、原图预览、文件元数据展示、资源清理、34 × 27 自动检测和用户校正 fallback。</p>
             </article>
             <article>
               <h3>尚未实现</h3>
-              <p>用户手动校正、镜像处理、OCR、OpenCV、图片导出，以及将检测结果用于单元格位置变换。</p>
+              <p>镜像处理、OCR、OpenCV、图片导出，以及将已应用网格选择用于单元格位置变换。</p>
             </article>
           </div>
         </section>
@@ -84,15 +84,15 @@ export function renderApp(): string {
           <ol class="roadmap-list">
             <li>已完成本地图片输入与原图预览。</li>
             <li>已完成 34 × 27 主网格自动检测原型。</li>
-            <li>下一步补充用户修正 fallback。</li>
-            <li>实现网格单元位置镜像，避免把内部标签做整图像素翻转。</li>
-            <li>补充本地导出流程和核心处理逻辑测试。</li>
+            <li>已完成用户网格校正 fallback。</li>
+            <li>下一步实现网格单元位置镜像，避免把内部标签做整图像素翻转。</li>
+            <li>后续补充本地导出流程和核心处理逻辑测试。</li>
           </ol>
         </section>
       </main>
 
       <footer class="site-footer">
-        <p>Mirror Master 当前支持本地预览和临时网格检测原型。用户校正、镜像处理和导出功能尚未实现。</p>
+        <p>Mirror Master 当前支持本地预览、网格检测和手动校正。镜像处理和导出功能尚未实现。</p>
       </footer>
     </div>
   `;

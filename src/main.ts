@@ -4,7 +4,11 @@ import './styles/page.css';
 
 import { renderApp } from './app';
 import { mountLocalImageInput } from './features/local-image-input/localImageInput';
-import { mountGridDetection } from './features/grid-detection/gridDetectionPanel';
+import {
+  mountGridDetection,
+  type GridDetectionController,
+} from './features/grid-detection/gridDetectionPanel';
+import { mountGridCorrectionEditor } from './features/grid-correction/gridCorrectionEditor';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -16,7 +20,6 @@ app.innerHTML = renderApp();
 
 const imageInputRoot = app.querySelector<HTMLElement>('[data-local-image-input]');
 const gridDetectionRoot = app.querySelector<HTMLElement>('[data-grid-detection]');
-const gridOverlay = app.querySelector<SVGSVGElement>('[data-grid-overlay]');
 
 if (!imageInputRoot) {
   throw new Error('Mirror Master bootstrap failed: missing local image input root.');
@@ -26,14 +29,19 @@ if (!gridDetectionRoot) {
   throw new Error('Mirror Master bootstrap failed: missing grid detection root.');
 }
 
-if (!gridOverlay) {
-  throw new Error('Mirror Master bootstrap failed: missing grid detection overlay.');
-}
+let gridDetection: GridDetectionController | null = null;
 
-const gridDetection = mountGridDetection(gridDetectionRoot, gridOverlay);
+const gridCorrection = mountGridCorrectionEditor(imageInputRoot, {
+  onSelectionApplied(selection) {
+    gridDetection?.showAppliedSelection(selection);
+  },
+});
+
+gridDetection = mountGridDetection(gridDetectionRoot, gridCorrection);
 
 mountLocalImageInput(imageInputRoot, {
   onImageReady(payload) {
+    gridCorrection.setImage(payload.dimensions);
     gridDetection.detect({
       file: payload.file,
       fileName: payload.image.fileName,
@@ -42,6 +50,7 @@ mountLocalImageInput(imageInputRoot, {
     });
   },
   onImageCleared() {
+    gridCorrection.clearImage();
     gridDetection.clear();
   },
 });

@@ -1,28 +1,17 @@
 import type { PIXELANIM_GRID_COLUMNS, PIXELANIM_GRID_ROWS } from './constants';
+import type {
+  GridCellSize,
+  NaturalBoundaryArrays,
+  NaturalImageRect,
+  NaturalImageSize,
+} from '../grid-selection/types';
 
-export interface NaturalImageSize {
-  readonly width: number;
-  readonly height: number;
-}
-
-export interface NaturalImageRect {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-  readonly right: number;
-  readonly bottom: number;
-}
-
-export interface NaturalBoundaryArrays {
-  readonly vertical: readonly number[];
-  readonly horizontal: readonly number[];
-}
-
-export interface GridCellSize {
-  readonly width: number;
-  readonly height: number;
-}
+export type {
+  GridCellSize,
+  NaturalBoundaryArrays,
+  NaturalImageRect,
+  NaturalImageSize,
+} from '../grid-selection/types';
 
 export interface DetectionMetrics {
   readonly geometry: number;

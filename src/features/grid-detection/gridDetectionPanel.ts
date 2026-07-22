@@ -1,10 +1,7 @@
 import { detectPixelanimGrid } from './detector';
-import {
-  PIXELANIM_GRID_COLUMNS,
-  PIXELANIM_GRID_ROWS,
-  PIXELANIM_HORIZONTAL_BOUNDARY_COUNT,
-  PIXELANIM_VERTICAL_BOUNDARY_COUNT,
-} from './constants';
+import { PIXELANIM_GRID_COLUMNS, PIXELANIM_GRID_ROWS } from './constants';
+import type { GridCorrectionController } from '../grid-correction/gridCorrectionEditor';
+import type { GridSelection, NaturalImageSize } from '../grid-selection/types';
 import type { DetectionMetrics, GridDetectionOutcome, GridDetectionSuccess } from './types';
 
 interface GridDetectionElements {
@@ -17,7 +14,10 @@ interface GridDetectionElements {
   readonly cellSize: HTMLElement;
   readonly metrics: HTMLElement;
   readonly guidance: HTMLElement;
-  readonly overlay: SVGSVGElement;
+  readonly actions: HTMLElement;
+  readonly useDetectedButton: HTMLButtonElement;
+  readonly adjustDetectedButton: HTMLButtonElement;
+  readonly manualSelectionButton: HTMLButtonElement;
 }
 
 export interface GridDetectionImageReadyPayload {
@@ -30,14 +30,10 @@ export interface GridDetectionImageReadyPayload {
 export interface GridDetectionController {
   readonly clear: () => void;
   readonly detect: (payload: GridDetectionImageReadyPayload) => void;
+  readonly showAppliedSelection: (selection: GridSelection) => void;
 }
 
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const IDLE_MESSAGE = '尚未选择图片，网格检测处于空闲状态。';
-
-export function renderGridDetectionOverlay(): string {
-  return '<svg class="grid-overlay" data-grid-overlay hidden aria-hidden="true"></svg>';
-}
 
 export function renderGridDetectionPanel(): string {
   return `
@@ -80,27 +76,46 @@ export function renderGridDetectionPanel(): string {
       <p class="detection-guidance" data-grid-detection-guidance hidden>
         请检查叠加层外框和每条分隔线是否贴合原图网格。
       </p>
+      <div class="detection-actions" data-grid-detection-actions hidden aria-label="网格检测操作">
+        <button class="button button-primary" type="button" data-grid-detection-use>
+          使用检测结果
+        </button>
+        <button class="button button-secondary" type="button" data-grid-detection-adjust>
+          调整检测区域
+        </button>
+        <button class="button button-primary" type="button" data-grid-detection-manual>
+          手动选择网格区域
+        </button>
+      </div>
     </section>
   `;
 }
 
 export function mountGridDetection(
   root: HTMLElement,
-  overlay: SVGSVGElement,
+  correction: GridCorrectionController,
 ): GridDetectionController {
-  const elements = getGridDetectionElements(root, overlay);
+  const elements = getGridDetectionElements(root);
   let detectionVersion = 0;
   let pendingDetectionTimer: number | null = null;
+  let latestDetectedResult: GridDetectionSuccess | null = null;
+  let latestFailureImage: NaturalImageSize | null = null;
 
   const clear = (): void => {
     detectionVersion += 1;
     clearPendingDetectionTimer();
+    latestDetectedResult = null;
+    latestFailureImage = null;
+    correction.clearTransientResult();
     renderIdle(elements);
   };
 
   const detect = (payload: GridDetectionImageReadyPayload): void => {
     detectionVersion += 1;
     clearPendingDetectionTimer();
+    latestDetectedResult = null;
+    latestFailureImage = null;
+    correction.clearTransientResult();
     const currentVersion = detectionVersion;
     renderDetecting(elements, payload);
 
@@ -119,16 +134,32 @@ export function mountGridDetection(
             return;
           }
 
-          renderOutcome(elements, outcome);
+          renderOutcome(elements, outcome, correction, setLatestResult);
         })
         .catch(() => {
           if (currentSelectionIsStale(currentVersion)) {
             return;
           }
 
-          renderFailed(elements, '检测过程意外中断，请重新选择图片后再试。');
+          const naturalImage = {
+            width: payload.width,
+            height: payload.height,
+          };
+          latestDetectedResult = null;
+          latestFailureImage = naturalImage;
+          correction.showDetectionFailure(naturalImage);
+          renderFailed(
+            elements,
+            '检测过程意外中断，请重新选择图片后再试。',
+            undefined,
+            naturalImage,
+          );
         });
     }, 30);
+  };
+
+  const showAppliedSelection = (selection: GridSelection): void => {
+    renderAppliedSelection(elements, selection);
   };
 
   const clearPendingDetectionTimer = (): void => {
@@ -142,11 +173,54 @@ export function mountGridDetection(
 
   const currentSelectionIsStale = (version: number): boolean => version !== detectionVersion;
 
+  const setLatestResult = (
+    detectedResult: GridDetectionSuccess | null,
+    failureImage: NaturalImageSize | null,
+  ): void => {
+    latestDetectedResult = detectedResult;
+    latestFailureImage = failureImage;
+  };
+
+  elements.useDetectedButton.addEventListener('click', () => {
+    if (!latestDetectedResult || latestDetectedResult.confidence.grade === 'low') {
+      return;
+    }
+
+    const selection = correction.acceptDetectedResult(latestDetectedResult);
+
+    if (selection) {
+      renderAppliedSelection(elements, selection);
+    }
+  });
+
+  elements.adjustDetectedButton.addEventListener('click', () => {
+    if (!latestDetectedResult || latestDetectedResult.confidence.grade === 'low') {
+      return;
+    }
+
+    correction.startDetectedAdjustment(latestDetectedResult);
+    elements.live.textContent = '正在调整检测到的网格区域；请使用预览图上的手柄。';
+    elements.guidance.textContent = '校正完成后在预览图下方点击“应用”。';
+    elements.guidance.hidden = false;
+  });
+
+  elements.manualSelectionButton.addEventListener('click', () => {
+    if (!latestFailureImage) {
+      return;
+    }
+
+    correction.startManualSelection(latestFailureImage);
+    elements.live.textContent = '请在预览图上拖出完整 34 × 27 外框的近似区域。';
+    elements.guidance.textContent = '拖出近似区域后会出现八个边角手柄和整框移动区域。';
+    elements.guidance.hidden = false;
+  });
+
   renderIdle(elements);
 
   return {
     clear,
     detect,
+    showAppliedSelection,
   };
 }
 
@@ -155,7 +229,7 @@ function renderIdle(elements: GridDetectionElements): void {
   elements.live.textContent = IDLE_MESSAGE;
   elements.details.hidden = true;
   elements.guidance.hidden = true;
-  clearOverlay(elements.overlay);
+  hideActions(elements);
 }
 
 function renderDetecting(
@@ -166,23 +240,47 @@ function renderDetecting(
   elements.live.textContent = `正在本地检测 ${payload.fileName} 的 34 × 27 网格...`;
   elements.details.hidden = true;
   elements.guidance.hidden = true;
-  clearOverlay(elements.overlay);
+  hideActions(elements);
 }
 
-function renderOutcome(elements: GridDetectionElements, outcome: GridDetectionOutcome): void {
+function renderOutcome(
+  elements: GridDetectionElements,
+  outcome: GridDetectionOutcome,
+  correction: GridCorrectionController,
+  setLatestResult: (
+    detectedResult: GridDetectionSuccess | null,
+    failureImage: NaturalImageSize | null,
+  ) => void,
+): void {
   if (outcome.ok) {
+    if (outcome.confidence.grade === 'low') {
+      setLatestResult(null, outcome.naturalImage);
+      correction.showDetectionFailure(outcome.naturalImage);
+      renderFailed(
+        elements,
+        '检测置信度较低，不能直接接受；请手动选择完整网格区域。',
+        outcome.metrics,
+        outcome.naturalImage,
+      );
+      return;
+    }
+
+    setLatestResult(outcome, null);
+    correction.showDetectedResult(outcome);
     renderDetected(elements, outcome);
     return;
   }
 
-  renderFailed(elements, outcome.message, outcome.metrics);
+  setLatestResult(null, outcome.naturalImage ?? null);
+  correction.showDetectionFailure(outcome.naturalImage ?? null);
+  renderFailed(elements, outcome.message, outcome.metrics, outcome.naturalImage);
 }
 
 function renderDetected(elements: GridDetectionElements, result: GridDetectionSuccess): void {
   elements.root.dataset.state = 'detected';
   elements.live.textContent = `已检测到 ${String(result.columns)} × ${String(
     result.rows,
-  )} 网格，置信度${result.confidence.label}。`;
+  )} 网格，置信度${result.confidence.label}。请选择使用或调整检测结果。`;
   elements.gridSize.textContent = `${String(result.columns)} 列 × ${String(result.rows)} 行`;
   elements.confidence.textContent = `${result.confidence.label}（${formatPercent(
     result.confidence.score,
@@ -196,13 +294,18 @@ function renderDetected(elements: GridDetectionElements, result: GridDetectionSu
   elements.metrics.textContent = formatMetrics(result.metrics);
   elements.details.hidden = false;
   elements.guidance.hidden = false;
-  renderOverlay(elements.overlay, result);
+  elements.guidance.textContent = '高或中置信度只代表可接受候选；应用前仍可调整外框。';
+  elements.actions.hidden = false;
+  elements.useDetectedButton.hidden = false;
+  elements.adjustDetectedButton.hidden = false;
+  elements.manualSelectionButton.hidden = true;
 }
 
 function renderFailed(
   elements: GridDetectionElements,
   message: string,
   metrics?: DetectionMetrics,
+  naturalImage?: NaturalImageSize,
 ): void {
   elements.root.dataset.state = 'failed';
   elements.live.textContent = message;
@@ -214,66 +317,46 @@ function renderFailed(
   elements.cellSize.textContent = '未检测';
   elements.metrics.textContent = metrics ? formatMetrics(metrics) : '没有足够稳定的评分组成。';
   elements.details.hidden = false;
-  elements.guidance.hidden = true;
-  clearOverlay(elements.overlay);
+  elements.guidance.textContent = naturalImage
+    ? '自动检测未产生可接受结果；请手动拖出完整 34 × 27 外框。'
+    : '自动检测未产生可接受结果。';
+  elements.guidance.hidden = false;
+  elements.actions.hidden = naturalImage === undefined;
+  elements.useDetectedButton.hidden = true;
+  elements.adjustDetectedButton.hidden = true;
+  elements.manualSelectionButton.hidden = naturalImage === undefined;
 }
 
-function renderOverlay(overlay: SVGSVGElement, result: GridDetectionSuccess): void {
-  clearOverlay(overlay);
-  overlay.removeAttribute('hidden');
-  overlay.setAttribute(
-    'viewBox',
-    `0 0 ${String(result.naturalImage.width)} ${String(result.naturalImage.height)}`,
-  );
-  overlay.setAttribute('preserveAspectRatio', 'none');
-  overlay.dataset.confidence = result.confidence.grade;
-
-  const group = document.createElementNS(SVG_NAMESPACE, 'g');
-  group.setAttribute('class', 'grid-overlay-lines');
-
-  for (const boundary of result.boundaries.vertical) {
-    const line = document.createElementNS(SVG_NAMESPACE, 'line');
-    line.setAttribute('x1', String(boundary));
-    line.setAttribute('x2', String(boundary));
-    line.setAttribute('y1', String(result.rectangle.y));
-    line.setAttribute('y2', String(result.rectangle.bottom));
-    group.append(line);
-  }
-
-  for (const boundary of result.boundaries.horizontal) {
-    const line = document.createElementNS(SVG_NAMESPACE, 'line');
-    line.setAttribute('x1', String(result.rectangle.x));
-    line.setAttribute('x2', String(result.rectangle.right));
-    line.setAttribute('y1', String(boundary));
-    line.setAttribute('y2', String(boundary));
-    group.append(line);
-  }
-
-  const outerRectangle = document.createElementNS(SVG_NAMESPACE, 'rect');
-  outerRectangle.setAttribute('class', 'grid-overlay-outer');
-  outerRectangle.setAttribute('x', String(result.rectangle.x));
-  outerRectangle.setAttribute('y', String(result.rectangle.y));
-  outerRectangle.setAttribute('width', String(result.rectangle.width));
-  outerRectangle.setAttribute('height', String(result.rectangle.height));
-
-  overlay.append(group, outerRectangle);
-  overlay.dataset.boundaries = `${String(PIXELANIM_VERTICAL_BOUNDARY_COUNT)}v-${String(
-    PIXELANIM_HORIZONTAL_BOUNDARY_COUNT,
-  )}h`;
+function renderAppliedSelection(elements: GridDetectionElements, selection: GridSelection): void {
+  elements.root.dataset.state = 'applied';
+  elements.live.textContent = `已应用${formatSelectionSource(selection.source)}网格选择。`;
+  elements.gridSize.textContent = `${String(PIXELANIM_GRID_COLUMNS)} 列 × ${String(
+    PIXELANIM_GRID_ROWS,
+  )} 行`;
+  elements.confidence.textContent = formatSelectionSource(selection.source);
+  elements.rectangle.textContent = `x=${formatCoordinate(selection.rectangle.x)}, y=${formatCoordinate(
+    selection.rectangle.y,
+  )}, w=${formatCoordinate(selection.rectangle.width)}, h=${formatCoordinate(
+    selection.rectangle.height,
+  )}`;
+  elements.cellSize.textContent = `${formatCoordinate(selection.cellSize.width)} × ${formatCoordinate(
+    selection.cellSize.height,
+  )} px`;
+  elements.metrics.textContent = '已创建浏览器内存中的网格选择；未上传、未导出。';
+  elements.details.hidden = false;
+  elements.guidance.textContent = '如需继续微调，请在预览图下方点击“编辑已应用区域”。';
+  elements.guidance.hidden = false;
+  hideActions(elements);
 }
 
-function clearOverlay(overlay: SVGSVGElement): void {
-  overlay.replaceChildren();
-  overlay.setAttribute('hidden', '');
-  delete overlay.dataset.confidence;
-  delete overlay.dataset.boundaries;
-  overlay.removeAttribute('viewBox');
+function hideActions(elements: GridDetectionElements): void {
+  elements.actions.hidden = true;
+  elements.useDetectedButton.hidden = true;
+  elements.adjustDetectedButton.hidden = true;
+  elements.manualSelectionButton.hidden = true;
 }
 
-function getGridDetectionElements(
-  root: HTMLElement,
-  overlay: SVGSVGElement,
-): GridDetectionElements {
+function getGridDetectionElements(root: HTMLElement): GridDetectionElements {
   return {
     root,
     live: getRequiredElement(root, '[data-grid-detection-live]', HTMLElement),
@@ -284,7 +367,18 @@ function getGridDetectionElements(
     cellSize: getRequiredElement(root, '[data-grid-detection-cell-size]', HTMLElement),
     metrics: getRequiredElement(root, '[data-grid-detection-metrics]', HTMLElement),
     guidance: getRequiredElement(root, '[data-grid-detection-guidance]', HTMLElement),
-    overlay,
+    actions: getRequiredElement(root, '[data-grid-detection-actions]', HTMLElement),
+    useDetectedButton: getRequiredElement(root, '[data-grid-detection-use]', HTMLButtonElement),
+    adjustDetectedButton: getRequiredElement(
+      root,
+      '[data-grid-detection-adjust]',
+      HTMLButtonElement,
+    ),
+    manualSelectionButton: getRequiredElement(
+      root,
+      '[data-grid-detection-manual]',
+      HTMLButtonElement,
+    ),
   };
 }
 
@@ -310,6 +404,10 @@ function formatCoordinate(value: number): string {
 
 function formatPercent(value: number): string {
   return `${Math.round(value * 100).toString()}%`;
+}
+
+function formatSelectionSource(source: GridSelection['source']): string {
+  return source === 'automatic' ? '自动检测' : '手动校正';
 }
 
 function formatMetrics(metrics: DetectionMetrics): string {

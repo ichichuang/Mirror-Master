@@ -7,9 +7,10 @@ import {
   type LocalImageInputLifecycle,
 } from './types';
 import {
-  renderGridDetectionOverlay,
-  renderGridDetectionPanel,
-} from '../grid-detection/gridDetectionPanel';
+  renderGridCorrectionControls,
+  renderGridCorrectionOverlay,
+} from '../grid-correction/gridCorrectionMarkup';
+import { renderGridDetectionPanel } from '../grid-detection/gridDetectionPanel';
 
 const EMPTY_MESSAGE = '尚未选择图片。请选择一张本地 PNG、JPEG 或 WebP 图片。';
 
@@ -79,6 +80,7 @@ export function renderLocalImageInput(): string {
 
         <figure class="preview-panel" aria-labelledby="preview-title">
           <figcaption id="preview-title" class="preview-title">原图预览</figcaption>
+          ${renderGridCorrectionControls()}
           <div class="preview-frame" data-preview-frame>
             <p class="preview-empty" data-empty-preview>未选择图片时不会显示预览。</p>
             <p class="preview-loading" data-loading-preview hidden>
@@ -86,7 +88,7 @@ export function renderLocalImageInput(): string {
             </p>
             <div class="preview-stage" data-preview-stage hidden>
               <img class="preview-image" alt="" data-preview-image />
-              ${renderGridDetectionOverlay()}
+              ${renderGridCorrectionOverlay()}
             </div>
           </div>
         </figure>
