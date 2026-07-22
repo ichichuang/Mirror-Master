@@ -19,15 +19,15 @@ export function renderApp(): string {
       <main id="main-content" class="page-main" tabindex="-1">
         <section id="top" class="hero" aria-labelledby="page-title">
           <div class="hero-copy">
-            <p class="eyebrow">GRID-PRECISION-001</p>
+            <p class="eyebrow">MIRROR-001</p>
             <h1 id="page-title">Mirror Master</h1>
             <p class="hero-description">
               现在可以选择一张本地 PNG、JPEG 或 WebP 图片，在浏览器内自动检测完整的
-              34 × 27 Pixelanim 主网格，先进行粗校正，再生成严格整数像素精确校准。
+              34 × 27 Pixelanim 主网格，完成粗校正和整数精确确认后，生成本地镜像结果预览。
             </p>
             <p class="foundation-note">
-              检测、粗校正和精修只使用本地 Canvas 2D 与浏览器交互；本节点不包含 OCR、OpenCV、
-              镜像处理、图片导出或远程上传。
+              检测、粗校正、精修和镜像预览只使用本地 Canvas 2D 与浏览器交互；本节点不包含 OCR、OpenCV、
+              图片导出、下载或远程上传。
             </p>
           </div>
 
@@ -58,12 +58,12 @@ export function renderApp(): string {
               <h3>已经完成</h3>
               <p>
                 本地单图输入、原图预览、文件元数据展示、资源清理、34 × 27 自动检测、
-                用户校正 fallback 和整数像素精确校准。
+                用户校正 fallback、整数像素精确校准和网格单元镜像预览。
               </p>
             </article>
             <article>
               <h3>尚未实现</h3>
-              <p>镜像处理、OCR、OpenCV、图片导出、下载，以及单元格位置变换。</p>
+              <p>OCR、OpenCV、图片导出、下载，以及批量处理。</p>
             </article>
           </div>
         </section>
@@ -89,14 +89,14 @@ export function renderApp(): string {
             <li>已完成 34 × 27 主网格自动检测原型。</li>
             <li>已完成用户网格校正 fallback。</li>
             <li>已完成整数像素精确校准，确认后生成 processingReady 合同。</li>
-            <li>下一步实现网格单元位置镜像，避免把内部标签做整图像素翻转。</li>
+            <li>已完成网格单元位置镜像预览，避免把内部标签做整图像素翻转。</li>
             <li>后续补充本地导出流程和更完整的核心处理逻辑测试。</li>
           </ol>
         </section>
       </main>
 
       <footer class="site-footer">
-        <p>Mirror Master 当前支持本地预览、网格检测和手动校正。镜像处理和导出功能尚未实现。</p>
+        <p>Mirror Master 当前支持本地预览、网格检测、手动校正、整数精修和镜像结果预览。导出和下载尚未实现。</p>
       </footer>
     </div>
   `;

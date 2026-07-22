@@ -109,6 +109,11 @@ interface GridCorrectionElements {
 export interface GridCorrectionLifecycle {
   readonly onSelectionApplied?: (selection: GridSelection) => void;
   readonly onSelectionCleared?: () => void;
+  readonly onPrecisionConfirmed?: (payload: {
+    readonly file: File;
+    readonly calibration: PixelGridCalibration;
+  }) => void;
+  readonly onPrecisionInvalidated?: (message: string) => void;
 }
 
 export interface GridCorrectionController {
@@ -120,6 +125,7 @@ export interface GridCorrectionController {
   readonly acceptDetectedResult: (result: GridDetectionSuccess) => GridSelection | null;
   readonly startDetectedAdjustment: (result: GridDetectionSuccess) => void;
   readonly startManualSelection: (naturalImage: NaturalImageSize) => void;
+  readonly returnToPrecisionAdjustment: () => void;
 }
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -490,6 +496,7 @@ export function mountGridCorrectionEditor(
     }
 
     resetPrecisionState('已返回粗校正，精确校准需重新生成。', false);
+    lifecycle.onPrecisionInvalidated?.('已返回粗校正，镜像预览已失效。');
     draftRectangle = appliedSelection.rectangle;
     mode = 'editing';
     renderAll();
@@ -558,6 +565,7 @@ export function mountGridCorrectionEditor(
 
     cancelPendingPrecision();
     precisionVersion += 1;
+    lifecycle.onPrecisionInvalidated?.('正在重新精修整数像素网格，镜像预览已失效。');
     const currentVersion = precisionVersion;
     const currentFile = selectedFile;
     const currentSelection = appliedSelection;
@@ -666,6 +674,12 @@ export function mountGridCorrectionEditor(
   function confirmPrecisionCalibration(): void {
     const candidate = precisionUi.candidate;
 
+    if (!selectedFile) {
+      announce('不能确认：当前原始本地文件不存在。');
+      renderAll();
+      return;
+    }
+
     if (!candidate || !candidate.validation.ok) {
       announce(candidate ? `不能确认：${candidate.validation.message}` : '没有可确认的精确候选。');
       renderAll();
@@ -687,18 +701,24 @@ export function mountGridCorrectionEditor(
       message: '已显式确认精确整数像素网格；processingReady: true。',
     };
     renderAll();
-    announce('精确网格已确认，processingReady: true。镜像、导出和下载仍未实现。');
+    lifecycle.onPrecisionConfirmed?.({
+      file: selectedFile,
+      calibration,
+    });
+    announce('精确网格已确认，processingReady: true。现在可以生成镜像预览；导出和下载仍未实现。');
   }
 
   function cancelPrecision(): void {
     if (!appliedSelection) {
       resetPrecisionState('等待粗校正选择。', false);
+      lifecycle.onPrecisionInvalidated?.('精修已取消，镜像预览已失效。');
       renderAll();
       announce('已取消精修。');
       return;
     }
 
     preparePrecisionForSelection(appliedSelection);
+    lifecycle.onPrecisionInvalidated?.('精修已取消，镜像预览已失效。');
     renderAll();
     announce('已取消精修，保留粗校正选择。');
   }
@@ -769,6 +789,8 @@ export function mountGridCorrectionEditor(
       return;
     }
 
+    lifecycle.onPrecisionInvalidated?.('精修候选已改变，镜像预览已失效。');
+
     if (!precisionWorkspace) {
       precisionUi = {
         status: 'rejected',
@@ -797,6 +819,25 @@ export function mountGridCorrectionEditor(
     };
     renderAll();
     announce(candidate.validation.message);
+  }
+
+  function returnToPrecisionAdjustment(): void {
+    if (!precisionUi.candidate) {
+      announce('当前没有可调整的精修候选。');
+      return;
+    }
+
+    cancelPendingPrecision();
+    precisionVersion += 1;
+    precisionUi = {
+      status: precisionUi.candidate.validation.ok ? 'candidate' : 'rejected',
+      candidate: precisionUi.candidate,
+      calibration: null,
+      message: '已返回精修调整；需要重新确认后才能再次生成镜像预览。',
+    };
+    lifecycle.onPrecisionInvalidated?.('已返回精修调整，镜像预览已失效。');
+    renderAll();
+    announce('已返回精修调整；processingReady 已取消。');
   }
 
   function setManualZoom(nextScale: number): void {
@@ -1442,6 +1483,7 @@ export function mountGridCorrectionEditor(
     acceptDetectedResult,
     startDetectedAdjustment,
     startManualSelection,
+    returnToPrecisionAdjustment,
   };
 }
 

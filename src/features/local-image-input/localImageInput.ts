@@ -11,6 +11,7 @@ import {
   renderGridCorrectionOverlay,
 } from '../grid-correction/gridCorrectionMarkup';
 import { renderGridDetectionPanel } from '../grid-detection/gridDetectionPanel';
+import { renderGridMirrorPanel } from '../grid-mirror/gridMirrorMarkup';
 
 const EMPTY_MESSAGE = '尚未选择图片。请选择一张本地 PNG、JPEG 或 WebP 图片。';
 
@@ -116,6 +117,8 @@ export function renderLocalImageInput(): string {
         </section>
 
         ${renderGridDetectionPanel()}
+
+        ${renderGridMirrorPanel()}
       </div>
     </section>
   `;
