@@ -41,7 +41,7 @@ gridDetection = mountGridDetection(gridDetectionRoot, gridCorrection);
 
 mountLocalImageInput(imageInputRoot, {
   onImageReady(payload) {
-    gridCorrection.setImage(payload.dimensions);
+    gridCorrection.setImage(payload.file, payload.dimensions);
     gridDetection.detect({
       file: payload.file,
       fileName: payload.image.fileName,

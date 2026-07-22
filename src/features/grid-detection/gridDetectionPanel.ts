@@ -329,7 +329,9 @@ function renderFailed(
 
 function renderAppliedSelection(elements: GridDetectionElements, selection: GridSelection): void {
   elements.root.dataset.state = 'applied';
-  elements.live.textContent = `已应用${formatSelectionSource(selection.source)}网格选择。`;
+  elements.live.textContent = `已应用${formatSelectionSource(
+    selection.source,
+  )}粗校正网格选择；这还不是精确处理就绪状态。`;
   elements.gridSize.textContent = `${String(PIXELANIM_GRID_COLUMNS)} 列 × ${String(
     PIXELANIM_GRID_ROWS,
   )} 行`;
@@ -342,9 +344,10 @@ function renderAppliedSelection(elements: GridDetectionElements, selection: Grid
   elements.cellSize.textContent = `${formatCoordinate(selection.cellSize.width)} × ${formatCoordinate(
     selection.cellSize.height,
   )} px`;
-  elements.metrics.textContent = '已创建浏览器内存中的网格选择；未上传、未导出。';
+  elements.metrics.textContent = '已创建浏览器内存中的粗校正选择；12% 容差不代表镜像或导出就绪。';
   elements.details.hidden = false;
-  elements.guidance.textContent = '如需继续微调，请在预览图下方点击“编辑已应用区域”。';
+  elements.guidance.textContent =
+    '请在预览图下方进行整数像素精修；如需改粗框，可点击“编辑已应用区域”。';
   elements.guidance.hidden = false;
   hideActions(elements);
 }

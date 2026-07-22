@@ -11,6 +11,22 @@ import {
   validateGridSelectionRect,
 } from '../grid-selection/geometry';
 import type { GridSelection, NaturalImageRect, NaturalImageSize } from '../grid-selection/types';
+import { PIXEL_GRID_PRECISION_STATE_LABELS } from '../grid-precision/constants';
+import {
+  EMPTY_PRECISION_EVIDENCE,
+  createPixelGridCalibration,
+  createPixelGridCalibrationCandidate,
+} from '../grid-precision/geometry';
+import {
+  createPixelGridPrecisionWorkspace,
+  type PixelGridPrecisionWorkspace,
+} from '../grid-precision/precisionRefiner';
+import type {
+  PixelGridCalibration,
+  PixelGridCalibrationCandidate,
+  PixelGridPrecisionFailureReason,
+  PixelGridPrecisionState,
+} from '../grid-precision/types';
 import {
   HANDLE_LABELS,
   HANDLE_TARGET_CSS_SIZE,
@@ -69,6 +85,25 @@ interface GridCorrectionElements {
   readonly cellSize: HTMLElement;
   readonly validation: HTMLElement;
   readonly live: HTMLElement;
+  readonly precisionPanel: HTMLElement;
+  readonly precisionMessage: HTMLElement;
+  readonly precisionState: HTMLElement;
+  readonly precisionXReadout: HTMLElement;
+  readonly precisionYReadout: HTMLElement;
+  readonly precisionCellReadout: HTMLElement;
+  readonly precisionRightReadout: HTMLElement;
+  readonly precisionBottomReadout: HTMLElement;
+  readonly precisionSize: HTMLElement;
+  readonly precisionEvidence: HTMLElement;
+  readonly precisionReadiness: HTMLElement;
+  readonly precisionXInput: HTMLInputElement;
+  readonly precisionYInput: HTMLInputElement;
+  readonly precisionCellInput: HTMLInputElement;
+  readonly precisionStepButtons: readonly HTMLButtonElement[];
+  readonly precisionRefineButton: HTMLButtonElement;
+  readonly precisionConfirmButton: HTMLButtonElement;
+  readonly precisionCancelButton: HTMLButtonElement;
+  readonly precisionReturnRoughButton: HTMLButtonElement;
 }
 
 export interface GridCorrectionLifecycle {
@@ -78,7 +113,7 @@ export interface GridCorrectionLifecycle {
 
 export interface GridCorrectionController {
   readonly clearImage: () => void;
-  readonly setImage: (naturalImage: NaturalImageSize) => void;
+  readonly setImage: (file: File, naturalImage: NaturalImageSize) => void;
   readonly clearTransientResult: () => void;
   readonly showDetectedResult: (result: GridDetectionSuccess) => void;
   readonly showDetectionFailure: (naturalImage: NaturalImageSize | null) => void;
@@ -91,6 +126,15 @@ const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const MIN_ZOOM = 0.12;
 const MAX_ZOOM = 4;
 
+type PrecisionAxis = 'x' | 'y' | 'cell';
+
+interface PrecisionUiState {
+  readonly status: PixelGridPrecisionState;
+  readonly candidate: PixelGridCalibrationCandidate | null;
+  readonly calibration: PixelGridCalibration | null;
+  readonly message: string;
+}
+
 export function mountGridCorrectionEditor(
   root: HTMLElement,
   lifecycle: GridCorrectionLifecycle = {},
@@ -98,6 +142,7 @@ export function mountGridCorrectionEditor(
   const elements = getGridCorrectionElements(root);
 
   let mode: EditorMode = 'empty';
+  let selectedFile: File | null = null;
   let naturalImage: NaturalImageSize | null = null;
   let detectedResult: GridDetectionSuccess | null = null;
   let appliedSelection: GridSelection | null = null;
@@ -106,6 +151,10 @@ export function mountGridCorrectionEditor(
   let zoomMode: ZoomMode = 'fit';
   let zoomScale = 1;
   let pendingResizeFrame: number | null = null;
+  let pendingPrecisionTimer: number | null = null;
+  let precisionVersion = 0;
+  let precisionWorkspace: PixelGridPrecisionWorkspace | null = null;
+  let precisionUi: PrecisionUiState = createPrecisionIdleState('等待粗校正选择。');
 
   const resizeObserver = createResizeObserver(scheduleResizeRender);
 
@@ -157,14 +206,59 @@ export function mountGridCorrectionEditor(
     editAppliedSelection();
   });
 
+  elements.precisionRefineButton.addEventListener('click', () => {
+    startPrecisionRefinement();
+  });
+
+  elements.precisionConfirmButton.addEventListener('click', () => {
+    confirmPrecisionCalibration();
+  });
+
+  elements.precisionCancelButton.addEventListener('click', () => {
+    cancelPrecision();
+  });
+
+  elements.precisionReturnRoughButton.addEventListener('click', () => {
+    returnToRoughCorrection();
+  });
+
+  for (const button of elements.precisionStepButtons) {
+    button.addEventListener('click', () => {
+      const axis = parsePrecisionAxis(button.dataset.gridPrecisionStepAxis);
+      const delta = Number(button.dataset.gridPrecisionStepDelta);
+
+      if (!axis || !Number.isInteger(delta)) {
+        return;
+      }
+
+      adjustPrecisionValue(axis, delta);
+    });
+  }
+
+  for (const input of [
+    elements.precisionXInput,
+    elements.precisionYInput,
+    elements.precisionCellInput,
+  ]) {
+    input.addEventListener('change', () => {
+      applyPrecisionInputs();
+    });
+
+    input.addEventListener('keydown', (event) => {
+      handlePrecisionInputKeyDown(event);
+    });
+  }
+
   elements.overlay.addEventListener('pointerdown', handlePointerDown);
   elements.overlay.addEventListener('pointermove', handlePointerMove);
   elements.overlay.addEventListener('pointerup', handlePointerUp);
   elements.overlay.addEventListener('pointercancel', handlePointerCancel);
   elements.overlay.addEventListener('keydown', handleHandleKeyDown);
 
-  const setImage = (nextNaturalImage: NaturalImageSize): void => {
+  const setImage = (file: File, nextNaturalImage: NaturalImageSize): void => {
     clearSelectionState(false);
+    resetPrecisionState('等待粗校正选择。', true);
+    selectedFile = file;
     naturalImage = nextNaturalImage;
     mode = 'image-ready';
     zoomMode = 'fit';
@@ -178,6 +272,8 @@ export function mountGridCorrectionEditor(
   const clearImage = (): void => {
     clearSelectionState(true);
     cancelPendingResizeRender();
+    resetPrecisionState('等待粗校正选择。', true);
+    selectedFile = null;
     naturalImage = null;
     detectedResult = null;
     draftRectangle = null;
@@ -249,6 +345,7 @@ export function mountGridCorrectionEditor(
     appliedSelection = selection;
     draftRectangle = null;
     mode = 'applied';
+    preparePrecisionForSelection(selection);
     renderAll();
     announceApplied(selection);
     lifecycle.onSelectionApplied?.(selection);
@@ -285,6 +382,7 @@ export function mountGridCorrectionEditor(
   function clearSelectionState(emit: boolean): void {
     const hadSelection = appliedSelection !== null;
     appliedSelection = null;
+    resetPrecisionState('粗校正选择已清除。', false);
 
     if (emit && hadSelection) {
       lifecycle.onSelectionCleared?.();
@@ -313,6 +411,7 @@ export function mountGridCorrectionEditor(
     appliedSelection = selection;
     draftRectangle = null;
     mode = 'applied';
+    preparePrecisionForSelection(selection);
     renderAll();
     announceApplied(selection);
     lifecycle.onSelectionApplied?.(selection);
@@ -390,6 +489,7 @@ export function mountGridCorrectionEditor(
       return;
     }
 
+    resetPrecisionState('已返回粗校正，精确校准需重新生成。', false);
     draftRectangle = appliedSelection.rectangle;
     mode = 'editing';
     renderAll();
@@ -403,6 +503,300 @@ export function mountGridCorrectionEditor(
           selection.rectangle.y,
         )}。`,
     );
+  }
+
+  function preparePrecisionForSelection(selection: GridSelection): void {
+    cancelPendingPrecision();
+    precisionVersion += 1;
+    precisionUi = {
+      status: 'idle',
+      candidate: createSeedPrecisionCandidate(selection),
+      calibration: null,
+      message: '粗校正选择已应用；它仍不是处理就绪状态，请自动精修并显式确认。',
+    };
+  }
+
+  function resetPrecisionState(message: string, clearWorkspace: boolean): void {
+    cancelPendingPrecision();
+    precisionVersion += 1;
+    precisionUi = createPrecisionIdleState(message);
+
+    if (clearWorkspace) {
+      precisionWorkspace = null;
+    }
+  }
+
+  function createSeedPrecisionCandidate(selection: GridSelection): PixelGridCalibrationCandidate {
+    const estimatedCellSize = Math.round(
+      (selection.cellSize.width + selection.cellSize.height) / 2,
+    );
+
+    return createPixelGridCalibrationCandidate({
+      source: selection.source,
+      naturalImage: selection.naturalImage,
+      left: Math.round(selection.rectangle.x),
+      top: Math.round(selection.rectangle.y),
+      cellSize: Math.max(1, estimatedCellSize),
+      evidence: EMPTY_PRECISION_EVIDENCE,
+    });
+  }
+
+  function cancelPendingPrecision(): void {
+    if (pendingPrecisionTimer === null) {
+      return;
+    }
+
+    window.clearTimeout(pendingPrecisionTimer);
+    pendingPrecisionTimer = null;
+  }
+
+  function startPrecisionRefinement(): void {
+    if (!selectedFile || !appliedSelection || !naturalImage) {
+      announce('请先选择图片并应用一个粗校正网格。');
+      return;
+    }
+
+    cancelPendingPrecision();
+    precisionVersion += 1;
+    const currentVersion = precisionVersion;
+    const currentFile = selectedFile;
+    const currentSelection = appliedSelection;
+    precisionUi = {
+      status: 'refining',
+      candidate: precisionUi.candidate ?? createSeedPrecisionCandidate(currentSelection),
+      calibration: null,
+      message: '正在从原始本地文件读取自然像素并搜索整数网格候选。',
+    };
+    renderAll();
+    announce('正在自动精修整数像素网格。');
+
+    pendingPrecisionTimer = window.setTimeout(() => {
+      pendingPrecisionTimer = null;
+
+      void runPrecisionRefinement(currentVersion, currentFile, currentSelection);
+    }, 30);
+  }
+
+  async function runPrecisionRefinement(
+    version: number,
+    file: File,
+    selection: GridSelection,
+  ): Promise<void> {
+    try {
+      const workspace = await createPixelGridPrecisionWorkspace(file, selection.naturalImage);
+
+      if (precisionResultIsStale(version, file, selection)) {
+        return;
+      }
+
+      precisionWorkspace = workspace;
+      const outcome = workspace.refine(selection);
+
+      if (precisionResultIsStale(version, file, selection)) {
+        return;
+      }
+
+      if (outcome.ok) {
+        precisionUi = {
+          status: 'candidate',
+          candidate: outcome.candidate,
+          calibration: null,
+          message: '已生成严格整数像素候选；请检查叠加层后手动确认。',
+        };
+        renderAll();
+        announce('已生成精确候选。确认前 processingReady 仍为 false。');
+        return;
+      }
+
+      precisionUi = {
+        status: 'rejected',
+        candidate: outcome.candidate ?? precisionUi.candidate,
+        calibration: null,
+        message: outcome.message,
+      };
+      renderAll();
+      announce(`精修已拒绝：${outcome.message}`);
+    } catch (error) {
+      if (precisionResultIsStale(version, file, selection)) {
+        return;
+      }
+
+      const reason = precisionFailureReasonFromError(error);
+      const message = precisionFailureMessage(reason);
+      precisionWorkspace = null;
+      precisionUi = {
+        status: 'rejected',
+        candidate: precisionUi.candidate,
+        calibration: null,
+        message,
+      };
+      renderAll();
+      announce(`精修已拒绝：${message}`);
+    }
+  }
+
+  function precisionResultIsStale(version: number, file: File, selection: GridSelection): boolean {
+    return version !== precisionVersion || file !== selectedFile || selection !== appliedSelection;
+  }
+
+  function precisionFailureReasonFromError(error: unknown): PixelGridPrecisionFailureReason {
+    if (error instanceof Error && error.message === 'canvas-unavailable') {
+      return 'canvas-unavailable';
+    }
+
+    if (error instanceof Error && error.message === 'image-size-mismatch') {
+      return 'image-size-mismatch';
+    }
+
+    return 'decode-failed';
+  }
+
+  function precisionFailureMessage(reason: PixelGridPrecisionFailureReason): string {
+    if (reason === 'canvas-unavailable') {
+      return '当前浏览器无法创建本地 Canvas 2D 精修环境。';
+    }
+
+    if (reason === 'image-size-mismatch') {
+      return '原始文件尺寸与当前粗校正图片不一致，精修结果已拒绝。';
+    }
+
+    return '无法从原始本地文件读取自然像素，精修已停止。';
+  }
+
+  function confirmPrecisionCalibration(): void {
+    const candidate = precisionUi.candidate;
+
+    if (!candidate || !candidate.validation.ok) {
+      announce(candidate ? `不能确认：${candidate.validation.message}` : '没有可确认的精确候选。');
+      renderAll();
+      return;
+    }
+
+    const calibration = createPixelGridCalibration(candidate);
+
+    if (!calibration) {
+      announce('不能确认：精确候选未满足整数像素合同。');
+      renderAll();
+      return;
+    }
+
+    precisionUi = {
+      status: 'confirmed-ready',
+      candidate,
+      calibration,
+      message: '已显式确认精确整数像素网格；processingReady: true。',
+    };
+    renderAll();
+    announce('精确网格已确认，processingReady: true。镜像、导出和下载仍未实现。');
+  }
+
+  function cancelPrecision(): void {
+    if (!appliedSelection) {
+      resetPrecisionState('等待粗校正选择。', false);
+      renderAll();
+      announce('已取消精修。');
+      return;
+    }
+
+    preparePrecisionForSelection(appliedSelection);
+    renderAll();
+    announce('已取消精修，保留粗校正选择。');
+  }
+
+  function returnToRoughCorrection(): void {
+    if (!appliedSelection) {
+      announce('当前没有粗校正选择可返回。');
+      return;
+    }
+
+    editAppliedSelection();
+  }
+
+  function adjustPrecisionValue(axis: PrecisionAxis, delta: number): void {
+    const candidate = precisionUi.candidate;
+
+    if (!candidate) {
+      announce('请先自动精修生成整数候选。');
+      return;
+    }
+
+    evaluateManualPrecisionCandidate(
+      axis === 'x' ? candidate.left + delta : candidate.left,
+      axis === 'y' ? candidate.top + delta : candidate.top,
+      axis === 'cell' ? candidate.cellSize + delta : candidate.cellSize,
+    );
+  }
+
+  function applyPrecisionInputs(): void {
+    const left = Number(elements.precisionXInput.value);
+    const top = Number(elements.precisionYInput.value);
+    const cellSize = Number(elements.precisionCellInput.value);
+
+    evaluateManualPrecisionCandidate(left, top, cellSize);
+  }
+
+  function handlePrecisionInputKeyDown(event: KeyboardEvent): void {
+    if (
+      event.key !== 'ArrowLeft' &&
+      event.key !== 'ArrowRight' &&
+      event.key !== 'ArrowUp' &&
+      event.key !== 'ArrowDown'
+    ) {
+      return;
+    }
+
+    const target = event.currentTarget;
+
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const axis = parsePrecisionAxis(target.dataset.gridPrecisionInput);
+
+    if (!axis) {
+      return;
+    }
+
+    const direction = event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -1 : 1;
+    const step = event.shiftKey ? 10 : 1;
+    event.preventDefault();
+    adjustPrecisionValue(axis, direction * step);
+  }
+
+  function evaluateManualPrecisionCandidate(left: number, top: number, cellSize: number): void {
+    if (!appliedSelection) {
+      announce('请先应用一个粗校正网格。');
+      return;
+    }
+
+    if (!precisionWorkspace) {
+      precisionUi = {
+        status: 'rejected',
+        candidate: createPixelGridCalibrationCandidate({
+          source: appliedSelection.source,
+          naturalImage: appliedSelection.naturalImage,
+          left,
+          top,
+          cellSize,
+          evidence: EMPTY_PRECISION_EVIDENCE,
+        }),
+        calibration: null,
+        message: '请先点击“自动精修”，再进行整数候选微调。',
+      };
+      renderAll();
+      announce('请先点击“自动精修”，再进行整数候选微调。');
+      return;
+    }
+
+    const candidate = precisionWorkspace.evaluate(appliedSelection.source, left, top, cellSize);
+    precisionUi = {
+      status: candidate.validation.ok ? 'candidate' : 'rejected',
+      candidate,
+      calibration: null,
+      message: candidate.validation.message,
+    };
+    renderAll();
+    announce(candidate.validation.message);
   }
 
   function setManualZoom(nextScale: number): void {
@@ -663,6 +1057,7 @@ export function mountGridCorrectionEditor(
     renderZoomControls();
     renderCorrectionControls();
     renderReadout();
+    renderPrecisionPanel();
     renderSvg();
   }
 
@@ -725,6 +1120,81 @@ export function mountGridCorrectionEditor(
     elements.validation.dataset.state = validation.ok ? 'valid' : 'invalid';
   }
 
+  function renderPrecisionPanel(): void {
+    const hasSelection = appliedSelection !== null;
+    const grid = precisionUi.calibration ?? precisionUi.candidate;
+    elements.precisionPanel.hidden = !hasSelection;
+
+    if (!hasSelection) {
+      elements.precisionMessage.textContent = '等待粗校正选择。';
+      elements.precisionState.textContent = PIXEL_GRID_PRECISION_STATE_LABELS.idle;
+      renderEmptyPrecisionReadout();
+      setPrecisionInputs(null);
+      setPrecisionControlsDisabled(true);
+      return;
+    }
+
+    elements.precisionMessage.textContent = precisionUi.message;
+    elements.precisionState.textContent = PIXEL_GRID_PRECISION_STATE_LABELS[precisionUi.status];
+
+    if (!grid) {
+      renderEmptyPrecisionReadout();
+      setPrecisionInputs(null);
+    } else {
+      elements.precisionXReadout.textContent = formatInteger(grid.left);
+      elements.precisionYReadout.textContent = formatInteger(grid.top);
+      elements.precisionCellReadout.textContent = `${formatInteger(grid.cellSize)} px`;
+      elements.precisionRightReadout.textContent = formatInteger(grid.right);
+      elements.precisionBottomReadout.textContent = formatInteger(grid.bottom);
+      elements.precisionSize.textContent = `${String(grid.columns)} 列 × ${String(grid.rows)} 行`;
+      elements.precisionEvidence.textContent = formatPrecisionEvidence(grid.evidence);
+      elements.precisionReadiness.textContent =
+        precisionUi.calibration?.processingReady === true
+          ? 'processingReady: true'
+          : precisionUi.candidate?.validation.ok === true
+            ? '候选有效，等待确认'
+            : '未就绪';
+      setPrecisionInputs(grid);
+    }
+
+    const canAdjust = precisionWorkspace !== null && precisionUi.status !== 'refining';
+    setPrecisionControlsDisabled(!canAdjust);
+    elements.precisionRefineButton.disabled = precisionUi.status === 'refining';
+    elements.precisionConfirmButton.disabled =
+      precisionUi.status !== 'candidate' || precisionUi.candidate?.validation.ok !== true;
+    elements.precisionCancelButton.disabled = precisionUi.status === 'idle';
+    elements.precisionReturnRoughButton.disabled = mode !== 'applied';
+  }
+
+  function renderEmptyPrecisionReadout(): void {
+    elements.precisionXReadout.textContent = '未设置';
+    elements.precisionYReadout.textContent = '未设置';
+    elements.precisionCellReadout.textContent = '未设置';
+    elements.precisionRightReadout.textContent = '未设置';
+    elements.precisionBottomReadout.textContent = '未设置';
+    elements.precisionSize.textContent = '34 列 × 27 行';
+    elements.precisionEvidence.textContent = '未评分';
+    elements.precisionReadiness.textContent = '未就绪';
+  }
+
+  function setPrecisionInputs(
+    grid: PixelGridCalibrationCandidate | PixelGridCalibration | null,
+  ): void {
+    elements.precisionXInput.value = grid ? formatInteger(grid.left) : '';
+    elements.precisionYInput.value = grid ? formatInteger(grid.top) : '';
+    elements.precisionCellInput.value = grid ? formatInteger(grid.cellSize) : '';
+  }
+
+  function setPrecisionControlsDisabled(disabled: boolean): void {
+    elements.precisionXInput.disabled = disabled;
+    elements.precisionYInput.disabled = disabled;
+    elements.precisionCellInput.disabled = disabled;
+
+    for (const button of elements.precisionStepButtons) {
+      button.disabled = disabled;
+    }
+  }
+
   function renderSvg(): void {
     elements.overlay.replaceChildren();
 
@@ -771,7 +1241,13 @@ export function mountGridCorrectionEditor(
       return;
     }
 
-    renderGrid(visibleRectangle);
+    const precisionGrid = mode === 'applied' ? getVisiblePrecisionGrid() : null;
+
+    if (precisionGrid) {
+      renderPrecisionGrid(precisionGrid);
+    } else {
+      renderGrid(visibleRectangle);
+    }
 
     if (mode === 'editing') {
       renderHandles(visibleRectangle);
@@ -790,33 +1266,72 @@ export function mountGridCorrectionEditor(
 
   function renderGrid(rectangle: NaturalImageRect): void {
     const boundaries = deriveGridBoundaries(rectangle);
-    const lineGroup = document.createElementNS(SVG_NAMESPACE, 'g');
-    lineGroup.setAttribute('class', 'grid-overlay-lines');
+    renderGridLines(
+      rectangle.x,
+      rectangle.y,
+      rectangle.right,
+      rectangle.bottom,
+      boundaries.vertical,
+      boundaries.horizontal,
+      'grid-overlay-lines',
+      'grid-overlay-outer',
+    );
+  }
 
-    for (const boundary of boundaries.vertical) {
+  function renderPrecisionGrid(grid: PixelGridCalibrationCandidate | PixelGridCalibration): void {
+    renderGridLines(
+      grid.left,
+      grid.top,
+      grid.right,
+      grid.bottom,
+      grid.verticalBoundaries,
+      grid.horizontalBoundaries,
+      precisionUi.status === 'confirmed-ready'
+        ? 'grid-overlay-lines grid-precision-lines is-confirmed'
+        : 'grid-overlay-lines grid-precision-lines',
+      precisionUi.status === 'confirmed-ready'
+        ? 'grid-overlay-outer grid-precision-outer is-confirmed'
+        : 'grid-overlay-outer grid-precision-outer',
+    );
+  }
+
+  function renderGridLines(
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+    verticalBoundaries: readonly number[],
+    horizontalBoundaries: readonly number[],
+    lineClass: string,
+    outerClass: string,
+  ): void {
+    const lineGroup = document.createElementNS(SVG_NAMESPACE, 'g');
+    lineGroup.setAttribute('class', lineClass);
+
+    for (const boundary of verticalBoundaries) {
       const line = document.createElementNS(SVG_NAMESPACE, 'line');
       line.setAttribute('x1', String(boundary));
       line.setAttribute('x2', String(boundary));
-      line.setAttribute('y1', String(rectangle.y));
-      line.setAttribute('y2', String(rectangle.bottom));
+      line.setAttribute('y1', String(top));
+      line.setAttribute('y2', String(bottom));
       lineGroup.append(line);
     }
 
-    for (const boundary of boundaries.horizontal) {
+    for (const boundary of horizontalBoundaries) {
       const line = document.createElementNS(SVG_NAMESPACE, 'line');
-      line.setAttribute('x1', String(rectangle.x));
-      line.setAttribute('x2', String(rectangle.right));
+      line.setAttribute('x1', String(left));
+      line.setAttribute('x2', String(right));
       line.setAttribute('y1', String(boundary));
       line.setAttribute('y2', String(boundary));
       lineGroup.append(line);
     }
 
     const outerRectangle = document.createElementNS(SVG_NAMESPACE, 'rect');
-    outerRectangle.setAttribute('class', 'grid-overlay-outer');
-    outerRectangle.setAttribute('x', String(rectangle.x));
-    outerRectangle.setAttribute('y', String(rectangle.y));
-    outerRectangle.setAttribute('width', String(rectangle.width));
-    outerRectangle.setAttribute('height', String(rectangle.height));
+    outerRectangle.setAttribute('class', outerClass);
+    outerRectangle.setAttribute('x', String(left));
+    outerRectangle.setAttribute('y', String(top));
+    outerRectangle.setAttribute('width', String(right - left));
+    outerRectangle.setAttribute('height', String(bottom - top));
 
     elements.overlay.append(lineGroup, outerRectangle);
   }
@@ -895,6 +1410,22 @@ export function mountGridCorrectionEditor(
     return null;
   }
 
+  function getVisiblePrecisionGrid(): PixelGridCalibrationCandidate | PixelGridCalibration | null {
+    if (precisionUi.calibration) {
+      return precisionUi.calibration;
+    }
+
+    if (
+      precisionUi.status === 'candidate' ||
+      precisionUi.status === 'confirmed-ready' ||
+      precisionUi.status === 'rejected'
+    ) {
+      return precisionUi.candidate;
+    }
+
+    return null;
+  }
+
   function announce(message: string): void {
     elements.live.hidden = false;
     elements.live.textContent = message;
@@ -912,6 +1443,40 @@ export function mountGridCorrectionEditor(
     startDetectedAdjustment,
     startManualSelection,
   };
+}
+
+function createPrecisionIdleState(message: string): PrecisionUiState {
+  return {
+    status: 'idle',
+    candidate: null,
+    calibration: null,
+    message,
+  };
+}
+
+function parsePrecisionAxis(value: string | undefined): PrecisionAxis | null {
+  return value === 'x' || value === 'y' || value === 'cell' ? value : null;
+}
+
+function formatPrecisionEvidence(evidence: {
+  readonly boundaryStrength: number;
+  readonly centerContrast: number;
+  readonly periodicConsistency: number;
+  readonly outerEdgeSupport: number;
+  readonly score: number;
+  readonly ambiguityGap: number;
+}): string {
+  return `总分 ${formatPercent(evidence.score)}，边界 ${formatPercent(
+    evidence.boundaryStrength,
+  )}，对比 ${formatPercent(evidence.centerContrast)}，周期 ${formatPercent(
+    evidence.periodicConsistency,
+  )}，外缘 ${formatPercent(evidence.outerEdgeSupport)}，差距 ${formatPercent(
+    evidence.ambiguityGap,
+  )}`;
+}
+
+function formatInteger(value: number): string {
+  return Number.isInteger(value) ? value.toString() : formatCoordinate(value);
 }
 
 function applyHandleDelta(
@@ -1081,6 +1646,59 @@ function getGridCorrectionElements(root: HTMLElement): GridCorrectionElements {
     cellSize: getRequiredElement(root, '[data-grid-correction-cell-size]', HTMLElement),
     validation: getRequiredElement(root, '[data-grid-correction-validation]', HTMLElement),
     live: getRequiredElement(root, '[data-grid-correction-live]', HTMLElement),
+    precisionPanel: getRequiredElement(root, '[data-grid-precision-panel]', HTMLElement),
+    precisionMessage: getRequiredElement(root, '[data-grid-precision-message]', HTMLElement),
+    precisionState: getRequiredElement(root, '[data-grid-precision-state]', HTMLElement),
+    precisionXReadout: getRequiredElement(root, '[data-grid-precision-x-readout]', HTMLElement),
+    precisionYReadout: getRequiredElement(root, '[data-grid-precision-y-readout]', HTMLElement),
+    precisionCellReadout: getRequiredElement(
+      root,
+      '[data-grid-precision-cell-readout]',
+      HTMLElement,
+    ),
+    precisionRightReadout: getRequiredElement(
+      root,
+      '[data-grid-precision-right-readout]',
+      HTMLElement,
+    ),
+    precisionBottomReadout: getRequiredElement(
+      root,
+      '[data-grid-precision-bottom-readout]',
+      HTMLElement,
+    ),
+    precisionSize: getRequiredElement(root, '[data-grid-precision-size]', HTMLElement),
+    precisionEvidence: getRequiredElement(root, '[data-grid-precision-evidence]', HTMLElement),
+    precisionReadiness: getRequiredElement(root, '[data-grid-precision-readiness]', HTMLElement),
+    precisionXInput: getRequiredElement(root, '[data-grid-precision-input="x"]', HTMLInputElement),
+    precisionYInput: getRequiredElement(root, '[data-grid-precision-input="y"]', HTMLInputElement),
+    precisionCellInput: getRequiredElement(
+      root,
+      '[data-grid-precision-input="cell"]',
+      HTMLInputElement,
+    ),
+    precisionStepButtons: Array.from(
+      root.querySelectorAll<HTMLButtonElement>('[data-grid-precision-step-axis]'),
+    ),
+    precisionRefineButton: getRequiredElement(
+      root,
+      '[data-grid-precision-refine]',
+      HTMLButtonElement,
+    ),
+    precisionConfirmButton: getRequiredElement(
+      root,
+      '[data-grid-precision-confirm]',
+      HTMLButtonElement,
+    ),
+    precisionCancelButton: getRequiredElement(
+      root,
+      '[data-grid-precision-cancel]',
+      HTMLButtonElement,
+    ),
+    precisionReturnRoughButton: getRequiredElement(
+      root,
+      '[data-grid-precision-return-rough]',
+      HTMLButtonElement,
+    ),
   };
 }
 
