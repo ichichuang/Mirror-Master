@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Production output
+dist/
+dist-ssr/
+
+# Local caches and reports
+.cache/
+.eslintcache
+.vite/
+coverage/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS and editor state
+.DS_Store
+.idea/
+.vscode/
+*.code-workspace
