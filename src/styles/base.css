@@ -38,9 +38,20 @@ a:hover {
 }
 
 a:focus-visible,
+button:focus-visible,
+input:focus-visible,
 [tabindex]:focus-visible {
   outline: 3px solid var(--color-focus);
   outline-offset: 4px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
 }
 
 h1,

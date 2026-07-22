@@ -8,12 +8,14 @@
 
   --color-page: #f6f8fb;
   --color-surface: #ffffff;
+  --color-surface-subtle: #f9fbfc;
   --color-text: #1a2433;
   --color-heading: #111827;
   --color-muted: #526173;
   --color-border: #d9e2ec;
   --color-accent: #0f766e;
   --color-accent-strong: #0b5f59;
+  --color-accent-soft: #d9f2ef;
   --color-focus: #d9464d;
   --color-warn: #d9464d;
   --color-warn-bg: #fff1f2;
