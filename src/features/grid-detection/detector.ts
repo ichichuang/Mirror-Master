@@ -1,10 +1,11 @@
 import {
   AXIS_CANDIDATE_LIMIT,
-  AXIS_STEP_CANDIDATE_LIMIT,
   MAX_ANALYSIS_LONG_EDGE,
   MAX_BOUNDARY_SEARCH_PIXELS,
   MIN_ANALYSIS_CELL_SIZE,
-  MIN_DETECTED_GRID_SEGMENTS,
+  PIXELANIM_GRID_COLUMNS,
+  PIXELANIM_GRID_RATIO,
+  PIXELANIM_GRID_ROWS,
 } from './constants';
 import {
   clamp,
@@ -49,16 +50,10 @@ interface AxisCandidate {
   readonly end: number;
   readonly span: number;
   readonly step: number;
-  readonly segments: number;
   readonly lineStrength: number;
   readonly baselineStrength: number;
   readonly periodicity: number;
   readonly score: number;
-}
-
-interface ProfilePeak {
-  readonly position: number;
-  readonly strength: number;
 }
 
 interface BoundaryAggregate {
@@ -86,9 +81,8 @@ const MEDIUM_CONFIDENCE_MIN = 0.58;
 const MIN_ACCEPTED_BOUNDARY_STRENGTH = 0.24;
 const MIN_ACCEPTED_CONTRAST = 0.2;
 const CONTINUOUS_LINE_EVIDENCE_MIN = 0.026;
-const MIN_PROFILE_EVIDENCE = 0.008;
 
-export async function detectGrid(
+export async function detectPixelanimGrid(
   input: GridDetectionInput,
 ): Promise<GridDetectionOutcome> {
   let raster: LoadedRaster;
@@ -106,10 +100,10 @@ export async function detectGrid(
     };
 
     if (
-      naturalImage.width < MIN_ANALYSIS_CELL_SIZE * MIN_DETECTED_GRID_SEGMENTS ||
-      naturalImage.height < MIN_ANALYSIS_CELL_SIZE * MIN_DETECTED_GRID_SEGMENTS
+      naturalImage.width < PIXELANIM_GRID_COLUMNS * 6 ||
+      naturalImage.height < PIXELANIM_GRID_ROWS * 6
     ) {
-      return failure('image-too-small', '图片尺寸过小，无法可靠检测重复网格边界。', naturalImage);
+      return failure('image-too-small', '图片尺寸过小，无法可靠检测 34 × 27 网格。', naturalImage);
     }
 
     const analysis = createAnalysisImage(raster);
@@ -125,7 +119,7 @@ export async function detectGrid(
     const candidate = selectBestGridCandidate(analysis);
 
     if (!candidate) {
-      return failure('no-periodic-grid', '未找到足够稳定的重复网格边界。', naturalImage);
+      return failure('no-periodic-grid', '未找到足够稳定的 34 × 27 周期性网格结构。', naturalImage);
     }
 
     if (candidate.metrics.geometry < 0.62) {
@@ -150,7 +144,7 @@ export async function detectGrid(
     }
 
     const refined = refineOuterRectangle(raster, analysis, candidate);
-    const success = createSuccessResult(naturalImage, refined, candidate);
+    const success = createSuccessResult(naturalImage, refined, candidate.metrics);
 
     if (success.confidence.grade === 'low') {
       return failure(
@@ -171,8 +165,16 @@ export async function detectGrid(
 function selectBestGridCandidate(analysis: AnalysisImage): RectCandidate | null {
   const verticalProfile = createAxisProfile(analysis, 'vertical');
   const horizontalProfile = createAxisProfile(analysis, 'horizontal');
-  const verticalCandidates = findAxisCandidates(verticalProfile, analysis.width);
-  const horizontalCandidates = findAxisCandidates(horizontalProfile, analysis.height);
+  const verticalCandidates = findAxisCandidates(
+    verticalProfile,
+    analysis.width,
+    PIXELANIM_GRID_COLUMNS,
+  );
+  const horizontalCandidates = findAxisCandidates(
+    horizontalProfile,
+    analysis.height,
+    PIXELANIM_GRID_ROWS,
+  );
 
   let bestCandidate: RectCandidate | null = null;
 
@@ -219,17 +221,14 @@ function selectBestGridCandidate(analysis: AnalysisImage): RectCandidate | null 
 function createSuccessResult(
   naturalImage: NaturalImageSize,
   refined: RefinedRectangle,
-  candidate: RectCandidate,
+  metrics: DetectionMetrics,
 ): GridDetectionSuccess {
-  const columns = candidate.vertical.segments;
-  const rows = candidate.horizontal.segments;
-  const metrics = candidate.metrics;
   const rectangle = createNaturalRect(refined.left, refined.top, refined.right, refined.bottom);
-  const vertical = createBoundaryArray(rectangle.x, rectangle.right, columns);
-  const horizontal = createBoundaryArray(rectangle.y, rectangle.bottom, rows);
+  const vertical = createBoundaryArray(rectangle.x, rectangle.right, PIXELANIM_GRID_COLUMNS);
+  const horizontal = createBoundaryArray(rectangle.y, rectangle.bottom, PIXELANIM_GRID_ROWS);
   const cellSize = {
-    width: rectangle.width / columns,
-    height: rectangle.height / rows,
+    width: rectangle.width / PIXELANIM_GRID_COLUMNS,
+    height: rectangle.height / PIXELANIM_GRID_ROWS,
   };
 
   if (
@@ -238,13 +237,13 @@ function createSuccessResult(
   ) {
     return {
       ok: true,
-      columns,
-      rows,
+      columns: PIXELANIM_GRID_COLUMNS,
+      rows: PIXELANIM_GRID_ROWS,
       naturalImage,
       rectangle,
       boundaries: {
-        vertical: [],
-        horizontal: [],
+        vertical: createBoundaryArray(0, 0, PIXELANIM_GRID_COLUMNS),
+        horizontal: createBoundaryArray(0, 0, PIXELANIM_GRID_ROWS),
       },
       cellSize,
       metrics: createMetrics(0, 0, 0, 0),
@@ -254,8 +253,8 @@ function createSuccessResult(
 
   return {
     ok: true,
-    columns,
-    rows,
+    columns: PIXELANIM_GRID_COLUMNS,
+    rows: PIXELANIM_GRID_ROWS,
     naturalImage,
     rectangle,
     boundaries: {
@@ -308,14 +307,11 @@ function createConfidence(score: number): DetectionConfidence {
 
 function scoreCandidateGeometry(vertical: AxisCandidate, horizontal: AxisCandidate): number {
   const cellRatio = vertical.step / horizontal.step;
+  const rectangleRatio = vertical.span / horizontal.span;
   const squareScore = scoreNearRatio(cellRatio, 1, 0.2);
-  const repeatedBoundaryScore = clamp(
-    Math.min(vertical.segments, horizontal.segments) / 6,
-    0,
-    1,
-  );
+  const ratioScore = scoreNearRatio(rectangleRatio, PIXELANIM_GRID_RATIO, 0.16);
 
-  return squareScore * 0.84 + repeatedBoundaryScore * 0.16;
+  return squareScore * 0.68 + ratioScore * 0.32;
 }
 
 function createAxisProfile(analysis: AnalysisImage, axis: 'vertical' | 'horizontal'): Float32Array {
@@ -351,44 +347,23 @@ function createAxisProfile(analysis: AnalysisImage, axis: 'vertical' | 'horizont
 function findAxisCandidates(
   profile: Float32Array,
   axisLength: number,
+  segments: number,
 ): readonly AxisCandidate[] {
-  const threshold = getProfileEvidenceThreshold(profile);
-  const peaks = findProfilePeaks(profile, threshold);
-  const steps = proposeAxisSteps(peaks, axisLength);
+  const minSpan = Math.ceil(segments * MIN_ANALYSIS_CELL_SIZE);
   const candidates: AxisCandidate[] = [];
 
-  if (peaks.length < MIN_DETECTED_GRID_SEGMENTS + 1 || steps.length === 0) {
+  if (minSpan >= axisLength) {
     return candidates;
   }
 
-  for (const step of steps) {
+  for (let span = minSpan; span <= axisLength - 2; span += 1) {
+    const step = span / segments;
     const windowRadius = Math.max(1, Math.round(step * 0.08));
 
-    for (const peak of peaks) {
-      const run = findBoundaryRun(
-        profile,
-        peak.position,
-        step,
-        threshold,
-        windowRadius,
-      );
+    for (let start = 1; start <= axisLength - span - 1; start += 1) {
+      const axisCandidate = scoreAxisCandidate(profile, start, span, segments, windowRadius);
 
-      if (!run) {
-        continue;
-      }
-
-      const axisCandidate = scoreAxisCandidate(
-        profile,
-        run.start,
-        run.end - run.start,
-        run.segments,
-        windowRadius,
-      );
-
-      if (
-        axisCandidate.lineStrength < threshold * 0.72 ||
-        axisCandidate.lineStrength <= axisCandidate.baselineStrength
-      ) {
+      if (axisCandidate.score <= 0) {
         continue;
       }
 
@@ -397,145 +372,6 @@ function findAxisCandidates(
   }
 
   return dedupeAxisCandidates(candidates);
-}
-
-function getProfileEvidenceThreshold(profile: Float32Array): number {
-  let total = 0;
-  let squaredTotal = 0;
-  let count = 0;
-
-  for (let index = 1; index < profile.length - 1; index += 1) {
-    const value = profile[index] ?? 0;
-    total += value;
-    squaredTotal += value * value;
-    count += 1;
-  }
-
-  if (count === 0) {
-    return MIN_PROFILE_EVIDENCE;
-  }
-
-  const mean = total / count;
-  const variance = Math.max(0, squaredTotal / count - mean * mean);
-  return Math.max(MIN_PROFILE_EVIDENCE, mean + Math.sqrt(variance) * 0.55);
-}
-
-function findProfilePeaks(
-  profile: Float32Array,
-  threshold: number,
-): readonly ProfilePeak[] {
-  const peaks: ProfilePeak[] = [];
-
-  for (let position = 2; position < profile.length - 2; position += 1) {
-    const strength = profile[position] ?? 0;
-
-    if (
-      strength >= threshold &&
-      strength >= (profile[position - 1] ?? 0) &&
-      strength > (profile[position + 1] ?? 0)
-    ) {
-      peaks.push({ position, strength });
-    }
-  }
-
-  return peaks;
-}
-
-function proposeAxisSteps(
-  peaks: readonly ProfilePeak[],
-  axisLength: number,
-): readonly number[] {
-  const stepScores = new Map<number, number>();
-  const maximumStep = axisLength / MIN_DETECTED_GRID_SEGMENTS;
-
-  for (let leftIndex = 0; leftIndex < peaks.length; leftIndex += 1) {
-    const left = peaks[leftIndex];
-
-    if (!left) {
-      continue;
-    }
-
-    const neighborLimit = Math.min(peaks.length, leftIndex + 17);
-
-    for (let rightIndex = leftIndex + 1; rightIndex < neighborLimit; rightIndex += 1) {
-      const right = peaks[rightIndex];
-
-      if (!right) {
-        continue;
-      }
-
-      const difference = right.position - left.position;
-      const maximumDivisor = Math.min(
-        8,
-        Math.floor(difference / MIN_ANALYSIS_CELL_SIZE),
-      );
-
-      for (let divisor = 1; divisor <= maximumDivisor; divisor += 1) {
-        const step = difference / divisor;
-
-        if (step < MIN_ANALYSIS_CELL_SIZE || step > maximumStep) {
-          continue;
-        }
-
-        const roundedStep = Math.round(step * 2) / 2;
-        const weight = Math.min(left.strength, right.strength) / divisor;
-        stepScores.set(roundedStep, (stepScores.get(roundedStep) ?? 0) + weight);
-      }
-    }
-  }
-
-  return [...stepScores.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, AXIS_STEP_CANDIDATE_LIMIT)
-    .map(([step]) => step);
-}
-
-function findBoundaryRun(
-  profile: Float32Array,
-  anchor: number,
-  step: number,
-  threshold: number,
-  windowRadius: number,
-): { readonly start: number; readonly end: number; readonly segments: number } | null {
-  const acceptedEvidence = threshold * 0.68;
-  let start = anchor;
-  let end = anchor;
-
-  for (
-    let position = anchor - step;
-    position >= 1;
-    position -= step
-  ) {
-    if (localProfileMax(profile, position, windowRadius) < acceptedEvidence) {
-      break;
-    }
-
-    start = position;
-  }
-
-  for (
-    let position = anchor + step;
-    position <= profile.length - 2;
-    position += step
-  ) {
-    if (localProfileMax(profile, position, windowRadius) < acceptedEvidence) {
-      break;
-    }
-
-    end = position;
-  }
-
-  const segments = Math.round((end - start) / step);
-
-  if (segments < MIN_DETECTED_GRID_SEGMENTS) {
-    return null;
-  }
-
-  return {
-    start,
-    end: start + segments * step,
-    segments,
-  };
 }
 
 function scoreAxisCandidate(
@@ -572,19 +408,13 @@ function scoreAxisCandidate(
     1,
   );
   const consistency = clamp(1 - Math.sqrt(variance) / (lineStrength + 0.001), 0, 1);
-  const repeatedBoundaryScore = clamp(segments / 8, 0, 1);
-  const score =
-    lineStrength * 0.38 +
-    relativeContrast * 0.34 +
-    consistency * 0.14 +
-    repeatedBoundaryScore * 0.14;
+  const score = lineStrength * 0.45 + relativeContrast * 0.4 + consistency * 0.15;
 
   return {
     start,
     end: start + span,
     span,
     step,
-    segments,
     lineStrength,
     baselineStrength,
     periodicity: consistency * 0.35 + relativeContrast * 0.65,
@@ -623,8 +453,7 @@ function dedupeAxisCandidates(candidates: readonly AxisCandidate[]): readonly Ax
     const overlapsExisting = deduped.some(
       (existing) =>
         Math.abs(existing.start - candidate.start) < 3 &&
-        Math.abs(existing.span - candidate.span) < 4 &&
-        Math.abs(existing.step - candidate.step) < 1,
+        Math.abs(existing.span - candidate.span) < 4,
     );
 
     if (!overlapsExisting) {
@@ -662,7 +491,7 @@ function scoreVerticalBoundariesInRect(
     'vertical',
     vertical.start,
     vertical.step,
-    vertical.segments,
+    PIXELANIM_GRID_COLUMNS,
     horizontal.start,
     horizontal.end,
   );
@@ -678,7 +507,7 @@ function scoreHorizontalBoundariesInRect(
     'horizontal',
     horizontal.start,
     horizontal.step,
-    horizontal.segments,
+    PIXELANIM_GRID_ROWS,
     vertical.start,
     vertical.end,
   );
@@ -837,8 +666,8 @@ function refineOuterRectangle(
   const estimatedTop = candidate.horizontal.start * inverseScale;
   const estimatedBottom = candidate.horizontal.end * inverseScale;
   const estimatedCell = Math.min(
-    candidate.vertical.step * inverseScale,
-    candidate.horizontal.step * inverseScale,
+    (estimatedRight - estimatedLeft) / PIXELANIM_GRID_COLUMNS,
+    (estimatedBottom - estimatedTop) / PIXELANIM_GRID_ROWS,
   );
   const searchRadius = Math.round(clamp(estimatedCell * 0.24, 4, MAX_BOUNDARY_SEARCH_PIXELS));
   const cropLeft = Math.max(0, Math.floor(estimatedLeft - searchRadius - 2));

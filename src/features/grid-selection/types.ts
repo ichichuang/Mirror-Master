@@ -22,18 +22,15 @@ export interface GridCellSize {
   readonly height: number;
 }
 
-export interface IntegerGridModel {
+export interface IntegerGridSelection {
+  readonly naturalImage: NaturalImageSize;
   readonly left: number;
   readonly top: number;
   readonly right: number;
   readonly bottom: number;
   readonly cellSize: number;
-  readonly columns: number;
-  readonly rows: number;
+  readonly columns: 34;
+  readonly rows: 27;
   readonly verticalBoundaries: readonly number[];
   readonly horizontalBoundaries: readonly number[];
-}
-
-export interface IntegerGridSelection extends IntegerGridModel {
-  readonly naturalImage: NaturalImageSize;
 }

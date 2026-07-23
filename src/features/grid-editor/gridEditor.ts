@@ -1,9 +1,9 @@
-import { detectGrid } from '../grid-detection/detector';
+import { detectPixelanimGrid } from '../grid-detection/detector';
 import {
   clamp,
-  cloneIntegerGridSelection,
+  createIntegerGridSelection,
   createIntegerSelectionFromRectangle,
-  createNaturalRect,
+  getMaximumCellSize,
   translateIntegerGridSelection,
 } from '../grid-selection/geometry';
 import type {
@@ -172,7 +172,7 @@ export function mountGridEditor(
     );
     elements.overlay.hidden = false;
     elements.overlay.tabIndex = 0;
-    elements.overlay.setAttribute('aria-label', '主网格本体选区编辑区');
+    elements.overlay.setAttribute('aria-label', '34 × 27 网格选区编辑区');
     updateFitScale();
     renderStage();
     lifecycle.onSelectionChange?.(null);
@@ -203,7 +203,12 @@ export function mountGridEditor(
     }
 
     selection = detectedSeed
-      ? cloneIntegerGridSelection(detectedSeed)
+      ? createIntegerGridSelection(
+          detectedSeed.naturalImage,
+          detectedSeed.left,
+          detectedSeed.top,
+          detectedSeed.cellSize,
+        )
       : null;
     renderOverlay();
     lifecycle.onSelectionChange?.(selection);
@@ -211,7 +216,7 @@ export function mountGridEditor(
     if (selection) {
       setHint(formatSelectionHint(selection, '已恢复识别选区'));
     } else {
-      setHint('请在图片上拖出主网格本体。');
+      setHint('请在图片上拖出网格区域。');
     }
   }
 
@@ -224,10 +229,10 @@ export function mountGridEditor(
 
     detectionVersion += 1;
     const currentVersion = detectionVersion;
-    setHint('正在识别主网格边界与行列…');
+    setHint('正在识别 34 × 27 网格…');
 
     try {
-      const outcome = await detectGrid({
+      const outcome = await detectPixelanimGrid({
         file: image.file,
         naturalImage: image.naturalImage,
       });
@@ -240,10 +245,6 @@ export function mountGridEditor(
         const nextSelection = createIntegerSelectionFromRectangle(
           image.naturalImage,
           outcome.rectangle,
-          {
-            columns: outcome.columns,
-            rows: outcome.rows,
-          },
         );
 
         if (nextSelection) {
@@ -270,15 +271,12 @@ export function mountGridEditor(
     renderOverlay();
     lifecycle.onSelectionChange?.(null);
 
-    if (
-      currentImage &&
-      (currentImage.naturalImage.width < 1 || currentImage.naturalImage.height < 1)
-    ) {
-      setHint('图片尺寸不足，无法创建网格选区。');
+    if (currentImage && getMaximumCellSize(currentImage.naturalImage) < 1) {
+      setHint('图片尺寸不足，无法容纳 34 × 27 网格。');
       return;
     }
 
-    setHint('识别不完整，请直接框选主网格本体，不要包含标题、编号或空白边缘。');
+    setHint('未识别到网格，请直接在图片上拖出网格区域。');
   }
 
   function handlePointerDown(event: PointerEvent): void {
@@ -348,6 +346,7 @@ export function mountGridEditor(
           : resizeSelectionFromPointer(
               activePointer.startSelection,
               activePointer.handle,
+              activePointer.startPoint,
               point,
             );
     }
@@ -375,7 +374,7 @@ export function mountGridEditor(
     }
 
     if (!moved && !selection) {
-      setHint('请拖动以框选主网格本体。');
+      setHint('请拖动以绘制网格区域。');
     } else if (selection) {
       announce('网格选区已更新。');
     }
@@ -404,7 +403,7 @@ export function mountGridEditor(
       selection = placeResizedSelection(
         selection,
         handle,
-        direction * amount,
+        selection.cellSize + direction * amount,
       );
     }
 
@@ -638,80 +637,113 @@ function createDrawnSelection(
   start: NaturalPoint,
   point: NaturalPoint,
 ): IntegerGridSelection | null {
-  const rectangle = createNaturalRect(start.x, start.y, point.x, point.y);
-  return createIntegerSelectionFromRectangle(naturalImage, rectangle);
+  const cellSize = Math.round(
+    Math.max(Math.abs(point.x - start.x) / 34, Math.abs(point.y - start.y) / 27),
+  );
+
+  if (cellSize < 1) {
+    return null;
+  }
+
+  const width = 34 * cellSize;
+  const height = 27 * cellSize;
+  const left = point.x < start.x ? start.x - width : start.x;
+  const top = point.y < start.y ? start.y - height : start.y;
+
+  return createIntegerGridSelection(naturalImage, left, top, cellSize);
 }
 
 function resizeSelectionFromPointer(
   selection: IntegerGridSelection,
   handle: Exclude<HandleType, 'move'>,
+  startPoint: NaturalPoint,
   point: NaturalPoint,
 ): IntegerGridSelection {
-  const left = handle.includes('w') ? point.x : selection.left;
-  const right = handle.includes('e') ? point.x : selection.right;
-  const top = handle.includes('n') ? point.y : selection.top;
-  const bottom = handle.includes('s') ? point.y : selection.bottom;
+  const horizontalCell =
+    handle.includes('w')
+      ? (selection.right - point.x) / 34
+      : (point.x - selection.left) / 34;
+  const verticalCell =
+    handle.includes('n')
+      ? (selection.bottom - point.y) / 27
+      : (point.y - selection.top) / 27;
+  let desiredCell: number;
 
-  return fitResizedSelection(
-    selection,
-    handle,
-    createNaturalRect(left, top, right, bottom),
-  );
+  if (handle.length === 1) {
+    desiredCell = handle === 'e' || handle === 'w' ? horizontalCell : verticalCell;
+  } else {
+    desiredCell =
+      Math.abs(point.x - startPoint.x) >= Math.abs(point.y - startPoint.y)
+        ? horizontalCell
+        : verticalCell;
+  }
+
+  return placeResizedSelection(selection, handle, desiredCell);
 }
 
 function placeResizedSelection(
   selection: IntegerGridSelection,
   handle: Exclude<HandleType, 'move'>,
-  edgeDelta: number,
+  desiredCell: number,
 ): IntegerGridSelection {
+  const maximumCell = getMaximumCellForHandle(selection, handle);
+  const cellSize = clamp(Math.round(desiredCell), 1, maximumCell);
+  const width = 34 * cellSize;
+  const height = 27 * cellSize;
+  const oldWidth = selection.right - selection.left;
+  const oldHeight = selection.bottom - selection.top;
   let left = selection.left;
-  let right = selection.right;
   let top = selection.top;
-  let bottom = selection.bottom;
 
   if (handle.includes('w')) {
-    left -= edgeDelta;
-  }
-
-  if (handle.includes('e')) {
-    right += edgeDelta;
+    left = selection.right - width;
+  } else if (handle === 'n' || handle === 's') {
+    left = selection.left + (oldWidth - width) / 2;
   }
 
   if (handle.includes('n')) {
-    top -= edgeDelta;
+    top = selection.bottom - height;
+  } else if (handle === 'e' || handle === 'w') {
+    top = selection.top + (oldHeight - height) / 2;
   }
 
-  if (handle.includes('s')) {
-    bottom += edgeDelta;
-  }
-
-  return fitResizedSelection(
-    selection,
-    handle,
-    createNaturalRect(left, top, right, bottom),
+  return (
+    createIntegerGridSelection(
+      selection.naturalImage,
+      left,
+      top,
+      cellSize,
+    ) ?? selection
   );
 }
 
-function fitResizedSelection(
+function getMaximumCellForHandle(
   selection: IntegerGridSelection,
   handle: Exclude<HandleType, 'move'>,
-  rectangle: ReturnType<typeof createNaturalRect>,
-): IntegerGridSelection {
-  return (
-    createIntegerSelectionFromRectangle(selection.naturalImage, rectangle, {
-      preferredCellSize: selection.cellSize,
-      horizontalAlignment: handle.includes('w')
-        ? 'end'
-        : handle.includes('e')
-          ? 'start'
-          : 'center',
-      verticalAlignment: handle.includes('n')
-        ? 'end'
-        : handle.includes('s')
-          ? 'start'
-          : 'center',
-    }) ?? selection
-  );
+): number {
+  const image = selection.naturalImage;
+  const centerX = (selection.left + selection.right) / 2;
+  const centerY = (selection.top + selection.bottom) / 2;
+  let maxWidth: number;
+  let maxHeight: number;
+
+  if (handle.includes('w')) {
+    maxWidth = selection.right;
+  } else if (handle.includes('e')) {
+    maxWidth = image.width - selection.left;
+  } else {
+    maxWidth = 2 * Math.min(centerX, image.width - centerX);
+  }
+
+  if (handle.includes('n')) {
+    maxHeight = selection.bottom;
+  } else if (handle.includes('s')) {
+    maxHeight = image.height - selection.top;
+  } else {
+    maxHeight = 2 * Math.min(centerY, image.height - centerY);
+  }
+
+  return Math.max(1, Math.floor(Math.min(maxWidth / 34, maxHeight / 27)));
 }
 
 function getMoveKeyDelta(
@@ -879,7 +911,7 @@ function formatSelectionHint(
   selection: IntegerGridSelection,
   prefix: string,
 ): string {
-  return `${prefix}：${String(selection.columns)} 列 × ${String(selection.rows)} 行，单元格 ${String(selection.cellSize)} px。`;
+  return `${prefix}：34列×27行，单元格 ${String(selection.cellSize)}px。`;
 }
 
 function getElements(root: HTMLElement): GridEditorElements {

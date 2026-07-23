@@ -136,7 +136,7 @@ async function generateMirror(): Promise<void> {
   resultCanvas = outcome.result.outputCanvas;
   editor.showResult(resultCanvas);
   editor.setMessage(
-    `镜像结果已生成：${String(outcome.result.columns)} 列 × ${String(outcome.result.rows)} 行。`,
+    `镜像结果已生成：34列×27行，单元格 ${String(outcome.result.cellSize)}px。`,
   );
   prepareDownload(resultCanvas);
   updateActions();

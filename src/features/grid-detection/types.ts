@@ -1,3 +1,4 @@
+import type { PIXELANIM_GRID_COLUMNS, PIXELANIM_GRID_ROWS } from './constants';
 import type {
   GridCellSize,
   NaturalBoundaryArrays,
@@ -45,8 +46,8 @@ export type GridDetectionFailureReason =
 
 export interface GridDetectionSuccess {
   readonly ok: true;
-  readonly columns: number;
-  readonly rows: number;
+  readonly columns: typeof PIXELANIM_GRID_COLUMNS;
+  readonly rows: typeof PIXELANIM_GRID_ROWS;
   readonly naturalImage: NaturalImageSize;
   readonly rectangle: NaturalImageRect;
   readonly boundaries: NaturalBoundaryArrays;

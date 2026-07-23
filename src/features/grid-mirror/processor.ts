@@ -1,3 +1,7 @@
+import {
+  PIXELANIM_GRID_COLUMNS,
+  PIXELANIM_GRID_ROWS,
+} from '../grid-selection/constants';
 import { isValidIntegerGridSelection } from '../grid-selection/geometry';
 import type { IntegerGridSelection, NaturalImageSize } from '../grid-selection/types';
 import type {
@@ -59,8 +63,8 @@ export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirro
           top: input.selection.top,
         }),
         cellSize: input.selection.cellSize,
-        columns: input.selection.columns,
-        rows: input.selection.rows,
+        columns: PIXELANIM_GRID_COLUMNS,
+        rows: PIXELANIM_GRID_ROWS,
         outputCanvas,
       }),
     };
@@ -76,13 +80,13 @@ function moveGridCells(
   outputContext: CanvasRenderingContext2D,
   selection: IntegerGridSelection,
 ): void {
-  const { left, top, cellSize, columns, rows } = selection;
+  const { left, top, cellSize } = selection;
 
-  for (let row = 0; row < rows; row += 1) {
+  for (let row = 0; row < PIXELANIM_GRID_ROWS; row += 1) {
     const sourceY = top + row * cellSize;
 
-    for (let sourceColumn = 0; sourceColumn < columns; sourceColumn += 1) {
-      const targetColumn = columns - 1 - sourceColumn;
+    for (let sourceColumn = 0; sourceColumn < PIXELANIM_GRID_COLUMNS; sourceColumn += 1) {
+      const targetColumn = 33 - sourceColumn;
       const sourceX = left + sourceColumn * cellSize;
       const targetX = left + targetColumn * cellSize;
 

@@ -1,20 +1,12 @@
+import {
+  PIXELANIM_GRID_COLUMNS,
+  PIXELANIM_GRID_ROWS,
+} from './constants';
 import type {
   IntegerGridSelection,
   NaturalImageRect,
   NaturalImageSize,
 } from './types';
-
-export type GridAlignment = 'start' | 'center' | 'end';
-
-export interface GridFitOptions {
-  readonly preferredCellSize?: number;
-  readonly columns?: number;
-  readonly rows?: number;
-  readonly horizontalAlignment?: GridAlignment;
-  readonly verticalAlignment?: GridAlignment;
-}
-
-const DEFAULT_SHORT_AXIS_CELLS = 12;
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -92,38 +84,36 @@ export function scoreNearRatio(value: number, target: number, tolerance: number)
   return clamp(1 - Math.abs(value / target - 1) / tolerance, 0, 1);
 }
 
+export function getMaximumCellSize(naturalImage: NaturalImageSize): number {
+  return Math.floor(
+    Math.min(
+      naturalImage.width / PIXELANIM_GRID_COLUMNS,
+      naturalImage.height / PIXELANIM_GRID_ROWS,
+    ),
+  );
+}
+
 export function createIntegerGridSelection(
   naturalImage: NaturalImageSize,
   left: number,
   top: number,
-  columns: number,
-  rows: number,
   cellSize: number,
 ): IntegerGridSelection | null {
+  const maximumCellSize = getMaximumCellSize(naturalImage);
+
   if (
-    !isValidNaturalImage(naturalImage) ||
-    !Number.isFinite(left) ||
-    !Number.isFinite(top) ||
-    !Number.isFinite(columns) ||
-    !Number.isFinite(rows) ||
-    !Number.isFinite(cellSize)
+    !Number.isInteger(naturalImage.width) ||
+    !Number.isInteger(naturalImage.height) ||
+    naturalImage.width <= 0 ||
+    naturalImage.height <= 0 ||
+    maximumCellSize < 1
   ) {
     return null;
   }
 
-  const safeColumns = Math.max(1, Math.round(columns));
-  const safeRows = Math.max(1, Math.round(rows));
-  const maximumCellSize = Math.floor(
-    Math.min(naturalImage.width / safeColumns, naturalImage.height / safeRows),
-  );
-
-  if (maximumCellSize < 1) {
-    return null;
-  }
-
   const safeCellSize = clamp(Math.round(cellSize), 1, maximumCellSize);
-  const width = safeColumns * safeCellSize;
-  const height = safeRows * safeCellSize;
+  const width = PIXELANIM_GRID_COLUMNS * safeCellSize;
+  const height = PIXELANIM_GRID_ROWS * safeCellSize;
   const safeLeft = clamp(Math.round(left), 0, naturalImage.width - width);
   const safeTop = clamp(Math.round(top), 0, naturalImage.height - height);
   const right = safeLeft + width;
@@ -139,17 +129,17 @@ export function createIntegerGridSelection(
     right,
     bottom,
     cellSize: safeCellSize,
-    columns: safeColumns,
-    rows: safeRows,
+    columns: PIXELANIM_GRID_COLUMNS,
+    rows: PIXELANIM_GRID_ROWS,
     verticalBoundaries: Object.freeze(
       Array.from(
-        { length: safeColumns + 1 },
+        { length: PIXELANIM_GRID_COLUMNS + 1 },
         (_, index) => safeLeft + index * safeCellSize,
       ),
     ),
     horizontalBoundaries: Object.freeze(
       Array.from(
-        { length: safeRows + 1 },
+        { length: PIXELANIM_GRID_ROWS + 1 },
         (_, index) => safeTop + index * safeCellSize,
       ),
     ),
@@ -161,84 +151,23 @@ export function createIntegerGridSelection(
 export function createIntegerSelectionFromRectangle(
   naturalImage: NaturalImageSize,
   rectangle: NaturalImageRect,
-  options: GridFitOptions = {},
 ): IntegerGridSelection | null {
-  if (!isValidNaturalImage(naturalImage)) {
-    return null;
-  }
-
-  const bounded = clampRectangleToImage(naturalImage, rectangle);
-  const availableWidth = bounded.right - bounded.x;
-  const availableHeight = bounded.bottom - bounded.y;
-
-  if (availableWidth < 1 || availableHeight < 1) {
-    return null;
-  }
-
-  const exactColumns = normalizeOptionalCount(options.columns);
-  const exactRows = normalizeOptionalCount(options.rows);
-  let columns: number;
-  let rows: number;
-  let cellSize: number;
-
-  if (exactColumns !== null && exactRows !== null) {
-    columns = exactColumns;
-    rows = exactRows;
-    cellSize = Math.floor(Math.min(availableWidth / columns, availableHeight / rows));
-  } else {
-    const defaultCellSize = Math.max(
-      1,
-      Math.round(Math.min(availableWidth, availableHeight) / DEFAULT_SHORT_AXIS_CELLS),
-    );
-    const preferredCellSize = clamp(
-      Math.round(options.preferredCellSize ?? defaultCellSize),
-      1,
-      Math.floor(Math.min(availableWidth, availableHeight)),
-    );
-    columns = Math.max(1, Math.floor(availableWidth / preferredCellSize));
-    rows = Math.max(1, Math.floor(availableHeight / preferredCellSize));
-    cellSize = Math.floor(Math.min(availableWidth / columns, availableHeight / rows));
-  }
-
-  if (cellSize < 1) {
-    return null;
-  }
-
-  const width = columns * cellSize;
-  const height = rows * cellSize;
-  const left = alignInside(
-    bounded.x,
-    bounded.right,
-    width,
-    options.horizontalAlignment ?? 'center',
+  const cellSize = Math.round(
+    Math.min(
+      rectangle.width / PIXELANIM_GRID_COLUMNS,
+      rectangle.height / PIXELANIM_GRID_ROWS,
+    ),
   );
-  const top = alignInside(
-    bounded.y,
-    bounded.bottom,
-    height,
-    options.verticalAlignment ?? 'center',
-  );
+  const width = PIXELANIM_GRID_COLUMNS * cellSize;
+  const height = PIXELANIM_GRID_ROWS * cellSize;
+  const centerX = rectangle.x + rectangle.width / 2;
+  const centerY = rectangle.y + rectangle.height / 2;
 
   return createIntegerGridSelection(
     naturalImage,
-    left,
-    top,
-    columns,
-    rows,
+    centerX - width / 2,
+    centerY - height / 2,
     cellSize,
-  );
-}
-
-export function cloneIntegerGridSelection(
-  selection: IntegerGridSelection,
-): IntegerGridSelection | null {
-  return createIntegerGridSelection(
-    selection.naturalImage,
-    selection.left,
-    selection.top,
-    selection.columns,
-    selection.rows,
-    selection.cellSize,
   );
 }
 
@@ -252,8 +181,6 @@ export function translateIntegerGridSelection(
       selection.naturalImage,
       selection.left + deltaX,
       selection.top + deltaY,
-      selection.columns,
-      selection.rows,
       selection.cellSize,
     ) ?? selection
   );
@@ -274,30 +201,31 @@ export function isValidIntegerGridSelection(selection: IntegerGridSelection): bo
   } = selection;
 
   if (
-    !isValidNaturalImage(naturalImage) ||
     !allIntegers([
+      naturalImage.width,
+      naturalImage.height,
       left,
       top,
       right,
       bottom,
       cellSize,
-      columns,
-      rows,
       ...verticalBoundaries,
       ...horizontalBoundaries,
     ]) ||
-    cellSize <= 0 ||
-    columns <= 0 ||
-    rows <= 0
+    naturalImage.width <= 0 ||
+    naturalImage.height <= 0 ||
+    cellSize <= 0
   ) {
     return false;
   }
 
   if (
-    right !== left + columns * cellSize ||
-    bottom !== top + rows * cellSize ||
-    verticalBoundaries.length !== columns + 1 ||
-    horizontalBoundaries.length !== rows + 1
+    columns !== PIXELANIM_GRID_COLUMNS ||
+    rows !== PIXELANIM_GRID_ROWS ||
+    right !== left + PIXELANIM_GRID_COLUMNS * cellSize ||
+    bottom !== top + PIXELANIM_GRID_ROWS * cellSize ||
+    verticalBoundaries.length !== PIXELANIM_GRID_COLUMNS + 1 ||
+    horizontalBoundaries.length !== PIXELANIM_GRID_ROWS + 1
   ) {
     return false;
   }
@@ -314,51 +242,6 @@ export function isValidIntegerGridSelection(selection: IntegerGridSelection): bo
   return (
     hasExactSpacing(verticalBoundaries, left, right, cellSize) &&
     hasExactSpacing(horizontalBoundaries, top, bottom, cellSize)
-  );
-}
-
-function clampRectangleToImage(
-  naturalImage: NaturalImageSize,
-  rectangle: NaturalImageRect,
-): NaturalImageRect {
-  const left = clamp(Math.round(rectangle.x), 0, naturalImage.width);
-  const top = clamp(Math.round(rectangle.y), 0, naturalImage.height);
-  const right = clamp(Math.round(rectangle.right), left, naturalImage.width);
-  const bottom = clamp(Math.round(rectangle.bottom), top, naturalImage.height);
-  return createNaturalRect(left, top, right, bottom);
-}
-
-function alignInside(
-  start: number,
-  end: number,
-  size: number,
-  alignment: GridAlignment,
-): number {
-  if (alignment === 'start') {
-    return start;
-  }
-
-  if (alignment === 'end') {
-    return end - size;
-  }
-
-  return start + Math.floor((end - start - size) / 2);
-}
-
-function normalizeOptionalCount(value: number | undefined): number | null {
-  if (value === undefined || !Number.isFinite(value) || value < 1) {
-    return null;
-  }
-
-  return Math.round(value);
-}
-
-function isValidNaturalImage(naturalImage: NaturalImageSize): boolean {
-  return (
-    Number.isInteger(naturalImage.width) &&
-    Number.isInteger(naturalImage.height) &&
-    naturalImage.width > 0 &&
-    naturalImage.height > 0
   );
 }
 

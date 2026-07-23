@@ -16,8 +16,8 @@ export interface GridMirrorResult {
     readonly top: number;
   };
   readonly cellSize: number;
-  readonly columns: number;
-  readonly rows: number;
+  readonly columns: 34;
+  readonly rows: 27;
   readonly outputCanvas: HTMLCanvasElement;
 }
 
