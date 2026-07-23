@@ -348,6 +348,17 @@
   cursor: move;
 }
 
+.grid-search-area {
+  fill: rgb(217 70 77 / 7%);
+}
+
+.grid-search-outline {
+  fill: none;
+  stroke: #f43f5e;
+  stroke-width: 2;
+  stroke-dasharray: 8 5;
+}
+
 .grid-boundary {
   stroke: rgb(15 118 110 / 72%);
   stroke-width: 1;

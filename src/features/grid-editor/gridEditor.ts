@@ -1,17 +1,26 @@
 import { detectPixelanimGrid } from '../grid-detection/detector';
 import {
   clamp,
-  createIntegerGridSelection,
-  createIntegerSelectionFromRectangle,
-  getMaximumCellSize,
-  translateIntegerGridSelection,
+  createFullImageSearchRect,
+  createNaturalRect,
+  translateNaturalRect,
 } from '../grid-selection/geometry';
 import type {
-  IntegerGridSelection,
+  GridBoundarySelection,
+  NaturalImageRect,
   NaturalImageSize,
 } from '../grid-selection/types';
 
-type HandleType = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
+type HandleType =
+  | 'move'
+  | 'n'
+  | 'e'
+  | 's'
+  | 'w'
+  | 'nw'
+  | 'ne'
+  | 'se'
+  | 'sw';
 type ZoomMode = 'fit' | 'manual';
 type EditorView = 'original' | 'result';
 
@@ -32,7 +41,7 @@ interface ActivePointer {
   readonly kind: 'draw' | 'handle';
   readonly handle: HandleType | null;
   readonly startPoint: NaturalPoint;
-  readonly startSelection: IntegerGridSelection | null;
+  readonly startRect: NaturalImageRect | null;
   moved: boolean;
 }
 
@@ -54,7 +63,10 @@ interface GridEditorElements {
 }
 
 export interface GridEditorLifecycle {
-  readonly onSelectionChange?: (selection: IntegerGridSelection | null) => void;
+  readonly onSelectionChange?: (
+    selection: GridBoundarySelection | null,
+  ) => void;
+  readonly onDetectionChange?: (isDetecting: boolean) => void;
 }
 
 export interface GridEditorController {
@@ -65,25 +77,26 @@ export interface GridEditorController {
   readonly showResult: (canvas: HTMLCanvasElement) => void;
   readonly showOriginal: () => void;
   readonly setMessage: (message: string) => void;
-  readonly getSelection: () => IntegerGridSelection | null;
+  readonly getSelection: () => GridBoundarySelection | null;
 }
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 4;
+const MIN_SEARCH_RECT_SIZE = 8;
 const HANDLE_TARGET_CSS_SIZE = 44;
 const HANDLE_VISUAL_CSS_SIZE = 12;
 
 const HANDLE_LABELS: Record<HandleType, string> = {
-  move: '移动整个网格选区',
-  n: '调整网格上边缘',
-  e: '调整网格右边缘',
-  s: '调整网格下边缘',
-  w: '调整网格左边缘',
-  nw: '调整网格左上角',
-  ne: '调整网格右上角',
-  se: '调整网格右下角',
-  sw: '调整网格左下角',
+  move: '移动搜索区域',
+  n: '调整搜索区域上边缘',
+  e: '调整搜索区域右边缘',
+  s: '调整搜索区域下边缘',
+  w: '调整搜索区域左边缘',
+  nw: '调整搜索区域左上角',
+  ne: '调整搜索区域右上角',
+  se: '调整搜索区域右下角',
+  sw: '调整搜索区域左下角',
 };
 
 export function mountGridEditor(
@@ -92,14 +105,16 @@ export function mountGridEditor(
 ): GridEditorController {
   const elements = getElements(root);
   let currentImage: GridEditorImage | null = null;
-  let selection: IntegerGridSelection | null = null;
-  let detectedSeed: IntegerGridSelection | null = null;
+  let selection: GridBoundarySelection | null = null;
+  let searchRect: NaturalImageRect | null = null;
+  let initialSearchRect: NaturalImageRect | null = null;
   let activePointer: ActivePointer | null = null;
   let resultCanvas: HTMLCanvasElement | null = null;
   let view: EditorView = 'original';
   let zoomMode: ZoomMode = 'fit';
   let zoomScale = 1;
   let detectionVersion = 0;
+  let detecting = false;
   let pendingResizeFrame: number | null = null;
 
   const resizeObserver =
@@ -156,11 +171,12 @@ export function mountGridEditor(
   elements.overlay.addEventListener('keydown', handleOverlayKeyDown);
 
   function setImage(image: GridEditorImage): void {
-    detectionVersion += 1;
+    cancelDetection();
     activePointer = null;
     currentImage = image;
     selection = null;
-    detectedSeed = null;
+    initialSearchRect = createFullImageSearchRect(image.naturalImage);
+    searchRect = initialSearchRect;
     zoomMode = 'fit';
     view = 'original';
     clearResult();
@@ -168,15 +184,18 @@ export function mountGridEditor(
     elements.image.alt = `${image.fileName} 的原图`;
     elements.overlay.setAttribute(
       'viewBox',
-      `0 0 ${String(image.naturalImage.width)} ${String(image.naturalImage.height)}`,
+      `0 0 ${String(image.naturalImage.width)} ${String(
+        image.naturalImage.height,
+      )}`,
     );
     elements.overlay.hidden = false;
     elements.overlay.tabIndex = 0;
-    elements.overlay.setAttribute('aria-label', '34 × 27 网格选区编辑区');
+    elements.overlay.setAttribute('aria-label', '网格搜索区域编辑区');
     updateFitScale();
     renderStage();
     lifecycle.onSelectionChange?.(null);
-    void runDetection();
+    void runDetection(initialSearchRect);
+
     window.requestAnimationFrame(() => {
       if (zoomMode === 'fit') {
         updateFitScale();
@@ -186,41 +205,20 @@ export function mountGridEditor(
   }
 
   function redetect(): void {
-    if (!currentImage) {
-      return;
-    }
+    const rectangle = getVisibleRect();
 
-    selection = null;
-    detectedSeed = null;
-    lifecycle.onSelectionChange?.(null);
-    renderOverlay();
-    void runDetection();
+    if (rectangle) {
+      void runDetection(rectangle);
+    }
   }
 
   function resetSelection(): void {
-    if (!currentImage) {
-      return;
-    }
-
-    selection = detectedSeed
-      ? createIntegerGridSelection(
-          detectedSeed.naturalImage,
-          detectedSeed.left,
-          detectedSeed.top,
-          detectedSeed.cellSize,
-        )
-      : null;
-    renderOverlay();
-    lifecycle.onSelectionChange?.(selection);
-
-    if (selection) {
-      setHint(formatSelectionHint(selection, '已恢复识别选区'));
-    } else {
-      setHint('请在图片上拖出网格区域。');
+    if (initialSearchRect) {
+      void runDetection(initialSearchRect);
     }
   }
 
-  async function runDetection(): Promise<void> {
+  async function runDetection(rectangle: NaturalImageRect): Promise<void> {
     const image = currentImage;
 
     if (!image) {
@@ -229,54 +227,73 @@ export function mountGridEditor(
 
     detectionVersion += 1;
     const currentVersion = detectionVersion;
-    setHint('正在识别 34 × 27 网格…');
+    detecting = true;
+    selection = null;
+    searchRect = rectangle;
+    clearResult();
+    renderOverlay();
+    lifecycle.onSelectionChange?.(null);
+    lifecycle.onDetectionChange?.(true);
+    setHint('正在识别网格…');
 
     try {
       const outcome = await detectPixelanimGrid({
         file: image.file,
         naturalImage: image.naturalImage,
+        searchRect: rectangle,
       });
 
-      if (currentVersion !== detectionVersion || currentImage?.file !== image.file) {
+      if (
+        currentVersion !== detectionVersion ||
+        currentImage?.file !== image.file
+      ) {
         return;
       }
 
-      if (outcome.ok) {
-        const nextSelection = createIntegerSelectionFromRectangle(
-          image.naturalImage,
-          outcome.rectangle,
-        );
+      detecting = false;
+      lifecycle.onDetectionChange?.(false);
 
-        if (nextSelection) {
-          selection = nextSelection;
-          detectedSeed = nextSelection;
-          renderOverlay();
-          lifecycle.onSelectionChange?.(selection);
-          setHint(formatSelectionHint(selection, '已识别主网格'));
-          return;
-        }
+      if (outcome.ok) {
+        selection = outcome.selection;
+        searchRect =
+          createNaturalRect(
+            image.naturalImage,
+            selection.left,
+            selection.top,
+            selection.right,
+            selection.bottom,
+          ) ?? rectangle;
+        renderOverlay();
+        lifecycle.onSelectionChange?.(selection);
+        setHint(formatSelectionStatus(selection));
+        return;
       }
 
-      enterManualDrawMode();
+      renderOverlay();
+      lifecycle.onSelectionChange?.(null);
+      setHint(outcome.message);
     } catch {
-      if (currentVersion === detectionVersion && currentImage?.file === image.file) {
-        enterManualDrawMode();
+      if (
+        currentVersion === detectionVersion &&
+        currentImage?.file === image.file
+      ) {
+        detecting = false;
+        lifecycle.onDetectionChange?.(false);
+        selection = null;
+        renderOverlay();
+        lifecycle.onSelectionChange?.(null);
+        setHint('未识别到完整网格，请调整搜索区域。');
       }
     }
   }
 
-  function enterManualDrawMode(): void {
-    selection = null;
-    detectedSeed = null;
-    renderOverlay();
-    lifecycle.onSelectionChange?.(null);
+  function cancelDetection(): void {
+    detectionVersion += 1;
 
-    if (currentImage && getMaximumCellSize(currentImage.naturalImage) < 1) {
-      setHint('图片尺寸不足，无法容纳 34 × 27 网格。');
-      return;
+    if (detecting) {
+      detecting = false;
+      lifecycle.onDetectionChange?.(false);
     }
-
-    setHint('未识别到网格，请直接在图片上拖出网格区域。');
   }
 
   function handlePointerDown(event: PointerEvent): void {
@@ -286,23 +303,24 @@ export function mountGridEditor(
 
     const target = event.target instanceof Element ? event.target : null;
     const handle = parseHandle(target?.getAttribute('data-grid-handle'));
+    const visibleRect = getVisibleRect();
 
-    if (!selection && !handle) {
-      activePointer = {
-        pointerId: event.pointerId,
-        kind: 'draw',
-        handle: null,
-        startPoint: toNaturalPoint(event),
-        startSelection: null,
-        moved: false,
-      };
-    } else if (selection && handle) {
+    if (handle && visibleRect) {
       activePointer = {
         pointerId: event.pointerId,
         kind: 'handle',
         handle,
         startPoint: toNaturalPoint(event),
-        startSelection: selection,
+        startRect: visibleRect,
+        moved: false,
+      };
+    } else if (!handle) {
+      activePointer = {
+        pointerId: event.pointerId,
+        kind: 'draw',
+        handle: null,
+        startPoint: toNaturalPoint(event),
+        startRect: null,
         moved: false,
       };
     } else {
@@ -314,7 +332,11 @@ export function mountGridEditor(
   }
 
   function handlePointerMove(event: PointerEvent): void {
-    if (!activePointer || activePointer.pointerId !== event.pointerId || !currentImage) {
+    if (
+      !activePointer ||
+      activePointer.pointerId !== event.pointerId ||
+      !currentImage
+    ) {
       return;
     }
 
@@ -327,37 +349,41 @@ export function mountGridEditor(
       return;
     }
 
-    activePointer.moved = true;
-
-    if (activePointer.kind === 'draw') {
-      selection = createDrawnSelection(
-        currentImage.naturalImage,
-        activePointer.startPoint,
-        point,
-      );
-    } else if (activePointer.handle && activePointer.startSelection) {
-      selection =
-        activePointer.handle === 'move'
-          ? translateIntegerGridSelection(
-              activePointer.startSelection,
-              point.x - activePointer.startPoint.x,
-              point.y - activePointer.startPoint.y,
-            )
-          : resizeSelectionFromPointer(
-              activePointer.startSelection,
+    const nextRect =
+      activePointer.kind === 'draw'
+        ? createNaturalRect(
+            currentImage.naturalImage,
+            activePointer.startPoint.x,
+            activePointer.startPoint.y,
+            point.x,
+            point.y,
+          )
+        : activePointer.handle && activePointer.startRect
+          ? updateSearchRectFromPointer(
+              currentImage.naturalImage,
+              activePointer.startRect,
               activePointer.handle,
               activePointer.startPoint,
               point,
-            );
+            )
+          : null;
+
+    if (!nextRect) {
+      return;
     }
 
+    if (!activePointer.moved) {
+      cancelDetection();
+      selection = null;
+      clearResult();
+      lifecycle.onSelectionChange?.(null);
+    }
+
+    activePointer.moved = true;
+    searchRect = nextRect;
+    selection = null;
     renderOverlay();
-    lifecycle.onSelectionChange?.(selection);
-
-    if (selection) {
-      setHint(formatSelectionHint(selection, '选区已调整'));
-    }
-
+    setHint('调整搜索区域后松开以重新识别。');
     event.preventDefault();
   }
 
@@ -373,44 +399,49 @@ export function mountGridEditor(
       elements.overlay.releasePointerCapture(event.pointerId);
     }
 
-    if (!moved && !selection) {
-      setHint('请拖动以绘制网格区域。');
-    } else if (selection) {
-      announce('网格选区已更新。');
+    if (moved && searchRect) {
+      void runDetection(searchRect);
+    } else if (!selection) {
+      setHint('拖动搜索区域或边缘后重新识别。');
     }
   }
 
   function handleOverlayKeyDown(event: KeyboardEvent): void {
+    if (!currentImage || !event.key.startsWith('Arrow')) {
+      return;
+    }
+
     const target = event.target instanceof Element ? event.target : null;
     const handle = parseHandle(target?.getAttribute('data-grid-handle'));
+    const rectangle = getVisibleRect();
 
-    if (!selection || !handle || !event.key.startsWith('Arrow')) {
+    if (!handle || !rectangle) {
       return;
     }
 
     const amount = event.shiftKey ? 10 : 1;
+    const delta = getMoveKeyDelta(event.key, amount);
+    const nextRect =
+      handle === 'move'
+        ? translateNaturalRect(
+            currentImage.naturalImage,
+            rectangle,
+            delta.x,
+            delta.y,
+          )
+        : resizeNaturalRectWithDelta(
+            currentImage.naturalImage,
+            rectangle,
+            handle,
+            delta,
+          );
 
-    if (handle === 'move') {
-      const delta = getMoveKeyDelta(event.key, amount);
-      selection = translateIntegerGridSelection(selection, delta.x, delta.y);
-    } else {
-      const direction = getResizeKeyDirection(handle, event.key);
-
-      if (direction === 0) {
-        return;
-      }
-
-      selection = placeResizedSelection(
-        selection,
-        handle,
-        selection.cellSize + direction * amount,
-      );
-    }
-
+    searchRect = nextRect;
+    selection = null;
+    clearResult();
+    lifecycle.onSelectionChange?.(null);
     renderOverlay();
-    lifecycle.onSelectionChange?.(selection);
-    setHint(formatSelectionHint(selection, '选区已调整'));
-    announce('网格选区已更新。');
+    void runDetection(nextRect);
     event.preventDefault();
   }
 
@@ -448,7 +479,11 @@ export function mountGridEditor(
   function setView(nextView: EditorView): void {
     view = nextView;
     renderView();
-    announce(nextView === 'original' ? '已返回原图调整。' : '正在查看镜像结果。');
+    announce(
+      nextView === 'original'
+        ? '已返回原图调整。'
+        : '正在查看镜像结果。',
+    );
   }
 
   function setManualZoom(scale: number): void {
@@ -491,7 +526,9 @@ export function mountGridEditor(
       currentImage.naturalImage.height * zoomScale,
     )}px`;
     elements.zoomStatus.textContent =
-      zoomMode === 'fit' ? `适合 · ${formatPercent(zoomScale)}` : formatPercent(zoomScale);
+      zoomMode === 'fit'
+        ? `适合 · ${formatPercent(zoomScale)}`
+        : formatPercent(zoomScale);
     renderOverlay();
     renderView();
   }
@@ -515,74 +552,135 @@ export function mountGridEditor(
   function renderOverlay(): void {
     elements.overlay.replaceChildren();
 
-    if (!currentImage || !selection) {
+    if (!currentImage) {
+      return;
+    }
+
+    const rectangle = getVisibleRect();
+
+    if (!rectangle) {
       return;
     }
 
     const targetSize = HANDLE_TARGET_CSS_SIZE / zoomScale;
     const visualSize = HANDLE_VISUAL_CSS_SIZE / zoomScale;
-    const width = selection.right - selection.left;
-    const height = selection.bottom - selection.top;
-    const centerX = selection.left + width / 2;
-    const centerY = selection.top + height / 2;
+    const centerX = rectangle.x + rectangle.width / 2;
+    const centerY = rectangle.y + rectangle.height / 2;
 
     elements.overlay.append(
       createInteractiveRect(
-        selection.left,
-        selection.top,
-        width,
-        height,
+        rectangle.x,
+        rectangle.y,
+        rectangle.width,
+        rectangle.height,
         'move',
-        'grid-move-area',
+        selection ? 'grid-move-area' : 'grid-move-area grid-search-area',
       ),
     );
 
-    for (let index = 0; index < selection.verticalBoundaries.length; index += 1) {
-      const x = selection.verticalBoundaries[index];
+    if (selection) {
+      for (let index = 0; index < selection.xBoundaries.length; index += 1) {
+        const x = selection.xBoundaries[index];
 
-      if (x === undefined) {
-        continue;
+        if (x !== undefined) {
+          elements.overlay.append(
+            createLine(
+              x,
+              selection.top,
+              x,
+              selection.bottom,
+              index === 0 || index === selection.xBoundaries.length - 1,
+            ),
+          );
+        }
       }
 
-      elements.overlay.append(
-        createLine(
-          x,
-          selection.top,
-          x,
-          selection.bottom,
-          index === 0 || index === selection.verticalBoundaries.length - 1,
-        ),
-      );
-    }
+      for (let index = 0; index < selection.yBoundaries.length; index += 1) {
+        const y = selection.yBoundaries[index];
 
-    for (let index = 0; index < selection.horizontalBoundaries.length; index += 1) {
-      const y = selection.horizontalBoundaries[index];
-
-      if (y === undefined) {
-        continue;
+        if (y !== undefined) {
+          elements.overlay.append(
+            createLine(
+              selection.left,
+              y,
+              selection.right,
+              y,
+              index === 0 || index === selection.yBoundaries.length - 1,
+            ),
+          );
+        }
       }
-
+    } else {
       elements.overlay.append(
-        createLine(
-          selection.left,
-          y,
-          selection.right,
-          y,
-          index === 0 || index === selection.horizontalBoundaries.length - 1,
+        createOutlineRect(
+          rectangle.x,
+          rectangle.y,
+          rectangle.width,
+          rectangle.height,
         ),
       );
     }
 
     elements.overlay.append(
-      createEdgeHandle(centerX, selection.top, visualSize, targetSize, 'n'),
-      createEdgeHandle(selection.right, centerY, visualSize, targetSize, 'e'),
-      createEdgeHandle(centerX, selection.bottom, visualSize, targetSize, 's'),
-      createEdgeHandle(selection.left, centerY, visualSize, targetSize, 'w'),
-      createCornerHandle(selection.left, selection.top, visualSize, targetSize, 'nw'),
-      createCornerHandle(selection.right, selection.top, visualSize, targetSize, 'ne'),
-      createCornerHandle(selection.right, selection.bottom, visualSize, targetSize, 'se'),
-      createCornerHandle(selection.left, selection.bottom, visualSize, targetSize, 'sw'),
+      createEdgeHandle(centerX, rectangle.y, visualSize, targetSize, 'n'),
+      createEdgeHandle(
+        rectangle.right,
+        centerY,
+        visualSize,
+        targetSize,
+        'e',
+      ),
+      createEdgeHandle(
+        centerX,
+        rectangle.bottom,
+        visualSize,
+        targetSize,
+        's',
+      ),
+      createEdgeHandle(rectangle.x, centerY, visualSize, targetSize, 'w'),
+      createCornerHandle(
+        rectangle.x,
+        rectangle.y,
+        visualSize,
+        targetSize,
+        'nw',
+      ),
+      createCornerHandle(
+        rectangle.right,
+        rectangle.y,
+        visualSize,
+        targetSize,
+        'ne',
+      ),
+      createCornerHandle(
+        rectangle.right,
+        rectangle.bottom,
+        visualSize,
+        targetSize,
+        'se',
+      ),
+      createCornerHandle(
+        rectangle.x,
+        rectangle.bottom,
+        visualSize,
+        targetSize,
+        'sw',
+      ),
     );
+  }
+
+  function getVisibleRect(): NaturalImageRect | null {
+    if (selection && currentImage) {
+      return createNaturalRect(
+        currentImage.naturalImage,
+        selection.left,
+        selection.top,
+        selection.right,
+        selection.bottom,
+      );
+    }
+
+    return searchRect;
   }
 
   function toNaturalPoint(event: PointerEvent): NaturalPoint {
@@ -591,17 +689,19 @@ export function mountGridEditor(
     }
 
     const bounds = elements.stage.getBoundingClientRect();
-    const scaleX = currentImage.naturalImage.width / Math.max(bounds.width, 1);
-    const scaleY = currentImage.naturalImage.height / Math.max(bounds.height, 1);
+    const scaleX =
+      currentImage.naturalImage.width / Math.max(bounds.width, 1);
+    const scaleY =
+      currentImage.naturalImage.height / Math.max(bounds.height, 1);
 
     return {
       x: clamp(
-        (event.clientX - bounds.left) * scaleX,
+        Math.round((event.clientX - bounds.left) * scaleX),
         0,
         currentImage.naturalImage.width,
       ),
       y: clamp(
-        (event.clientY - bounds.top) * scaleY,
+        Math.round((event.clientY - bounds.top) * scaleY),
         0,
         currentImage.naturalImage.height,
       ),
@@ -632,124 +732,96 @@ export function mountGridEditor(
   };
 }
 
-function createDrawnSelection(
+function updateSearchRectFromPointer(
   naturalImage: NaturalImageSize,
-  start: NaturalPoint,
-  point: NaturalPoint,
-): IntegerGridSelection | null {
-  const cellSize = Math.round(
-    Math.max(Math.abs(point.x - start.x) / 34, Math.abs(point.y - start.y) / 27),
-  );
-
-  if (cellSize < 1) {
-    return null;
-  }
-
-  const width = 34 * cellSize;
-  const height = 27 * cellSize;
-  const left = point.x < start.x ? start.x - width : start.x;
-  const top = point.y < start.y ? start.y - height : start.y;
-
-  return createIntegerGridSelection(naturalImage, left, top, cellSize);
-}
-
-function resizeSelectionFromPointer(
-  selection: IntegerGridSelection,
-  handle: Exclude<HandleType, 'move'>,
+  rectangle: NaturalImageRect,
+  handle: HandleType,
   startPoint: NaturalPoint,
   point: NaturalPoint,
-): IntegerGridSelection {
-  const horizontalCell =
-    handle.includes('w')
-      ? (selection.right - point.x) / 34
-      : (point.x - selection.left) / 34;
-  const verticalCell =
-    handle.includes('n')
-      ? (selection.bottom - point.y) / 27
-      : (point.y - selection.top) / 27;
-  let desiredCell: number;
-
-  if (handle.length === 1) {
-    desiredCell = handle === 'e' || handle === 'w' ? horizontalCell : verticalCell;
-  } else {
-    desiredCell =
-      Math.abs(point.x - startPoint.x) >= Math.abs(point.y - startPoint.y)
-        ? horizontalCell
-        : verticalCell;
+): NaturalImageRect {
+  if (handle === 'move') {
+    return translateNaturalRect(
+      naturalImage,
+      rectangle,
+      point.x - startPoint.x,
+      point.y - startPoint.y,
+    );
   }
 
-  return placeResizedSelection(selection, handle, desiredCell);
-}
-
-function placeResizedSelection(
-  selection: IntegerGridSelection,
-  handle: Exclude<HandleType, 'move'>,
-  desiredCell: number,
-): IntegerGridSelection {
-  const maximumCell = getMaximumCellForHandle(selection, handle);
-  const cellSize = clamp(Math.round(desiredCell), 1, maximumCell);
-  const width = 34 * cellSize;
-  const height = 27 * cellSize;
-  const oldWidth = selection.right - selection.left;
-  const oldHeight = selection.bottom - selection.top;
-  let left = selection.left;
-  let top = selection.top;
+  let left = rectangle.x;
+  let top = rectangle.y;
+  let right = rectangle.right;
+  let bottom = rectangle.bottom;
 
   if (handle.includes('w')) {
-    left = selection.right - width;
-  } else if (handle === 'n' || handle === 's') {
-    left = selection.left + (oldWidth - width) / 2;
+    left = clamp(
+      point.x,
+      0,
+      rectangle.right - MIN_SEARCH_RECT_SIZE,
+    );
+  }
+
+  if (handle.includes('e')) {
+    right = clamp(
+      point.x,
+      rectangle.x + MIN_SEARCH_RECT_SIZE,
+      naturalImage.width,
+    );
   }
 
   if (handle.includes('n')) {
-    top = selection.bottom - height;
-  } else if (handle === 'e' || handle === 'w') {
-    top = selection.top + (oldHeight - height) / 2;
+    top = clamp(
+      point.y,
+      0,
+      rectangle.bottom - MIN_SEARCH_RECT_SIZE,
+    );
+  }
+
+  if (handle.includes('s')) {
+    bottom = clamp(
+      point.y,
+      rectangle.y + MIN_SEARCH_RECT_SIZE,
+      naturalImage.height,
+    );
   }
 
   return (
-    createIntegerGridSelection(
-      selection.naturalImage,
-      left,
-      top,
-      cellSize,
-    ) ?? selection
+    createNaturalRect(naturalImage, left, top, right, bottom) ?? rectangle
   );
 }
 
-function getMaximumCellForHandle(
-  selection: IntegerGridSelection,
+function resizeNaturalRectWithDelta(
+  naturalImage: NaturalImageSize,
+  rectangle: NaturalImageRect,
   handle: Exclude<HandleType, 'move'>,
-): number {
-  const image = selection.naturalImage;
-  const centerX = (selection.left + selection.right) / 2;
-  const centerY = (selection.top + selection.bottom) / 2;
-  let maxWidth: number;
-  let maxHeight: number;
+  delta: NaturalPoint,
+): NaturalImageRect {
+  const point = {
+    x: handle.includes('w')
+      ? rectangle.x + delta.x
+      : handle.includes('e')
+        ? rectangle.right + delta.x
+        : rectangle.x,
+    y: handle.includes('n')
+      ? rectangle.y + delta.y
+      : handle.includes('s')
+        ? rectangle.bottom + delta.y
+        : rectangle.y,
+  };
 
-  if (handle.includes('w')) {
-    maxWidth = selection.right;
-  } else if (handle.includes('e')) {
-    maxWidth = image.width - selection.left;
-  } else {
-    maxWidth = 2 * Math.min(centerX, image.width - centerX);
-  }
-
-  if (handle.includes('n')) {
-    maxHeight = selection.bottom;
-  } else if (handle.includes('s')) {
-    maxHeight = image.height - selection.top;
-  } else {
-    maxHeight = 2 * Math.min(centerY, image.height - centerY);
-  }
-
-  return Math.max(1, Math.floor(Math.min(maxWidth / 34, maxHeight / 27)));
+  return updateSearchRectFromPointer(
+    naturalImage,
+    rectangle,
+    handle,
+    { x: rectangle.x, y: rectangle.y },
+    point,
+  );
 }
 
 function getMoveKeyDelta(
   key: string,
   amount: number,
-): { readonly x: number; readonly y: number } {
+): NaturalPoint {
   switch (key) {
     case 'ArrowLeft':
       return { x: -amount, y: 0 };
@@ -762,29 +834,6 @@ function getMoveKeyDelta(
     default:
       return { x: 0, y: 0 };
   }
-}
-
-function getResizeKeyDirection(
-  handle: Exclude<HandleType, 'move'>,
-  key: string,
-): -1 | 0 | 1 {
-  if (key === 'ArrowRight') {
-    return handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0;
-  }
-
-  if (key === 'ArrowLeft') {
-    return handle.includes('w') ? 1 : handle.includes('e') ? -1 : 0;
-  }
-
-  if (key === 'ArrowDown') {
-    return handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
-  }
-
-  if (key === 'ArrowUp') {
-    return handle.includes('n') ? 1 : handle.includes('s') ? -1 : 0;
-  }
-
-  return 0;
 }
 
 function createLine(
@@ -800,8 +849,30 @@ function createLine(
   line.setAttribute('x2', String(x2));
   line.setAttribute('y2', String(y2));
   line.setAttribute('vector-effect', 'non-scaling-stroke');
-  line.setAttribute('class', outer ? 'grid-boundary grid-boundary-outer' : 'grid-boundary');
+  line.setAttribute(
+    'class',
+    outer
+      ? 'grid-boundary grid-boundary-outer'
+      : 'grid-boundary',
+  );
   return line;
+}
+
+function createOutlineRect(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): SVGRectElement {
+  const rectangle = document.createElementNS(SVG_NAMESPACE, 'rect');
+  rectangle.setAttribute('x', String(x));
+  rectangle.setAttribute('y', String(y));
+  rectangle.setAttribute('width', String(width));
+  rectangle.setAttribute('height', String(height));
+  rectangle.setAttribute('class', 'grid-search-outline');
+  rectangle.setAttribute('vector-effect', 'non-scaling-stroke');
+  rectangle.setAttribute('pointer-events', 'none');
+  return rectangle;
 }
 
 function createInteractiveRect(
@@ -871,7 +942,10 @@ function createEdgeHandle(
   visual.setAttribute('y', String(y - visualHeight / 2));
   visual.setAttribute('width', String(visualWidth));
   visual.setAttribute('height', String(visualHeight));
-  visual.setAttribute('rx', String(Math.min(visualWidth, visualHeight) / 2));
+  visual.setAttribute(
+    'rx',
+    String(Math.min(visualWidth, visualHeight) / 2),
+  );
   visual.setAttribute('class', 'grid-edge-visual');
   visual.setAttribute('pointer-events', 'none');
   group.append(target, visual);
@@ -907,29 +981,70 @@ function formatPercent(scale: number): string {
   return `${String(Math.round(scale * 100))}%`;
 }
 
-function formatSelectionHint(
-  selection: IntegerGridSelection,
-  prefix: string,
+function formatSelectionStatus(
+  selection: GridBoundarySelection,
 ): string {
-  return `${prefix}：34列×27行，单元格 ${String(selection.cellSize)}px。`;
+  return `识别到 ${String(selection.columns)} 列 × ${String(
+    selection.rows,
+  )} 行，单元 ${String(selection.cellSize)} px`;
 }
 
 function getElements(root: HTMLElement): GridEditorElements {
   return {
     frame: getRequiredElement(root, '[data-editor-frame]', HTMLElement),
     stage: getRequiredElement(root, '[data-editor-stage]', HTMLElement),
-    image: getRequiredElement(root, '[data-editor-image]', HTMLImageElement),
-    overlay: getRequiredElement(root, '[data-editor-overlay]', SVGSVGElement),
+    image: getRequiredElement(
+      root,
+      '[data-editor-image]',
+      HTMLImageElement,
+    ),
+    overlay: getRequiredElement(
+      root,
+      '[data-editor-overlay]',
+      SVGSVGElement,
+    ),
     hint: getRequiredElement(root, '[data-editor-hint]', HTMLElement),
     live: getRequiredElement(root, '[data-editor-live]', HTMLElement),
-    originalTab: getRequiredElement(root, '[data-view-original]', HTMLButtonElement),
-    resultTab: getRequiredElement(root, '[data-view-result]', HTMLButtonElement),
-    returnButton: getRequiredElement(root, '[data-return-adjust]', HTMLButtonElement),
-    zoomFitButton: getRequiredElement(root, '[data-zoom-fit]', HTMLButtonElement),
-    zoomOutButton: getRequiredElement(root, '[data-zoom-out]', HTMLButtonElement),
-    zoomActualButton: getRequiredElement(root, '[data-zoom-actual]', HTMLButtonElement),
-    zoomInButton: getRequiredElement(root, '[data-zoom-in]', HTMLButtonElement),
-    zoomStatus: getRequiredElement(root, '[data-zoom-status]', HTMLElement),
+    originalTab: getRequiredElement(
+      root,
+      '[data-view-original]',
+      HTMLButtonElement,
+    ),
+    resultTab: getRequiredElement(
+      root,
+      '[data-view-result]',
+      HTMLButtonElement,
+    ),
+    returnButton: getRequiredElement(
+      root,
+      '[data-return-adjust]',
+      HTMLButtonElement,
+    ),
+    zoomFitButton: getRequiredElement(
+      root,
+      '[data-zoom-fit]',
+      HTMLButtonElement,
+    ),
+    zoomOutButton: getRequiredElement(
+      root,
+      '[data-zoom-out]',
+      HTMLButtonElement,
+    ),
+    zoomActualButton: getRequiredElement(
+      root,
+      '[data-zoom-actual]',
+      HTMLButtonElement,
+    ),
+    zoomInButton: getRequiredElement(
+      root,
+      '[data-zoom-in]',
+      HTMLButtonElement,
+    ),
+    zoomStatus: getRequiredElement(
+      root,
+      '[data-zoom-status]',
+      HTMLElement,
+    ),
   };
 }
 

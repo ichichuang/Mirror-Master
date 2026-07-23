@@ -1,11 +1,11 @@
 import type {
-  IntegerGridSelection,
+  GridBoundarySelection,
   NaturalImageSize,
 } from '../grid-selection/types';
 
 export interface GridMirrorInput {
   readonly file: File;
-  readonly selection: IntegerGridSelection;
+  readonly selection: GridBoundarySelection;
 }
 
 export interface GridMirrorResult {
@@ -16,8 +16,8 @@ export interface GridMirrorResult {
     readonly top: number;
   };
   readonly cellSize: number;
-  readonly columns: 34;
-  readonly rows: 27;
+  readonly columns: number;
+  readonly rows: number;
   readonly outputCanvas: HTMLCanvasElement;
 }
 

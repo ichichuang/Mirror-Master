@@ -1,35 +1,23 @@
+import { loadOpenCV, type OpenCV } from '@opencvjs/web';
+
 import {
-  AXIS_CANDIDATE_LIMIT,
-  MAX_ANALYSIS_LONG_EDGE,
-  MAX_BOUNDARY_SEARCH_PIXELS,
-  MIN_ANALYSIS_CELL_SIZE,
-  PIXELANIM_GRID_COLUMNS,
-  PIXELANIM_GRID_RATIO,
-  PIXELANIM_GRID_ROWS,
-} from './constants';
-import {
-  clamp,
-  createBoundaryArray,
-  createNaturalRect,
-  isMonotonicInside,
-  scoreNearRatio,
-} from './geometry';
-import {
-  CONFIDENCE_LABELS,
-  type ConfidenceGrade,
-  type DetectionConfidence,
-  type DetectionMetrics,
-  type GridDetectionFailure,
-  type GridDetectionFailureReason,
-  type GridDetectionOutcome,
-  type GridDetectionSuccess,
-  type NaturalImageSize,
+  createGridBoundarySelection,
+  isValidGridBoundarySelection,
+} from '../grid-selection/geometry';
+import type {
+  NaturalImageRect,
+  NaturalImageSize,
+} from '../grid-selection/types';
+import type {
+  GridDetectionFailure,
+  GridDetectionFailureReason,
+  GridDetectionInput,
+  GridDetectionOutcome,
 } from './types';
 
-interface GridDetectionInput {
-  readonly file: File;
-  readonly naturalImage: NaturalImageSize;
-}
+type OpenCvApi = typeof OpenCV;
+type CvMat = ReturnType<OpenCvApi['matFromImageData']>;
+type Axis = 'x' | 'y';
 
 interface LoadedRaster {
   readonly source: CanvasImageSource;
@@ -38,842 +26,1222 @@ interface LoadedRaster {
   readonly close: () => void;
 }
 
-interface AnalysisImage {
-  readonly luminance: Float32Array;
+interface LineCluster {
+  readonly center: number;
+  readonly weight: number;
   readonly width: number;
-  readonly height: number;
-  readonly scale: number;
 }
 
-interface AxisCandidate {
+interface AxisEvidence {
+  readonly profile: Float32Array;
+  readonly clusters: readonly LineCluster[];
+}
+
+interface LineEvidence {
+  readonly x: AxisEvidence;
+  readonly y: AxisEvidence;
+}
+
+interface SpacingObservation {
+  readonly value: number;
+  readonly weight: number;
+}
+
+interface SharedSpacingCandidate {
+  readonly cellSize: number;
+  readonly rawX: number;
+  readonly rawY: number;
+  readonly evidenceWeight: number;
+}
+
+interface AxisFit {
   readonly start: number;
-  readonly end: number;
-  readonly span: number;
-  readonly step: number;
-  readonly lineStrength: number;
-  readonly baselineStrength: number;
-  readonly periodicity: number;
+  readonly lineCount: number;
+  readonly coverage: number;
   readonly score: number;
 }
 
-interface BoundaryAggregate {
-  readonly line: number;
-  readonly baseline: number;
-  readonly coverage: number;
-  readonly baselineCoverage: number;
+interface BoundaryModel {
+  readonly cellSize: number;
+  readonly xBoundaries: readonly number[];
+  readonly yBoundaries: readonly number[];
 }
 
-interface RectCandidate {
-  readonly vertical: AxisCandidate;
-  readonly horizontal: AxisCandidate;
-  readonly metrics: DetectionMetrics;
+interface CellStatistics {
+  readonly darkRatio: number;
+  readonly colorRatio: number;
 }
 
-interface RefinedRectangle {
-  readonly left: number;
-  readonly top: number;
-  readonly right: number;
-  readonly bottom: number;
-}
+const MIN_CELL_SIZE = 3;
+const MIN_BOUNDARY_COUNT = 4;
+const MIN_MATCH_COVERAGE = 0.8;
+const HARMONIC_SCORE_RETENTION = 0.9;
+const MAX_HARMONIC_DIVISOR = 6;
+const MAX_AXIS_SPACING_OBSERVATIONS = 64;
+const MAX_SHARED_SPACING_CANDIDATES = 72;
+const MAX_SPACING_DISAGREEMENT = 2;
+const LABEL_BAND_CELL_RATIO = 0.62;
 
-const HIGH_CONFIDENCE_MIN = 0.78;
-const MEDIUM_CONFIDENCE_MIN = 0.58;
-const MIN_ACCEPTED_BOUNDARY_STRENGTH = 0.24;
-const MIN_ACCEPTED_CONTRAST = 0.2;
-const CONTINUOUS_LINE_EVIDENCE_MIN = 0.026;
+let openCvPromise: Promise<OpenCvApi> | null = null;
 
 export async function detectPixelanimGrid(
   input: GridDetectionInput,
 ): Promise<GridDetectionOutcome> {
+  if (!isValidSearchRectangle(input.searchRect, input.naturalImage)) {
+    return failure(
+      'invalid-search-rectangle',
+      '搜索区域无效，请重新调整。',
+    );
+  }
+
   let raster: LoadedRaster;
 
   try {
     raster = await loadRasterFromFile(input.file);
   } catch {
-    return failure('decode-failed', '无法读取图片像素，网格检测已停止。', input.naturalImage);
+    return failure('decode-failed', '无法读取当前图片。');
   }
 
   try {
-    const naturalImage = {
-      width: raster.width,
-      height: raster.height,
-    };
-
     if (
-      naturalImage.width < PIXELANIM_GRID_COLUMNS * 6 ||
-      naturalImage.height < PIXELANIM_GRID_ROWS * 6
+      raster.width !== input.naturalImage.width ||
+      raster.height !== input.naturalImage.height
     ) {
-      return failure('image-too-small', '图片尺寸过小，无法可靠检测 34 × 27 网格。', naturalImage);
+      return failure(
+        'image-size-mismatch',
+        '当前图片已变化，请重新选择图片。',
+      );
     }
 
-    const analysis = createAnalysisImage(raster);
+    const imageData = readSearchPixels(raster, input.searchRect);
 
-    if (!analysis) {
+    if (!imageData) {
       return failure(
         'canvas-unavailable',
-        '当前浏览器无法创建本地 Canvas 分析环境。',
-        naturalImage,
+        '当前浏览器无法读取图片像素。',
       );
     }
 
-    const candidate = selectBestGridCandidate(analysis);
+    let cv: OpenCvApi;
 
-    if (!candidate) {
-      return failure('no-periodic-grid', '未找到足够稳定的 34 × 27 周期性网格结构。', naturalImage);
-    }
-
-    if (candidate.metrics.geometry < 0.62) {
+    try {
+      cv = await getOpenCv();
+    } catch {
       return failure(
-        'geometry-inconsistent',
-        '候选区域的比例或单元近似正方形约束不稳定。',
-        naturalImage,
-        candidate.metrics,
+        'opencv-unavailable',
+        '网格识别组件无法初始化。',
       );
     }
 
-    if (
-      candidate.metrics.boundaryStrength < MIN_ACCEPTED_BOUNDARY_STRENGTH ||
-      candidate.metrics.contrast < MIN_ACCEPTED_CONTRAST
-    ) {
+    const localModel = detectBoundaryModel(cv, imageData);
+
+    if (!localModel) {
       return failure(
-        'weak-boundary-evidence',
-        '候选网格线相对单元中心的边界证据不足。',
-        naturalImage,
-        candidate.metrics,
+        'no-grid-boundaries',
+        '未识别到完整网格，请调整搜索区域。',
       );
     }
 
-    const refined = refineOuterRectangle(raster, analysis, candidate);
-    const success = createSuccessResult(naturalImage, refined, candidate.metrics);
+    const naturalModel = offsetBoundaryModel(localModel, input.searchRect);
+    const trimmedModel = trimLabelBands(
+      naturalModel,
+      imageData,
+      input.searchRect,
+    );
+    const selection = createGridBoundarySelection({
+      naturalImage: input.naturalImage,
+      searchRect: input.searchRect,
+      cellSize: trimmedModel.cellSize,
+      xBoundaries: trimmedModel.xBoundaries,
+      yBoundaries: trimmedModel.yBoundaries,
+    });
 
-    if (success.confidence.grade === 'low') {
+    if (!selection || !isValidGridBoundarySelection(selection)) {
       return failure(
-        'low-confidence',
-        '检测置信度较低，暂不显示网格叠加层。',
-        naturalImage,
-        success.metrics,
-        success.confidence,
+        'no-grid-boundaries',
+        '未识别到完整网格，请调整搜索区域。',
       );
     }
 
-    return success;
+    return {
+      ok: true,
+      selection,
+    };
   } finally {
     raster.close();
   }
 }
 
-function selectBestGridCandidate(analysis: AnalysisImage): RectCandidate | null {
-  const verticalProfile = createAxisProfile(analysis, 'vertical');
-  const horizontalProfile = createAxisProfile(analysis, 'horizontal');
-  const verticalCandidates = findAxisCandidates(
-    verticalProfile,
-    analysis.width,
-    PIXELANIM_GRID_COLUMNS,
+function getOpenCv(): Promise<OpenCvApi> {
+  openCvPromise ??= loadOpenCV();
+  return openCvPromise;
+}
+
+function detectBoundaryModel(
+  cv: OpenCvApi,
+  imageData: ImageData,
+): BoundaryModel | null {
+  const rgba = cv.matFromImageData(imageData);
+  const gray = new cv.Mat();
+  const binary = new cv.Mat();
+
+  try {
+    cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+    cv.adaptiveThreshold(
+      gray,
+      binary,
+      255,
+      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+      cv.THRESH_BINARY_INV,
+      chooseAdaptiveBlockSize(imageData.width, imageData.height),
+      5,
+    );
+
+    const primaryEvidence = extractLineEvidence(cv, gray, binary, false);
+    const primaryModel = inferBoundaryModel(primaryEvidence);
+
+    if (primaryModel) {
+      return primaryModel;
+    }
+
+    const fallbackEvidence = extractLineEvidence(cv, gray, binary, true);
+    return inferBoundaryModel(fallbackEvidence);
+  } finally {
+    rgba.delete();
+    gray.delete();
+    binary.delete();
+  }
+}
+
+function extractLineEvidence(
+  cv: OpenCvApi,
+  gray: CvMat,
+  binary: CvMat,
+  includeHoughFallback: boolean,
+): LineEvidence {
+  const verticalMask = new cv.Mat();
+  const horizontalMask = new cv.Mat();
+  const verticalKernel = cv.getStructuringElement(
+    cv.MORPH_RECT,
+    new cv.Size(1, chooseMorphologyLength(binary.rows)),
   );
-  const horizontalCandidates = findAxisCandidates(
-    horizontalProfile,
-    analysis.height,
-    PIXELANIM_GRID_ROWS,
+  const horizontalKernel = cv.getStructuringElement(
+    cv.MORPH_RECT,
+    new cv.Size(chooseMorphologyLength(binary.cols), 1),
   );
 
-  let bestCandidate: RectCandidate | null = null;
+  try {
+    cv.morphologyEx(binary, verticalMask, cv.MORPH_OPEN, verticalKernel);
+    cv.morphologyEx(binary, horizontalMask, cv.MORPH_OPEN, horizontalKernel);
 
-  for (const vertical of verticalCandidates) {
-    for (const horizontal of horizontalCandidates) {
-      const geometry = scoreCandidateGeometry(vertical, horizontal);
+    if (includeHoughFallback) {
+      addHoughFallback(cv, gray, verticalMask, horizontalMask);
+    }
 
-      if (geometry < 0.45) {
+    const xProfile = projectMask(verticalMask, 'x');
+    const yProfile = projectMask(horizontalMask, 'y');
+
+    return {
+      x: {
+        profile: xProfile,
+        clusters: clusterLinePixels(xProfile),
+      },
+      y: {
+        profile: yProfile,
+        clusters: clusterLinePixels(yProfile),
+      },
+    };
+  } finally {
+    verticalMask.delete();
+    horizontalMask.delete();
+    verticalKernel.delete();
+    horizontalKernel.delete();
+  }
+}
+
+function addHoughFallback(
+  cv: OpenCvApi,
+  gray: CvMat,
+  verticalMask: CvMat,
+  horizontalMask: CvMat,
+): void {
+  const edges = new cv.Mat();
+  const lines = new cv.Mat();
+  const houghVertical = new cv.Mat(
+    gray.rows,
+    gray.cols,
+    cv.CV_8UC1,
+    cv.Scalar.all(0),
+  );
+  const houghHorizontal = new cv.Mat(
+    gray.rows,
+    gray.cols,
+    cv.CV_8UC1,
+    cv.Scalar.all(0),
+  );
+
+  try {
+    cv.Canny(gray, edges, 50, 150, 3, false);
+    cv.HoughLinesP(
+      edges,
+      lines,
+      1,
+      Math.PI / 180,
+      Math.max(16, Math.round(Math.min(gray.cols, gray.rows) * 0.025)),
+      Math.max(12, Math.round(Math.min(gray.cols, gray.rows) * 0.06)),
+      Math.max(4, Math.round(Math.min(gray.cols, gray.rows) * 0.025)),
+    );
+
+    const color = cv.Scalar.all(255);
+
+    for (let row = 0; row < lines.rows; row += 1) {
+      const offset = row * 4;
+      const x1 = lines.data32S[offset];
+      const y1 = lines.data32S[offset + 1];
+      const x2 = lines.data32S[offset + 2];
+      const y2 = lines.data32S[offset + 3];
+
+      if (
+        x1 === undefined ||
+        y1 === undefined ||
+        x2 === undefined ||
+        y2 === undefined
+      ) {
         continue;
       }
 
-      const verticalAggregate = scoreVerticalBoundariesInRect(analysis, vertical, horizontal);
-      const horizontalAggregate = scoreHorizontalBoundariesInRect(analysis, vertical, horizontal);
-      const boundaryLine = (verticalAggregate.line + horizontalAggregate.line) / 2;
-      const baseline = (verticalAggregate.baseline + horizontalAggregate.baseline) / 2;
-      const coverage = (verticalAggregate.coverage + horizontalAggregate.coverage) / 2;
-      const baselineCoverage =
-        (verticalAggregate.baselineCoverage + horizontalAggregate.baselineCoverage) / 2;
-      const rawContrast = Math.max(0, boundaryLine - baseline);
-      const boundaryStrength = clamp((boundaryLine - 0.012) / 0.1, 0, 1) * 0.55 + coverage * 0.45;
-      const contrast = clamp(
-        (rawContrast / (boundaryLine + baseline + 0.001)) * 0.72 +
-          Math.max(0, coverage - baselineCoverage) * 0.28,
-        0,
-        1,
-      );
-      const periodicity = clamp((vertical.periodicity + horizontal.periodicity) / 2, 0, 1);
-      const metrics = createMetrics(geometry, periodicity, boundaryStrength, contrast);
-      const rectCandidate: RectCandidate = {
-        vertical,
-        horizontal,
-        metrics,
-      };
+      const deltaX = Math.abs(x2 - x1);
+      const deltaY = Math.abs(y2 - y1);
 
-      if (!bestCandidate || rectCandidate.metrics.score > bestCandidate.metrics.score) {
-        bestCandidate = rectCandidate;
+      if (deltaX <= Math.max(2, deltaY * 0.025)) {
+        cv.line(
+          houghVertical,
+          new cv.Point(Math.round((x1 + x2) / 2), y1),
+          new cv.Point(Math.round((x1 + x2) / 2), y2),
+          color,
+          1,
+        );
+      } else if (deltaY <= Math.max(2, deltaX * 0.025)) {
+        cv.line(
+          houghHorizontal,
+          new cv.Point(x1, Math.round((y1 + y2) / 2)),
+          new cv.Point(x2, Math.round((y1 + y2) / 2)),
+          color,
+          1,
+        );
       }
     }
+
+    cv.bitwise_or(verticalMask, houghVertical, verticalMask);
+    cv.bitwise_or(horizontalMask, houghHorizontal, horizontalMask);
+  } finally {
+    edges.delete();
+    lines.delete();
+    houghVertical.delete();
+    houghHorizontal.delete();
   }
-
-  return bestCandidate;
 }
 
-function createSuccessResult(
-  naturalImage: NaturalImageSize,
-  refined: RefinedRectangle,
-  metrics: DetectionMetrics,
-): GridDetectionSuccess {
-  const rectangle = createNaturalRect(refined.left, refined.top, refined.right, refined.bottom);
-  const vertical = createBoundaryArray(rectangle.x, rectangle.right, PIXELANIM_GRID_COLUMNS);
-  const horizontal = createBoundaryArray(rectangle.y, rectangle.bottom, PIXELANIM_GRID_ROWS);
-  const cellSize = {
-    width: rectangle.width / PIXELANIM_GRID_COLUMNS,
-    height: rectangle.height / PIXELANIM_GRID_ROWS,
-  };
-
-  if (
-    !isMonotonicInside(vertical, 0, naturalImage.width) ||
-    !isMonotonicInside(horizontal, 0, naturalImage.height)
-  ) {
-    return {
-      ok: true,
-      columns: PIXELANIM_GRID_COLUMNS,
-      rows: PIXELANIM_GRID_ROWS,
-      naturalImage,
-      rectangle,
-      boundaries: {
-        vertical: createBoundaryArray(0, 0, PIXELANIM_GRID_COLUMNS),
-        horizontal: createBoundaryArray(0, 0, PIXELANIM_GRID_ROWS),
-      },
-      cellSize,
-      metrics: createMetrics(0, 0, 0, 0),
-      confidence: createConfidence(0),
-    };
-  }
-
-  return {
-    ok: true,
-    columns: PIXELANIM_GRID_COLUMNS,
-    rows: PIXELANIM_GRID_ROWS,
-    naturalImage,
-    rectangle,
-    boundaries: {
-      vertical,
-      horizontal,
-    },
-    cellSize,
-    metrics,
-    confidence: createConfidence(metrics.score),
-  };
-}
-
-function createMetrics(
-  geometry: number,
-  periodicity: number,
-  boundaryStrength: number,
-  contrast: number,
-): DetectionMetrics {
-  const boundedGeometry = clamp(geometry, 0, 1);
-  const boundedPeriodicity = clamp(periodicity, 0, 1);
-  const boundedBoundaryStrength = clamp(boundaryStrength, 0, 1);
-  const boundedContrast = clamp(contrast, 0, 1);
-
-  return {
-    geometry: boundedGeometry,
-    periodicity: boundedPeriodicity,
-    boundaryStrength: boundedBoundaryStrength,
-    contrast: boundedContrast,
-    score: clamp(
-      boundedGeometry * 0.25 +
-        boundedPeriodicity * 0.25 +
-        boundedBoundaryStrength * 0.3 +
-        boundedContrast * 0.2,
-      0,
-      1,
-    ),
-  };
-}
-
-function createConfidence(score: number): DetectionConfidence {
-  const grade: ConfidenceGrade =
-    score >= HIGH_CONFIDENCE_MIN ? 'high' : score >= MEDIUM_CONFIDENCE_MIN ? 'medium' : 'low';
-
-  return {
-    grade,
-    label: CONFIDENCE_LABELS[grade],
-    score,
-  };
-}
-
-function scoreCandidateGeometry(vertical: AxisCandidate, horizontal: AxisCandidate): number {
-  const cellRatio = vertical.step / horizontal.step;
-  const rectangleRatio = vertical.span / horizontal.span;
-  const squareScore = scoreNearRatio(cellRatio, 1, 0.2);
-  const ratioScore = scoreNearRatio(rectangleRatio, PIXELANIM_GRID_RATIO, 0.16);
-
-  return squareScore * 0.68 + ratioScore * 0.32;
-}
-
-function createAxisProfile(analysis: AnalysisImage, axis: 'vertical' | 'horizontal'): Float32Array {
-  const length = axis === 'vertical' ? analysis.width : analysis.height;
-  const crossLength = axis === 'vertical' ? analysis.height : analysis.width;
+function projectMask(mask: CvMat, axis: Axis): Float32Array {
+  const length = axis === 'x' ? mask.cols : mask.rows;
+  const crossLength = axis === 'x' ? mask.rows : mask.cols;
   const profile = new Float32Array(length);
-  const crossStride = Math.max(1, Math.floor(crossLength / 700));
 
-  for (let position = 1; position < length - 1; position += 1) {
-    let evidence = 0;
-    let samples = 0;
+  if (axis === 'x') {
+    for (let y = 0; y < mask.rows; y += 1) {
+      const rowOffset = y * mask.cols;
 
-    for (let cross = 1; cross < crossLength - 1; cross += crossStride) {
-      evidence +=
-        axis === 'vertical'
-          ? verticalEvidenceAt(analysis.luminance, analysis.width, analysis.height, position, cross)
-          : horizontalEvidenceAt(
-              analysis.luminance,
-              analysis.width,
-              analysis.height,
-              cross,
-              position,
-            );
-      samples += 1;
+      for (let x = 0; x < mask.cols; x += 1) {
+        if ((mask.data8U[rowOffset + x] ?? 0) > 0) {
+          profile[x] = (profile[x] ?? 0) + 1;
+        }
+      }
     }
+  } else {
+    for (let y = 0; y < mask.rows; y += 1) {
+      const rowOffset = y * mask.cols;
+      let count = 0;
 
-    profile[position] = samples > 0 ? evidence / samples : 0;
+      for (let x = 0; x < mask.cols; x += 1) {
+        if ((mask.data8U[rowOffset + x] ?? 0) > 0) {
+          count += 1;
+        }
+      }
+
+      profile[y] = count;
+    }
+  }
+
+  for (let index = 0; index < profile.length; index += 1) {
+    profile[index] = (profile[index] ?? 0) / Math.max(1, crossLength);
   }
 
   return profile;
 }
 
-function findAxisCandidates(
-  profile: Float32Array,
-  axisLength: number,
-  segments: number,
-): readonly AxisCandidate[] {
-  const minSpan = Math.ceil(segments * MIN_ANALYSIS_CELL_SIZE);
-  const candidates: AxisCandidate[] = [];
+function clusterLinePixels(profile: Float32Array): readonly LineCluster[] {
+  const peak = maximum(profile);
 
-  if (minSpan >= axisLength) {
-    return candidates;
+  if (peak <= 0) {
+    return [];
   }
 
-  for (let span = minSpan; span <= axisLength - 2; span += 1) {
-    const step = span / segments;
-    const windowRadius = Math.max(1, Math.round(step * 0.08));
+  const threshold = Math.max(
+    0.02,
+    peak * 0.12,
+    percentile(profile, 0.82) * 0.42,
+  );
+  const maximumClusterWidth = Math.max(
+    7,
+    Math.round(profile.length * 0.012),
+  );
+  const clusters: LineCluster[] = [];
+  let start = -1;
+  let lastEvidence = -1;
+  let weightedPosition = 0;
+  let weight = 0;
 
-    for (let start = 1; start <= axisLength - span - 1; start += 1) {
-      const axisCandidate = scoreAxisCandidate(profile, start, span, segments, windowRadius);
+  const flush = (): void => {
+    if (start < 0 || lastEvidence < start || weight <= 0) {
+      start = -1;
+      lastEvidence = -1;
+      weightedPosition = 0;
+      weight = 0;
+      return;
+    }
 
-      if (axisCandidate.score <= 0) {
-        continue;
+    const width = lastEvidence - start + 1;
+
+    if (width <= maximumClusterWidth) {
+      clusters.push({
+        center: Math.round(weightedPosition / weight),
+        weight,
+        width,
+      });
+    }
+
+    start = -1;
+    lastEvidence = -1;
+    weightedPosition = 0;
+    weight = 0;
+  };
+
+  for (let index = 0; index < profile.length; index += 1) {
+    const value = profile[index] ?? 0;
+
+    if (value >= threshold) {
+      if (start < 0) {
+        start = index;
+      } else if (lastEvidence >= 0 && index - lastEvidence > 2) {
+        flush();
+        start = index;
       }
 
-      offerAxisCandidate(candidates, axisCandidate);
+      lastEvidence = index;
+      weightedPosition += index * value;
+      weight += value;
+    } else if (start >= 0 && lastEvidence >= 0 && index - lastEvidence > 1) {
+      flush();
     }
   }
 
-  return dedupeAxisCandidates(candidates);
+  flush();
+  return mergeDuplicateClusters(clusters);
 }
 
-function scoreAxisCandidate(
-  profile: Float32Array,
-  start: number,
-  span: number,
-  segments: number,
-  windowRadius: number,
-): AxisCandidate {
-  const step = span / segments;
-  let lineTotal = 0;
-  let lineSquaredTotal = 0;
-  let baselineTotal = 0;
-
-  for (let index = 0; index <= segments; index += 1) {
-    const boundary = start + step * index;
-    const boundaryStrength = localProfileMax(profile, boundary, windowRadius);
-    lineTotal += boundaryStrength;
-    lineSquaredTotal += boundaryStrength * boundaryStrength;
-  }
-
-  for (let index = 0; index < segments; index += 1) {
-    const center = start + step * (index + 0.5);
-    baselineTotal += localProfileMax(profile, center, Math.max(1, Math.floor(windowRadius / 2)));
-  }
-
-  const boundaryCount = segments + 1;
-  const lineStrength = lineTotal / boundaryCount;
-  const baselineStrength = baselineTotal / segments;
-  const variance = Math.max(0, lineSquaredTotal / boundaryCount - lineStrength * lineStrength);
-  const relativeContrast = clamp(
-    (lineStrength - baselineStrength) / (lineStrength + baselineStrength + 0.001),
-    0,
-    1,
+function mergeDuplicateClusters(
+  clusters: readonly LineCluster[],
+): readonly LineCluster[] {
+  const ordered = [...clusters].sort(
+    (left, right) => left.center - right.center,
   );
-  const consistency = clamp(1 - Math.sqrt(variance) / (lineStrength + 0.001), 0, 1);
-  const score = lineStrength * 0.45 + relativeContrast * 0.4 + consistency * 0.15;
+  const merged: LineCluster[] = [];
 
-  return {
-    start,
-    end: start + span,
-    span,
-    step,
-    lineStrength,
-    baselineStrength,
-    periodicity: consistency * 0.35 + relativeContrast * 0.65,
-    score,
-  };
-}
+  for (const cluster of ordered) {
+    const previous = merged[merged.length - 1];
 
-function offerAxisCandidate(candidates: AxisCandidate[], candidate: AxisCandidate): void {
-  if (candidates.length < AXIS_CANDIDATE_LIMIT * 3) {
-    candidates.push(candidate);
-    return;
-  }
-
-  let lowestScore = Number.POSITIVE_INFINITY;
-  let lowestIndex = -1;
-
-  for (let index = 0; index < candidates.length; index += 1) {
-    const current = candidates[index];
-
-    if (current && current.score < lowestScore) {
-      lowestScore = current.score;
-      lowestIndex = index;
-    }
-  }
-
-  if (lowestIndex >= 0 && candidate.score > lowestScore) {
-    candidates[lowestIndex] = candidate;
-  }
-}
-
-function dedupeAxisCandidates(candidates: readonly AxisCandidate[]): readonly AxisCandidate[] {
-  const ordered = [...candidates].sort((left, right) => right.score - left.score);
-  const deduped: AxisCandidate[] = [];
-
-  for (const candidate of ordered) {
-    const overlapsExisting = deduped.some(
-      (existing) =>
-        Math.abs(existing.start - candidate.start) < 3 &&
-        Math.abs(existing.span - candidate.span) < 4,
-    );
-
-    if (!overlapsExisting) {
-      deduped.push(candidate);
+    if (!previous || cluster.center - previous.center > 2) {
+      merged.push(cluster);
+      continue;
     }
 
-    if (deduped.length >= AXIS_CANDIDATE_LIMIT) {
-      break;
-    }
-  }
-
-  return deduped;
-}
-
-function localProfileMax(profile: Float32Array, position: number, radius: number): number {
-  const center = Math.round(position);
-  const start = Math.max(0, center - radius);
-  const end = Math.min(profile.length - 1, center + radius);
-  let maxValue = 0;
-
-  for (let index = start; index <= end; index += 1) {
-    maxValue = Math.max(maxValue, profile[index] ?? 0);
-  }
-
-  return maxValue;
-}
-
-function scoreVerticalBoundariesInRect(
-  analysis: AnalysisImage,
-  vertical: AxisCandidate,
-  horizontal: AxisCandidate,
-): BoundaryAggregate {
-  return scoreBoundariesInRect(
-    analysis,
-    'vertical',
-    vertical.start,
-    vertical.step,
-    PIXELANIM_GRID_COLUMNS,
-    horizontal.start,
-    horizontal.end,
-  );
-}
-
-function scoreHorizontalBoundariesInRect(
-  analysis: AnalysisImage,
-  vertical: AxisCandidate,
-  horizontal: AxisCandidate,
-): BoundaryAggregate {
-  return scoreBoundariesInRect(
-    analysis,
-    'horizontal',
-    horizontal.start,
-    horizontal.step,
-    PIXELANIM_GRID_ROWS,
-    vertical.start,
-    vertical.end,
-  );
-}
-
-function scoreBoundariesInRect(
-  analysis: AnalysisImage,
-  axis: 'vertical' | 'horizontal',
-  start: number,
-  step: number,
-  segments: number,
-  crossStart: number,
-  crossEnd: number,
-): BoundaryAggregate {
-  const crossMin = Math.max(1, Math.round(crossStart));
-  const crossMax = Math.min(
-    (axis === 'vertical' ? analysis.height : analysis.width) - 2,
-    Math.round(crossEnd),
-  );
-  const crossStride = Math.max(1, Math.floor((crossMax - crossMin) / 520));
-  const windowRadius = Math.max(1, Math.round(step * 0.06));
-  let lineTotal = 0;
-  let lineSamples = 0;
-  let lineCoverageTotal = 0;
-  let baselineTotal = 0;
-  let baselineSamples = 0;
-  let baselineCoverageTotal = 0;
-
-  for (let index = 0; index <= segments; index += 1) {
-    const position = start + step * index;
-    const stats = aggregateLineEvidenceStats(
-      analysis,
-      axis,
-      position,
-      crossMin,
-      crossMax,
-      crossStride,
-      windowRadius,
-    );
-    lineTotal += stats.strength;
-    lineCoverageTotal += stats.coverage;
-    lineSamples += 1;
-  }
-
-  for (let index = 0; index < segments; index += 1) {
-    const position = start + step * (index + 0.5);
-    const stats = aggregateLineEvidenceStats(
-      analysis,
-      axis,
-      position,
-      crossMin,
-      crossMax,
-      crossStride,
-      Math.max(1, Math.floor(windowRadius / 2)),
-    );
-    baselineTotal += stats.strength;
-    baselineCoverageTotal += stats.coverage;
-    baselineSamples += 1;
-  }
-
-  return {
-    line: lineSamples > 0 ? lineTotal / lineSamples : 0,
-    baseline: baselineSamples > 0 ? baselineTotal / baselineSamples : 0,
-    coverage: lineSamples > 0 ? lineCoverageTotal / lineSamples : 0,
-    baselineCoverage: baselineSamples > 0 ? baselineCoverageTotal / baselineSamples : 0,
-  };
-}
-
-interface LineEvidenceStats {
-  readonly strength: number;
-  readonly coverage: number;
-}
-
-function aggregateLineEvidence(
-  analysis: AnalysisImage,
-  axis: 'vertical' | 'horizontal',
-  position: number,
-  crossMin: number,
-  crossMax: number,
-  crossStride: number,
-  windowRadius: number,
-): number {
-  return aggregateLineEvidenceStats(
-    analysis,
-    axis,
-    position,
-    crossMin,
-    crossMax,
-    crossStride,
-    windowRadius,
-  ).strength;
-}
-
-function aggregateLineEvidenceStats(
-  analysis: AnalysisImage,
-  axis: 'vertical' | 'horizontal',
-  position: number,
-  crossMin: number,
-  crossMax: number,
-  crossStride: number,
-  windowRadius: number,
-): LineEvidenceStats {
-  const center = Math.round(position);
-  let total = 0;
-  let samples = 0;
-  let coveredSamples = 0;
-
-  for (let cross = crossMin; cross <= crossMax; cross += crossStride) {
-    let best = 0;
-
-    for (let offset = -windowRadius; offset <= windowRadius; offset += 1) {
-      const current = center + offset;
-
-      if (axis === 'vertical') {
-        if (current <= 0 || current >= analysis.width - 1) {
-          continue;
-        }
-
-        best = Math.max(
-          best,
-          verticalEvidenceAt(analysis.luminance, analysis.width, analysis.height, current, cross),
-        );
-      } else {
-        if (current <= 0 || current >= analysis.height - 1) {
-          continue;
-        }
-
-        best = Math.max(
-          best,
-          horizontalEvidenceAt(analysis.luminance, analysis.width, analysis.height, cross, current),
-        );
-      }
-    }
-
-    total += best;
-    if (best >= CONTINUOUS_LINE_EVIDENCE_MIN) {
-      coveredSamples += 1;
-    }
-    samples += 1;
-  }
-
-  return {
-    strength: samples > 0 ? total / samples : 0,
-    coverage: samples > 0 ? coveredSamples / samples : 0,
-  };
-}
-
-function refineOuterRectangle(
-  raster: LoadedRaster,
-  analysis: AnalysisImage,
-  candidate: RectCandidate,
-): RefinedRectangle {
-  const inverseScale = 1 / analysis.scale;
-  const estimatedLeft = candidate.vertical.start * inverseScale;
-  const estimatedRight = candidate.vertical.end * inverseScale;
-  const estimatedTop = candidate.horizontal.start * inverseScale;
-  const estimatedBottom = candidate.horizontal.end * inverseScale;
-  const estimatedCell = Math.min(
-    (estimatedRight - estimatedLeft) / PIXELANIM_GRID_COLUMNS,
-    (estimatedBottom - estimatedTop) / PIXELANIM_GRID_ROWS,
-  );
-  const searchRadius = Math.round(clamp(estimatedCell * 0.24, 4, MAX_BOUNDARY_SEARCH_PIXELS));
-  const cropLeft = Math.max(0, Math.floor(estimatedLeft - searchRadius - 2));
-  const cropTop = Math.max(0, Math.floor(estimatedTop - searchRadius - 2));
-  const cropRight = Math.min(raster.width, Math.ceil(estimatedRight + searchRadius + 2));
-  const cropBottom = Math.min(raster.height, Math.ceil(estimatedBottom + searchRadius + 2));
-  const cropWidth = Math.max(1, cropRight - cropLeft);
-  const cropHeight = Math.max(1, cropBottom - cropTop);
-  const canvas = document.createElement('canvas');
-  canvas.width = raster.width;
-  canvas.height = raster.height;
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-
-  if (!context) {
-    return {
-      left: estimatedLeft,
-      top: estimatedTop,
-      right: estimatedRight,
-      bottom: estimatedBottom,
+    const totalWeight = previous.weight + cluster.weight;
+    merged[merged.length - 1] = {
+      center: Math.round(
+        (previous.center * previous.weight +
+          cluster.center * cluster.weight) /
+          totalWeight,
+      ),
+      weight: totalWeight,
+      width: Math.max(previous.width, cluster.width),
     };
   }
 
-  context.drawImage(raster.source, 0, 0, raster.width, raster.height);
-  const crop = context.getImageData(cropLeft, cropTop, cropWidth, cropHeight);
-  const luminance = createLuminance(crop.data, cropWidth, cropHeight);
-  const cropAnalysis: AnalysisImage = {
-    luminance,
-    width: cropWidth,
-    height: cropHeight,
-    scale: 1,
-  };
-  const localLeft = estimatedLeft - cropLeft;
-  const localRight = estimatedRight - cropLeft;
-  const localTop = estimatedTop - cropTop;
-  const localBottom = estimatedBottom - cropTop;
-  const localYStart = clamp(Math.round(localTop), 1, cropHeight - 2);
-  const localYEnd = clamp(Math.round(localBottom), 1, cropHeight - 2);
-  const localXStart = clamp(Math.round(localLeft), 1, cropWidth - 2);
-  const localXEnd = clamp(Math.round(localRight), 1, cropWidth - 2);
-  const left =
-    cropLeft +
-    refineSingleBoundary(cropAnalysis, 'vertical', localLeft, localYStart, localYEnd, searchRadius);
-  const right =
-    cropLeft +
-    refineSingleBoundary(
-      cropAnalysis,
-      'vertical',
-      localRight,
-      localYStart,
-      localYEnd,
-      searchRadius,
+  return merged;
+}
+
+function inferBoundaryModel(
+  evidence: LineEvidence,
+): BoundaryModel | null {
+  if (
+    evidence.x.clusters.length < MIN_BOUNDARY_COUNT ||
+    evidence.y.clusters.length < MIN_BOUNDARY_COUNT
+  ) {
+    return null;
+  }
+
+  const xSpacing = collectSpacingObservations(evidence.x.clusters);
+  const ySpacing = collectSpacingObservations(evidence.y.clusters);
+  const sharedCandidates = createSharedSpacingCandidates(xSpacing, ySpacing);
+  const evaluated: Array<{
+    readonly candidate: SharedSpacingCandidate;
+    readonly xFit: AxisFit;
+    readonly yFit: AxisFit;
+    readonly score: number;
+  }> = [];
+
+  for (const candidate of sharedCandidates) {
+    const xFit = evaluateAxisSpacing(
+      evidence.x,
+      candidate.cellSize,
     );
-  const top =
-    cropTop +
-    refineSingleBoundary(
-      cropAnalysis,
-      'horizontal',
-      localTop,
-      localXStart,
-      localXEnd,
-      searchRadius,
-    );
-  const bottom =
-    cropTop +
-    refineSingleBoundary(
-      cropAnalysis,
-      'horizontal',
-      localBottom,
-      localXStart,
-      localXEnd,
-      searchRadius,
+    const yFit = evaluateAxisSpacing(
+      evidence.y,
+      candidate.cellSize,
     );
 
+    if (
+      !xFit ||
+      !yFit ||
+      xFit.coverage < MIN_MATCH_COVERAGE ||
+      yFit.coverage < MIN_MATCH_COVERAGE
+    ) {
+      continue;
+    }
+
+    evaluated.push({
+      candidate,
+      xFit,
+      yFit,
+      score: (xFit.score + yFit.score) / 2,
+    });
+  }
+
+  const bestScore = evaluated.reduce(
+    (best, current) => Math.max(best, current.score),
+    0,
+  );
+  const selected = evaluated
+    .filter(
+      (current) =>
+        current.score >= bestScore * HARMONIC_SCORE_RETENTION &&
+        Math.abs(current.candidate.rawX - current.candidate.rawY) <=
+          MAX_SPACING_DISAGREEMENT,
+    )
+    .sort(
+      (left, right) =>
+        left.candidate.cellSize - right.candidate.cellSize ||
+        right.score - left.score,
+    )[0];
+
+  if (!selected) {
+    return null;
+  }
+
+  const xBoundaries = refineAxisBoundaries(
+    evidence.x.profile,
+    selected.xFit,
+    selected.candidate.cellSize,
+  );
+  const yBoundaries = refineAxisBoundaries(
+    evidence.y.profile,
+    selected.yFit,
+    selected.candidate.cellSize,
+  );
+
+  if (
+    xBoundaries.length < MIN_BOUNDARY_COUNT ||
+    yBoundaries.length < MIN_BOUNDARY_COUNT
+  ) {
+    return null;
+  }
+
   return {
-    left: clamp(left, 0, raster.width),
-    top: clamp(top, 0, raster.height),
-    right: clamp(right, 0, raster.width),
-    bottom: clamp(bottom, 0, raster.height),
+    cellSize: selected.candidate.cellSize,
+    xBoundaries,
+    yBoundaries,
   };
 }
 
-function refineSingleBoundary(
-  analysis: AnalysisImage,
-  axis: 'vertical' | 'horizontal',
-  estimatedPosition: number,
-  crossStart: number,
-  crossEnd: number,
-  searchRadius: number,
-): number {
-  const center = Math.round(estimatedPosition);
-  const minPosition = Math.max(1, center - searchRadius);
-  const maxPosition = Math.min(
-    (axis === 'vertical' ? analysis.width : analysis.height) - 2,
-    center + searchRadius,
-  );
-  const crossMin = Math.max(1, Math.min(crossStart, crossEnd));
-  const crossMax = Math.min(
-    (axis === 'vertical' ? analysis.height : analysis.width) - 2,
-    Math.max(crossStart, crossEnd),
-  );
-  const crossStride = Math.max(1, Math.floor((crossMax - crossMin) / 800));
-  let bestPosition = clamp(center, minPosition, maxPosition);
-  let bestEvidence = Number.NEGATIVE_INFINITY;
+function collectSpacingObservations(
+  clusters: readonly LineCluster[],
+): readonly SpacingObservation[] {
+  const raw: SpacingObservation[] = [];
 
-  for (let position = minPosition; position <= maxPosition; position += 1) {
-    const evidence = aggregateLineEvidence(
-      analysis,
-      axis,
-      position,
-      crossMin,
-      crossMax,
-      crossStride,
-      1,
-    );
+  for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
+    const left = clusters[leftIndex];
 
-    if (evidence > bestEvidence) {
-      bestEvidence = evidence;
-      bestPosition = position;
+    if (!left) {
+      continue;
+    }
+
+    const lastIndex = Math.min(clusters.length, leftIndex + 10);
+
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < lastIndex;
+      rightIndex += 1
+    ) {
+      const right = clusters[rightIndex];
+
+      if (!right) {
+        continue;
+      }
+
+      const distance = right.center - left.center;
+
+      for (
+        let divisor = 1;
+        divisor <= MAX_HARMONIC_DIVISOR;
+        divisor += 1
+      ) {
+        const spacing = distance / divisor;
+
+        if (spacing < MIN_CELL_SIZE) {
+          break;
+        }
+
+        raw.push({
+          value: spacing,
+          weight:
+            Math.min(left.weight, right.weight) /
+            Math.max(1, divisor * 0.75),
+        });
+      }
     }
   }
 
-  return bestPosition;
+  return groupSpacingObservations(raw).slice(
+    0,
+    MAX_AXIS_SPACING_OBSERVATIONS,
+  );
 }
 
-function createAnalysisImage(raster: LoadedRaster): AnalysisImage | null {
-  const scale = Math.min(1, MAX_ANALYSIS_LONG_EDGE / Math.max(raster.width, raster.height));
-  const width = Math.max(1, Math.round(raster.width * scale));
-  const height = Math.max(1, Math.round(raster.height * scale));
+function groupSpacingObservations(
+  observations: readonly SpacingObservation[],
+): readonly SpacingObservation[] {
+  const ordered = [...observations].sort(
+    (left, right) => left.value - right.value,
+  );
+  const groups: Array<{
+    weightedValue: number;
+    weight: number;
+  }> = [];
+
+  for (const observation of ordered) {
+    const previous = groups[groups.length - 1];
+    const previousValue = previous
+      ? previous.weightedValue / previous.weight
+      : Number.NEGATIVE_INFINITY;
+
+    if (!previous || Math.abs(observation.value - previousValue) > 1.25) {
+      groups.push({
+        weightedValue: observation.value * observation.weight,
+        weight: observation.weight,
+      });
+      continue;
+    }
+
+    previous.weightedValue += observation.value * observation.weight;
+    previous.weight += observation.weight;
+  }
+
+  return groups
+    .map((group) => ({
+      value: group.weightedValue / group.weight,
+      weight: group.weight,
+    }))
+    .sort((left, right) => right.weight - left.weight);
+}
+
+function createSharedSpacingCandidates(
+  xObservations: readonly SpacingObservation[],
+  yObservations: readonly SpacingObservation[],
+): readonly SharedSpacingCandidate[] {
+  const byCellSize = new Map<number, SharedSpacingCandidate>();
+
+  for (const xObservation of xObservations) {
+    for (const yObservation of yObservations) {
+      if (
+        Math.abs(xObservation.value - yObservation.value) >
+        MAX_SPACING_DISAGREEMENT
+      ) {
+        continue;
+      }
+
+      for (
+        let divisor = 1;
+        divisor <= MAX_HARMONIC_DIVISOR;
+        divisor += 1
+      ) {
+        const rawX = xObservation.value / divisor;
+        const rawY = yObservation.value / divisor;
+        const cellSize = Math.round((rawX + rawY) / 2);
+
+        if (
+          cellSize < MIN_CELL_SIZE ||
+          Math.abs(rawX - rawY) > MAX_SPACING_DISAGREEMENT
+        ) {
+          continue;
+        }
+
+        const existing = byCellSize.get(cellSize);
+        const next: SharedSpacingCandidate = {
+          cellSize,
+          rawX,
+          rawY,
+          evidenceWeight:
+            Math.sqrt(xObservation.weight * yObservation.weight) /
+            divisor,
+        };
+
+        if (
+          !existing ||
+          next.evidenceWeight > existing.evidenceWeight ||
+          (next.evidenceWeight === existing.evidenceWeight &&
+            Math.abs(rawX - rawY) <
+              Math.abs(existing.rawX - existing.rawY))
+        ) {
+          byCellSize.set(cellSize, next);
+        }
+      }
+    }
+  }
+
+  return [...byCellSize.values()]
+    .sort(
+      (left, right) =>
+        right.evidenceWeight - left.evidenceWeight ||
+        left.cellSize - right.cellSize,
+    )
+    .slice(0, MAX_SHARED_SPACING_CANDIDATES);
+}
+
+function evaluateAxisSpacing(
+  evidence: AxisEvidence,
+  cellSize: number,
+): AxisFit | null {
+  const phases = new Set<number>();
+
+  for (const cluster of evidence.clusters) {
+    phases.add(positiveModulo(cluster.center, cellSize));
+  }
+
+  const peak = maximum(evidence.profile);
+  const matchThreshold = Math.max(0.018, peak * 0.1);
+  const matchRadius = Math.max(
+    1,
+    Math.min(4, Math.round(cellSize * 0.1)),
+  );
+  let best: AxisFit | null = null;
+
+  for (const phase of phases) {
+    const positions: number[] = [];
+
+    for (
+      let position = phase;
+      position <= evidence.profile.length;
+      position += cellSize
+    ) {
+      positions.push(position);
+    }
+
+    if (positions.length < MIN_BOUNDARY_COUNT) {
+      continue;
+    }
+
+    const evidencePrefix = [0];
+    const matchPrefix = [0];
+
+    for (const position of positions) {
+      const lineEvidence = sampleBoundaryEvidence(
+        evidence.profile,
+        position,
+        matchRadius,
+        peak,
+      );
+      evidencePrefix.push(
+        (evidencePrefix[evidencePrefix.length - 1] ?? 0) + lineEvidence,
+      );
+      matchPrefix.push(
+        (matchPrefix[matchPrefix.length - 1] ?? 0) +
+          (lineEvidence >= matchThreshold ? 1 : 0),
+      );
+    }
+
+    for (
+      let startIndex = 0;
+      startIndex <= positions.length - MIN_BOUNDARY_COUNT;
+      startIndex += 1
+    ) {
+      for (
+        let endIndex = startIndex + MIN_BOUNDARY_COUNT;
+        endIndex <= positions.length;
+        endIndex += 1
+      ) {
+        const lineCount = endIndex - startIndex;
+        const matches =
+          (matchPrefix[endIndex] ?? 0) -
+          (matchPrefix[startIndex] ?? 0);
+        const coverage = matches / lineCount;
+
+        if (coverage < MIN_MATCH_COVERAGE) {
+          continue;
+        }
+
+        const evidenceAverage =
+          ((evidencePrefix[endIndex] ?? 0) -
+            (evidencePrefix[startIndex] ?? 0)) /
+          lineCount;
+        const lengthEvidence = Math.min(
+          1,
+          (lineCount - 1) / 24,
+        );
+        const score =
+          evidenceAverage * 0.45 +
+          coverage * 0.35 +
+          lengthEvidence * 0.2;
+        const start = positions[startIndex];
+
+        if (
+          start !== undefined &&
+          (!best ||
+            score > best.score ||
+            (score === best.score && lineCount > best.lineCount))
+        ) {
+          best = {
+            start,
+            lineCount,
+            coverage,
+            score,
+          };
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+function refineAxisBoundaries(
+  profile: Float32Array,
+  fit: AxisFit,
+  cellSize: number,
+): readonly number[] {
+  const searchRadius = Math.max(
+    3,
+    Math.min(10, Math.round(cellSize * 0.25)),
+  );
+  let bestStart = fit.start;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  const peak = maximum(profile);
+
+  for (
+    let start = fit.start - searchRadius;
+    start <= fit.start + searchRadius;
+    start += 1
+  ) {
+    const end = start + (fit.lineCount - 1) * cellSize;
+
+    if (start < 0 || end > profile.length) {
+      continue;
+    }
+
+    let score = 0;
+
+    for (let index = 0; index < fit.lineCount; index += 1) {
+      score += sampleBoundaryEvidence(
+        profile,
+        start + index * cellSize,
+        1,
+        peak,
+      );
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = start;
+    }
+  }
+
+  return Object.freeze(
+    Array.from(
+      { length: fit.lineCount },
+      (_, index) => bestStart + index * cellSize,
+    ),
+  );
+}
+
+function offsetBoundaryModel(
+  model: BoundaryModel,
+  searchRect: NaturalImageRect,
+): BoundaryModel {
+  return {
+    cellSize: model.cellSize,
+    xBoundaries: Object.freeze(
+      model.xBoundaries.map((boundary) => boundary + searchRect.x),
+    ),
+    yBoundaries: Object.freeze(
+      model.yBoundaries.map((boundary) => boundary + searchRect.y),
+    ),
+  };
+}
+
+function trimLabelBands(
+  model: BoundaryModel,
+  imageData: ImageData,
+  searchRect: NaturalImageRect,
+): BoundaryModel {
+  let xBoundaries = [...model.xBoundaries];
+  let yBoundaries = [...model.yBoundaries];
+
+  if (xBoundaries.length >= 6 && yBoundaries.length >= 6) {
+    const topScore = scoreHorizontalLabelBand(
+      imageData,
+      searchRect,
+      xBoundaries,
+      yBoundaries[0],
+      yBoundaries[1],
+    );
+    const bottomScore = scoreHorizontalLabelBand(
+      imageData,
+      searchRect,
+      xBoundaries,
+      yBoundaries[yBoundaries.length - 2],
+      yBoundaries[yBoundaries.length - 1],
+    );
+    const trimTop = topScore >= LABEL_BAND_CELL_RATIO;
+    const trimBottom = bottomScore >= LABEL_BAND_CELL_RATIO;
+
+    yBoundaries = yBoundaries.slice(
+      trimTop ? 1 : 0,
+      trimBottom ? -1 : undefined,
+    );
+  }
+
+  if (xBoundaries.length >= 6 && yBoundaries.length >= 6) {
+    const leftScore = scoreVerticalLabelBand(
+      imageData,
+      searchRect,
+      xBoundaries[0],
+      xBoundaries[1],
+      yBoundaries,
+    );
+    const rightScore = scoreVerticalLabelBand(
+      imageData,
+      searchRect,
+      xBoundaries[xBoundaries.length - 2],
+      xBoundaries[xBoundaries.length - 1],
+      yBoundaries,
+    );
+    const trimLeft = leftScore >= LABEL_BAND_CELL_RATIO;
+    const trimRight = rightScore >= LABEL_BAND_CELL_RATIO;
+
+    xBoundaries = xBoundaries.slice(
+      trimLeft ? 1 : 0,
+      trimRight ? -1 : undefined,
+    );
+  }
+
+  return {
+    cellSize: model.cellSize,
+    xBoundaries: Object.freeze(xBoundaries),
+    yBoundaries: Object.freeze(yBoundaries),
+  };
+}
+
+function scoreHorizontalLabelBand(
+  imageData: ImageData,
+  searchRect: NaturalImageRect,
+  xBoundaries: readonly number[],
+  top: number | undefined,
+  bottom: number | undefined,
+): number {
+  if (top === undefined || bottom === undefined) {
+    return 0;
+  }
+
+  let labelCells = 0;
+  let cellCount = 0;
+
+  for (let index = 1; index < xBoundaries.length; index += 1) {
+    const left = xBoundaries[index - 1];
+    const right = xBoundaries[index];
+
+    if (left === undefined || right === undefined) {
+      continue;
+    }
+
+    if (
+      isLabelCell(
+        readCellStatistics(
+          imageData,
+          searchRect,
+          left,
+          top,
+          right,
+          bottom,
+        ),
+      )
+    ) {
+      labelCells += 1;
+    }
+
+    cellCount += 1;
+  }
+
+  return cellCount > 0 ? labelCells / cellCount : 0;
+}
+
+function scoreVerticalLabelBand(
+  imageData: ImageData,
+  searchRect: NaturalImageRect,
+  left: number | undefined,
+  right: number | undefined,
+  yBoundaries: readonly number[],
+): number {
+  if (left === undefined || right === undefined) {
+    return 0;
+  }
+
+  let labelCells = 0;
+  let cellCount = 0;
+
+  for (let index = 1; index < yBoundaries.length; index += 1) {
+    const top = yBoundaries[index - 1];
+    const bottom = yBoundaries[index];
+
+    if (top === undefined || bottom === undefined) {
+      continue;
+    }
+
+    if (
+      isLabelCell(
+        readCellStatistics(
+          imageData,
+          searchRect,
+          left,
+          top,
+          right,
+          bottom,
+        ),
+      )
+    ) {
+      labelCells += 1;
+    }
+
+    cellCount += 1;
+  }
+
+  return cellCount > 0 ? labelCells / cellCount : 0;
+}
+
+function readCellStatistics(
+  imageData: ImageData,
+  searchRect: NaturalImageRect,
+  naturalLeft: number,
+  naturalTop: number,
+  naturalRight: number,
+  naturalBottom: number,
+): CellStatistics {
+  const insetX = Math.max(1, Math.round((naturalRight - naturalLeft) * 0.18));
+  const insetY = Math.max(1, Math.round((naturalBottom - naturalTop) * 0.18));
+  const left = Math.max(
+    0,
+    Math.round(naturalLeft - searchRect.x + insetX),
+  );
+  const right = Math.min(
+    imageData.width,
+    Math.round(naturalRight - searchRect.x - insetX),
+  );
+  const top = Math.max(
+    0,
+    Math.round(naturalTop - searchRect.y + insetY),
+  );
+  const bottom = Math.min(
+    imageData.height,
+    Math.round(naturalBottom - searchRect.y - insetY),
+  );
+  const stride = Math.max(
+    1,
+    Math.floor(Math.min(right - left, bottom - top) / 18),
+  );
+  let samples = 0;
+  let darkPixels = 0;
+  let colorPixels = 0;
+
+  for (let y = top; y < bottom; y += stride) {
+    for (let x = left; x < right; x += stride) {
+      const offset = (y * imageData.width + x) * 4;
+      const red = imageData.data[offset] ?? 255;
+      const green = imageData.data[offset + 1] ?? 255;
+      const blue = imageData.data[offset + 2] ?? 255;
+      const maximumChannel = Math.max(red, green, blue);
+      const minimumChannel = Math.min(red, green, blue);
+      const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+
+      if (luminance < 190) {
+        darkPixels += 1;
+      }
+
+      if (maximumChannel - minimumChannel > 28 && luminance < 240) {
+        colorPixels += 1;
+      }
+
+      samples += 1;
+    }
+  }
+
+  return {
+    darkRatio: samples > 0 ? darkPixels / samples : 0,
+    colorRatio: samples > 0 ? colorPixels / samples : 0,
+  };
+}
+
+function isLabelCell(statistics: CellStatistics): boolean {
+  return (
+    statistics.darkRatio >= 0.025 &&
+    statistics.darkRatio <= 0.32 &&
+    statistics.colorRatio <= 0.1
+  );
+}
+
+function readSearchPixels(
+  raster: LoadedRaster,
+  searchRect: NaturalImageRect,
+): ImageData | null {
   const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = searchRect.width;
+  canvas.height = searchRect.height;
   const context = canvas.getContext('2d', { willReadFrequently: true });
 
   if (!context) {
     return null;
   }
 
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = 'high';
-  context.drawImage(raster.source, 0, 0, width, height);
+  context.imageSmoothingEnabled = false;
+  context.drawImage(
+    raster.source,
+    searchRect.x,
+    searchRect.y,
+    searchRect.width,
+    searchRect.height,
+    0,
+    0,
+    searchRect.width,
+    searchRect.height,
+  );
+  return context.getImageData(0, 0, searchRect.width, searchRect.height);
+}
 
-  const imageData = context.getImageData(0, 0, width, height);
+function chooseAdaptiveBlockSize(width: number, height: number): number {
+  const target = Math.round(Math.min(width, height) / 24);
+  const clamped = Math.min(81, Math.max(15, target));
+  return clamped % 2 === 0 ? clamped + 1 : clamped;
+}
 
+function chooseMorphologyLength(crossLength: number): number {
+  return Math.max(7, Math.round(crossLength * 0.045));
+}
+
+function isValidSearchRectangle(
+  rectangle: NaturalImageRect,
+  naturalImage: NaturalImageSize,
+): boolean {
+  return (
+    Number.isInteger(rectangle.x) &&
+    Number.isInteger(rectangle.y) &&
+    Number.isInteger(rectangle.width) &&
+    Number.isInteger(rectangle.height) &&
+    rectangle.width >= 8 &&
+    rectangle.height >= 8 &&
+    rectangle.right === rectangle.x + rectangle.width &&
+    rectangle.bottom === rectangle.y + rectangle.height &&
+    rectangle.x >= 0 &&
+    rectangle.y >= 0 &&
+    rectangle.right <= naturalImage.width &&
+    rectangle.bottom <= naturalImage.height
+  );
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((Math.round(value) % divisor) + divisor) % divisor;
+}
+
+function localProfileMax(
+  profile: Float32Array,
+  position: number,
+  radius: number,
+): number {
+  const center = Math.round(position);
+  const start = Math.max(0, center - radius);
+  const end = Math.min(profile.length - 1, center + radius);
+  let result = 0;
+
+  for (let index = start; index <= end; index += 1) {
+    result = Math.max(result, profile[index] ?? 0);
+  }
+
+  return result;
+}
+
+function sampleBoundaryEvidence(
+  profile: Float32Array,
+  position: number,
+  radius: number,
+  peak: number,
+): number {
+  const measured = localProfileMax(profile, position, radius);
+  const roundedPosition = Math.round(position);
+
+  if (
+    roundedPosition === 0 ||
+    roundedPosition === profile.length
+  ) {
+    return Math.max(measured, peak * 0.5);
+  }
+
+  return measured;
+}
+
+function maximum(values: Float32Array): number {
+  let result = 0;
+
+  for (const value of values) {
+    result = Math.max(result, value);
+  }
+
+  return result;
+}
+
+function percentile(values: Float32Array, ratio: number): number {
+  const ordered = Array.from(values).sort((left, right) => left - right);
+  const index = Math.min(
+    ordered.length - 1,
+    Math.max(0, Math.round((ordered.length - 1) * ratio)),
+  );
+  return ordered[index] ?? 0;
+}
+
+function failure(
+  reason: GridDetectionFailureReason,
+  message: string,
+): GridDetectionFailure {
   return {
-    luminance: createLuminance(imageData.data, width, height),
-    width,
-    height,
-    scale,
+    ok: false,
+    reason,
+    message,
   };
-}
-
-function createLuminance(data: Uint8ClampedArray, width: number, height: number): Float32Array {
-  const luminance = new Float32Array(width * height);
-  let outputIndex = 0;
-
-  for (let index = 0; index < data.length; index += 4) {
-    const red = data[index] ?? 0;
-    const green = data[index + 1] ?? 0;
-    const blue = data[index + 2] ?? 0;
-    luminance[outputIndex] = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
-    outputIndex += 1;
-  }
-
-  return luminance;
-}
-
-function verticalEvidenceAt(
-  luminance: Float32Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-): number {
-  if (x <= 0 || x >= width - 1 || y < 0 || y >= height) {
-    return 0;
-  }
-
-  const index = y * width + x;
-  const left = luminance[index - 1] ?? 0;
-  const center = luminance[index] ?? 0;
-  const right = luminance[index + 1] ?? 0;
-  const gradient = Math.abs(right - left);
-  const ridge = Math.abs(center - (left + right) / 2);
-
-  return gradient * 0.56 + ridge * 0.82;
-}
-
-function horizontalEvidenceAt(
-  luminance: Float32Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-): number {
-  if (x < 0 || x >= width || y <= 0 || y >= height - 1) {
-    return 0;
-  }
-
-  const index = y * width + x;
-  const top = luminance[index - width] ?? 0;
-  const center = luminance[index] ?? 0;
-  const bottom = luminance[index + width] ?? 0;
-  const gradient = Math.abs(bottom - top);
-  const ridge = Math.abs(center - (top + bottom) / 2);
-
-  return gradient * 0.56 + ridge * 0.82;
 }
 
 async function loadRasterFromFile(file: File): Promise<LoadedRaster> {
@@ -930,66 +1298,4 @@ function loadRasterWithImageElement(file: File): Promise<LoadedRaster> {
     image.decoding = 'async';
     image.src = objectUrl;
   });
-}
-
-function failure(
-  reason: GridDetectionFailureReason,
-  message: string,
-  naturalImage?: NaturalImageSize,
-  metrics?: DetectionMetrics,
-  confidence?: DetectionConfidence,
-): GridDetectionFailure {
-  const result: GridDetectionFailure = {
-    ok: false,
-    reason,
-    message,
-  };
-
-  if (naturalImage && metrics && confidence) {
-    return {
-      ...result,
-      naturalImage,
-      metrics,
-      confidence,
-    };
-  }
-
-  if (naturalImage && metrics) {
-    return {
-      ...result,
-      naturalImage,
-      metrics,
-    };
-  }
-
-  if (naturalImage) {
-    return {
-      ...result,
-      naturalImage,
-    };
-  }
-
-  if (metrics && confidence) {
-    return {
-      ...result,
-      metrics,
-      confidence,
-    };
-  }
-
-  if (metrics) {
-    return {
-      ...result,
-      metrics,
-    };
-  }
-
-  if (confidence) {
-    return {
-      ...result,
-      confidence,
-    };
-  }
-
-  return result;
 }

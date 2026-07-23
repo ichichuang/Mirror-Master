@@ -1,9 +1,8 @@
-import {
-  PIXELANIM_GRID_COLUMNS,
-  PIXELANIM_GRID_ROWS,
-} from '../grid-selection/constants';
-import { isValidIntegerGridSelection } from '../grid-selection/geometry';
-import type { IntegerGridSelection, NaturalImageSize } from '../grid-selection/types';
+import { isValidGridBoundarySelection } from '../grid-selection/geometry';
+import type {
+  GridBoundarySelection,
+  NaturalImageSize,
+} from '../grid-selection/types';
 import type {
   GridMirrorInput,
   GridMirrorProcessingFailure,
@@ -18,7 +17,10 @@ interface LoadedRaster {
 }
 
 export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirrorProcessingOutcome> {
-  if (!isValidIntegerGridSelection(input.selection)) {
+  if (
+    !isValidGridBoundarySelection(input.selection) ||
+    !hasIdenticalSquareCells(input.selection)
+  ) {
     return failure('invalid-boundaries', '当前网格选区无效，请返回原图重新调整。');
   }
 
@@ -63,8 +65,8 @@ export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirro
           top: input.selection.top,
         }),
         cellSize: input.selection.cellSize,
-        columns: PIXELANIM_GRID_COLUMNS,
-        rows: PIXELANIM_GRID_ROWS,
+        columns: input.selection.columns,
+        rows: input.selection.rows,
         outputCanvas,
       }),
     };
@@ -78,31 +80,92 @@ export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirro
 function moveGridCells(
   sourceCanvas: HTMLCanvasElement,
   outputContext: CanvasRenderingContext2D,
-  selection: IntegerGridSelection,
+  selection: GridBoundarySelection,
 ): void {
-  const { left, top, cellSize } = selection;
+  const {
+    columns,
+    rows,
+    xBoundaries,
+    yBoundaries,
+  } = selection;
 
-  for (let row = 0; row < PIXELANIM_GRID_ROWS; row += 1) {
-    const sourceY = top + row * cellSize;
+  for (let row = 0; row < rows; row += 1) {
+    const sourceTop = yBoundaries[row];
+    const sourceBottom = yBoundaries[row + 1];
 
-    for (let sourceColumn = 0; sourceColumn < PIXELANIM_GRID_COLUMNS; sourceColumn += 1) {
-      const targetColumn = 33 - sourceColumn;
-      const sourceX = left + sourceColumn * cellSize;
-      const targetX = left + targetColumn * cellSize;
+    if (sourceTop === undefined || sourceBottom === undefined) {
+      throw new Error('Missing row boundaries.');
+    }
+
+    for (let sourceColumn = 0; sourceColumn < columns; sourceColumn += 1) {
+      const targetColumn = columns - 1 - sourceColumn;
+      const sourceLeft = xBoundaries[sourceColumn];
+      const sourceRight = xBoundaries[sourceColumn + 1];
+      const targetLeft = xBoundaries[targetColumn];
+      const targetRight = xBoundaries[targetColumn + 1];
+
+      if (
+        sourceLeft === undefined ||
+        sourceRight === undefined ||
+        targetLeft === undefined ||
+        targetRight === undefined
+      ) {
+        throw new Error('Missing column boundaries.');
+      }
 
       outputContext.drawImage(
         sourceCanvas,
-        sourceX,
-        sourceY,
-        cellSize,
-        cellSize,
-        targetX,
-        sourceY,
-        cellSize,
-        cellSize,
+        sourceLeft,
+        sourceTop,
+        sourceRight - sourceLeft,
+        sourceBottom - sourceTop,
+        targetLeft,
+        sourceTop,
+        targetRight - targetLeft,
+        sourceBottom - sourceTop,
       );
     }
   }
+}
+
+function hasIdenticalSquareCells(
+  selection: GridBoundarySelection,
+): boolean {
+  const { cellSize, columns, rows, xBoundaries, yBoundaries } = selection;
+
+  for (let column = 0; column < columns; column += 1) {
+    const left = xBoundaries[column];
+    const right = xBoundaries[column + 1];
+    const targetColumn = columns - 1 - column;
+    const targetLeft = xBoundaries[targetColumn];
+    const targetRight = xBoundaries[targetColumn + 1];
+
+    if (
+      left === undefined ||
+      right === undefined ||
+      targetLeft === undefined ||
+      targetRight === undefined ||
+      right - left !== cellSize ||
+      targetRight - targetLeft !== cellSize
+    ) {
+      return false;
+    }
+  }
+
+  for (let row = 0; row < rows; row += 1) {
+    const top = yBoundaries[row];
+    const bottom = yBoundaries[row + 1];
+
+    if (
+      top === undefined ||
+      bottom === undefined ||
+      bottom - top !== cellSize
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function createNaturalCanvas(width: number, height: number): HTMLCanvasElement {

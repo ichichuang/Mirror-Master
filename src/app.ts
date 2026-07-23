@@ -47,7 +47,7 @@ export function renderApp(): string {
 
         <section class="upload-view" data-upload-view aria-labelledby="upload-title">
           <label class="drop-zone" for="image-file-input" data-drop-zone>
-            <span class="upload-mark" aria-hidden="true">34 × 27</span>
+            <span class="upload-mark" aria-hidden="true">自动识别</span>
             <span class="drop-zone-title" id="upload-title">上传图片开始</span>
             <span class="drop-zone-copy">选择或拖入 Pixelanim PNG、JPEG、WebP 图片</span>
           </label>
@@ -108,7 +108,7 @@ export function renderApp(): string {
               <svg
                 class="grid-overlay"
                 data-editor-overlay
-                aria-label="34 × 27 网格选区编辑区"
+                aria-label="网格搜索区域编辑区"
               ></svg>
             </div>
           </div>

@@ -8,7 +8,7 @@ import {
   type GridEditorController,
 } from './features/grid-editor/gridEditor';
 import { mirrorGridCells } from './features/grid-mirror/processor';
-import { isValidIntegerGridSelection } from './features/grid-selection/geometry';
+import { isValidGridBoundarySelection } from './features/grid-selection/geometry';
 import { mountLocalImageInput } from './features/local-image-input/localImageInput';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -38,6 +38,7 @@ let currentFile: File | null = null;
 let generationVersion = 0;
 let downloadVersion = 0;
 let generating = false;
+let detecting = false;
 let resultCanvas: HTMLCanvasElement | null = null;
 let downloadObjectUrl: string | null = null;
 let editor: GridEditorController;
@@ -49,6 +50,10 @@ editor = mountGridEditor(app, {
     clearGeneratedResult();
     updateActions();
   },
+  onDetectionChange(isDetecting) {
+    detecting = isDetecting;
+    updateActions();
+  },
 });
 
 mountLocalImageInput(app, {
@@ -56,6 +61,7 @@ mountLocalImageInput(app, {
     generationVersion += 1;
     currentFile = payload.file;
     generating = false;
+    detecting = false;
     clearGeneratedResult();
     editor.setImage({
       file: payload.file,
@@ -100,7 +106,13 @@ async function generateMirror(): Promise<void> {
   const file = currentFile;
   const selection = editor.getSelection();
 
-  if (!file || !selection || !isValidIntegerGridSelection(selection) || generating) {
+  if (
+    !file ||
+    !selection ||
+    !isValidGridBoundarySelection(selection) ||
+    generating ||
+    detecting
+  ) {
     return;
   }
 
@@ -136,7 +148,9 @@ async function generateMirror(): Promise<void> {
   resultCanvas = outcome.result.outputCanvas;
   editor.showResult(resultCanvas);
   editor.setMessage(
-    `镜像结果已生成：34列×27行，单元格 ${String(outcome.result.cellSize)}px。`,
+    `镜像已生成：${String(outcome.result.columns)} 列 × ${String(
+      outcome.result.rows,
+    )} 行，单元 ${String(outcome.result.cellSize)} px`,
   );
   prepareDownload(resultCanvas);
   updateActions();
@@ -147,10 +161,14 @@ function updateActions(): void {
   const hasResult = resultCanvas !== null;
   const selection = editor.getSelection();
   const canGenerate =
-    hasImage && selection !== null && isValidIntegerGridSelection(selection) && !generating;
+    hasImage &&
+    selection !== null &&
+    isValidGridBoundarySelection(selection) &&
+    !detecting &&
+    !generating;
 
-  redetectButton.disabled = !hasImage || generating;
-  resetSelectionButton.disabled = !hasImage || generating;
+  redetectButton.disabled = !hasImage || detecting || generating;
+  resetSelectionButton.disabled = !hasImage || detecting || generating;
 
   for (const button of generateButtons) {
     button.disabled = !canGenerate;
