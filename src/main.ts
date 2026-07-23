@@ -3,16 +3,12 @@ import './styles/base.css';
 import './styles/page.css';
 
 import { renderApp } from './app';
+import {
+  mountGridEditor,
+  type GridEditorController,
+} from './features/grid-editor/gridEditor';
+import { mirrorGridCells } from './features/grid-mirror/processor';
 import { mountLocalImageInput } from './features/local-image-input/localImageInput';
-import {
-  mountGridDetection,
-  type GridDetectionController,
-} from './features/grid-detection/gridDetectionPanel';
-import {
-  mountGridCorrectionEditor,
-  type GridCorrectionController,
-} from './features/grid-correction/gridCorrectionEditor';
-import { mountGridMirrorController } from './features/grid-mirror/gridMirrorController';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -22,68 +18,133 @@ if (!app) {
 
 app.innerHTML = renderApp();
 
-const imageInputRoot = app.querySelector<HTMLElement>('[data-local-image-input]');
-const gridDetectionRoot = app.querySelector<HTMLElement>('[data-grid-detection]');
-const gridMirrorRoot = app.querySelector<HTMLElement>('[data-grid-mirror]');
+const redetectButton = getRequiredElement(app, '[data-redetect]', HTMLButtonElement);
+const resetSelectionButton = getRequiredElement(
+  app,
+  '[data-reset-selection]',
+  HTMLButtonElement,
+);
+const generateButtons = [
+  getRequiredElement(app, '[data-generate]', HTMLButtonElement),
+  getRequiredElement(app, '[data-mobile-generate]', HTMLButtonElement),
+];
 
-if (!imageInputRoot) {
-  throw new Error('Mirror Master bootstrap failed: missing local image input root.');
-}
+let currentFile: File | null = null;
+let generationVersion = 0;
+let generating = false;
+let editor: GridEditorController;
 
-if (!gridDetectionRoot) {
-  throw new Error('Mirror Master bootstrap failed: missing grid detection root.');
-}
-
-if (!gridMirrorRoot) {
-  throw new Error('Mirror Master bootstrap failed: missing grid mirror root.');
-}
-
-let gridDetection: GridDetectionController | null = null;
-let gridCorrection: GridCorrectionController | null = null;
-
-const gridMirror = mountGridMirrorController(gridMirrorRoot, {
-  onReturnToPrecisionAdjustment() {
-    gridCorrection?.returnToPrecisionAdjustment();
+editor = mountGridEditor(app, {
+  onSelectionChange() {
+    generationVersion += 1;
+    generating = false;
+    editor.clearResult();
+    updateActions();
   },
 });
 
-gridCorrection = mountGridCorrectionEditor(imageInputRoot, {
-  onSelectionApplied(selection) {
-    gridDetection?.showAppliedSelection(selection);
-    gridMirror.invalidate('粗校正选择已改变，镜像预览已失效；请重新完成精修确认。');
-  },
-  onSelectionCleared() {
-    gridMirror.invalidate('粗校正选择已清除，镜像预览已失效。');
-  },
-  onPrecisionConfirmed(payload) {
-    gridMirror.setReady(payload);
-  },
-  onPrecisionInvalidated(message) {
-    gridMirror.invalidate(message);
-  },
-});
-
-gridDetection = mountGridDetection(gridDetectionRoot, gridCorrection);
-
-mountLocalImageInput(imageInputRoot, {
+mountLocalImageInput(app, {
   onImageReady(payload) {
-    gridMirror.setImage({
+    generationVersion += 1;
+    currentFile = payload.file;
+    generating = false;
+    editor.setImage({
       file: payload.file,
       fileName: payload.image.fileName,
       objectUrl: payload.image.objectUrl,
       naturalImage: payload.dimensions,
     });
-    gridCorrection.setImage(payload.file, payload.dimensions);
-    gridDetection.detect({
-      file: payload.file,
-      fileName: payload.image.fileName,
-      width: payload.dimensions.width,
-      height: payload.dimensions.height,
-    });
-  },
-  onImageCleared() {
-    gridCorrection.clearImage();
-    gridDetection.clear();
-    gridMirror.clearImage();
+    updateActions();
   },
 });
+
+redetectButton.addEventListener('click', () => {
+  generationVersion += 1;
+  editor.clearResult();
+  editor.redetect();
+  updateActions();
+});
+
+resetSelectionButton.addEventListener('click', () => {
+  generationVersion += 1;
+  editor.clearResult();
+  editor.resetSelection();
+  updateActions();
+});
+
+for (const button of generateButtons) {
+  button.addEventListener('click', () => {
+    void generateMirror();
+  });
+}
+
+async function generateMirror(): Promise<void> {
+  const file = currentFile;
+  const selection = editor.getSelection();
+
+  if (!file || !selection?.confirmedByInteraction || generating) {
+    return;
+  }
+
+  generationVersion += 1;
+  const currentVersion = generationVersion;
+  generating = true;
+  editor.setMessage('正在本地生成镜像…');
+  updateActions();
+
+  const outcome = await mirrorGridCells({
+    file,
+    selection,
+  });
+
+  if (currentVersion !== generationVersion || currentFile !== file) {
+    if (outcome.ok) {
+      outcome.result.outputCanvas.width = 0;
+      outcome.result.outputCanvas.height = 0;
+    }
+
+    return;
+  }
+
+  generating = false;
+
+  if (!outcome.ok) {
+    editor.setMessage(outcome.message);
+    updateActions();
+    return;
+  }
+
+  editor.showResult(outcome.result.outputCanvas);
+  editor.setMessage('镜像结果已生成。');
+  updateActions();
+}
+
+function updateActions(): void {
+  const hasImage = currentFile !== null;
+  const selection = editor.getSelection();
+  const canGenerate = hasImage && selection?.confirmedByInteraction === true && !generating;
+
+  redetectButton.disabled = !hasImage || generating;
+  resetSelectionButton.disabled = !hasImage || generating;
+
+  for (const button of generateButtons) {
+    button.disabled = !canGenerate;
+    button.textContent = generating ? '生成中…' : '生成镜像';
+  }
+}
+
+function getRequiredElement<ElementType extends HTMLElement>(
+  root: ParentNode,
+  selector: string,
+  elementType: { new (): ElementType },
+): ElementType {
+  const element = root.querySelector(selector);
+
+  if (!(element instanceof elementType)) {
+    throw new Error(`Missing expected element: ${selector}`);
+  }
+
+  return element;
+}
+
+updateActions();

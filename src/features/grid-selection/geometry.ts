@@ -1,16 +1,9 @@
 import {
-  GRID_CELL_SQUARE_TOLERANCE,
-  MIN_GRID_SELECTION_HEIGHT,
-  MIN_GRID_SELECTION_WIDTH,
   PIXELANIM_GRID_COLUMNS,
-  PIXELANIM_GRID_RATIO,
   PIXELANIM_GRID_ROWS,
 } from './constants';
 import type {
-  GridSelection,
-  GridSelectionSource,
-  GridSelectionValidation,
-  NaturalBoundaryArrays,
+  IntegerGridSelection,
   NaturalImageRect,
   NaturalImageSize,
 } from './types';
@@ -91,211 +84,102 @@ export function scoreNearRatio(value: number, target: number, tolerance: number)
   return clamp(1 - Math.abs(value / target - 1) / tolerance, 0, 1);
 }
 
-export function deriveGridBoundaries(rectangle: NaturalImageRect): NaturalBoundaryArrays {
-  return {
-    vertical: createBoundaryArray(rectangle.x, rectangle.right, PIXELANIM_GRID_COLUMNS),
-    horizontal: createBoundaryArray(rectangle.y, rectangle.bottom, PIXELANIM_GRID_ROWS),
-  };
+export function getMaximumCellSize(naturalImage: NaturalImageSize): number {
+  return Math.floor(
+    Math.min(
+      naturalImage.width / PIXELANIM_GRID_COLUMNS,
+      naturalImage.height / PIXELANIM_GRID_ROWS,
+    ),
+  );
 }
 
-export function validateGridSelectionRect(
-  rectangle: NaturalImageRect,
+export function createIntegerGridSelection(
   naturalImage: NaturalImageSize,
-): GridSelectionValidation {
-  const cellSize = {
-    width: rectangle.width / PIXELANIM_GRID_COLUMNS,
-    height: rectangle.height / PIXELANIM_GRID_ROWS,
-  };
-  const cellRatio =
-    cellSize.height > 0 ? cellSize.width / cellSize.height : Number.POSITIVE_INFINITY;
-  const mismatchRatio = Number.isFinite(cellRatio)
-    ? Math.abs(cellRatio - 1)
-    : Number.POSITIVE_INFINITY;
+  left: number,
+  top: number,
+  cellSize: number,
+  confirmedByInteraction: boolean,
+): IntegerGridSelection | null {
+  const maximumCellSize = getMaximumCellSize(naturalImage);
 
-  if (
-    rectangle.x < 0 ||
-    rectangle.y < 0 ||
-    rectangle.right > naturalImage.width ||
-    rectangle.bottom > naturalImage.height
-  ) {
-    return {
-      ok: false,
-      reason: 'outside-image',
-      cellSize,
-      mismatchRatio,
-      message: '区域超出图片边界。',
-    };
-  }
-
-  if (rectangle.width < MIN_GRID_SELECTION_WIDTH || rectangle.height < MIN_GRID_SELECTION_HEIGHT) {
-    return {
-      ok: false,
-      reason: 'too-small',
-      cellSize,
-      mismatchRatio,
-      message: `区域过小，至少需要 ${String(MIN_GRID_SELECTION_WIDTH)} × ${String(
-        MIN_GRID_SELECTION_HEIGHT,
-      )} 自然像素。`,
-    };
-  }
-
-  if (mismatchRatio > GRID_CELL_SQUARE_TOLERANCE) {
-    return {
-      ok: false,
-      reason: 'non-square-cells',
-      cellSize,
-      mismatchRatio,
-      message: `34 × 27 单元不接近正方形，偏差 ${formatPercent(
-        mismatchRatio,
-      )}，需不超过 ${formatPercent(GRID_CELL_SQUARE_TOLERANCE)}。`,
-    };
-  }
-
-  const boundaries = deriveGridBoundaries(rectangle);
-
-  if (
-    !isMonotonicInside(boundaries.vertical, 0, naturalImage.width) ||
-    !isMonotonicInside(boundaries.horizontal, 0, naturalImage.height)
-  ) {
-    return {
-      ok: false,
-      reason: 'invalid-boundaries',
-      cellSize,
-      mismatchRatio,
-      message: '边界数组无效，无法生成完整的 35 条垂直线和 28 条水平线。',
-    };
-  }
-
-  return {
-    ok: true,
-    cellSize,
-    mismatchRatio,
-    message: `有效：单元近似正方形，偏差 ${formatPercent(
-      mismatchRatio,
-    )}，容差 ${formatPercent(GRID_CELL_SQUARE_TOLERANCE)}。`,
-  };
-}
-
-export function createGridSelection(
-  source: GridSelectionSource,
-  naturalImage: NaturalImageSize,
-  rectangle: NaturalImageRect,
-): GridSelection | null {
-  const validation = validateGridSelectionRect(rectangle, naturalImage);
-
-  if (!validation.ok) {
+  if (maximumCellSize < 1) {
     return null;
   }
 
-  return {
-    source,
-    naturalImage,
-    rectangle,
-    boundaries: deriveGridBoundaries(rectangle),
-    cellSize: validation.cellSize,
-  };
+  const safeCellSize = clamp(Math.round(cellSize), 1, maximumCellSize);
+  const width = PIXELANIM_GRID_COLUMNS * safeCellSize;
+  const height = PIXELANIM_GRID_ROWS * safeCellSize;
+  const safeLeft = clamp(Math.round(left), 0, naturalImage.width - width);
+  const safeTop = clamp(Math.round(top), 0, naturalImage.height - height);
+  const right = safeLeft + width;
+  const bottom = safeTop + height;
+
+  return Object.freeze({
+    naturalImage: Object.freeze({
+      width: naturalImage.width,
+      height: naturalImage.height,
+    }),
+    left: safeLeft,
+    top: safeTop,
+    right,
+    bottom,
+    cellSize: safeCellSize,
+    columns: PIXELANIM_GRID_COLUMNS,
+    rows: PIXELANIM_GRID_ROWS,
+    verticalBoundaries: Object.freeze(
+      Array.from(
+        { length: PIXELANIM_GRID_COLUMNS + 1 },
+        (_, index) => safeLeft + index * safeCellSize,
+      ),
+    ),
+    horizontalBoundaries: Object.freeze(
+      Array.from(
+        { length: PIXELANIM_GRID_ROWS + 1 },
+        (_, index) => safeTop + index * safeCellSize,
+      ),
+    ),
+    confirmedByInteraction,
+  });
 }
 
-export function clampRectInsideImage(
-  rectangle: NaturalImageRect,
+export function createIntegerSelectionFromRectangle(
   naturalImage: NaturalImageSize,
-): NaturalImageRect {
-  const width = clamp(rectangle.width, MIN_GRID_SELECTION_WIDTH, naturalImage.width);
-  const height = clamp(rectangle.height, MIN_GRID_SELECTION_HEIGHT, naturalImage.height);
-  const centerX = clamp(
-    rectangle.x + rectangle.width / 2,
-    width / 2,
-    naturalImage.width - width / 2,
-  );
-  const centerY = clamp(
-    rectangle.y + rectangle.height / 2,
-    height / 2,
-    naturalImage.height - height / 2,
-  );
-
-  return createNaturalRect(
-    centerX - width / 2,
-    centerY - height / 2,
-    centerX + width / 2,
-    centerY + height / 2,
-  );
-}
-
-export function translateRectInsideImage(
   rectangle: NaturalImageRect,
-  deltaX: number,
-  deltaY: number,
-  naturalImage: NaturalImageSize,
-): NaturalImageRect {
-  const nextX = clamp(rectangle.x + deltaX, 0, naturalImage.width - rectangle.width);
-  const nextY = clamp(rectangle.y + deltaY, 0, naturalImage.height - rectangle.height);
-
-  return createNaturalRect(nextX, nextY, nextX + rectangle.width, nextY + rectangle.height);
-}
-
-export function correctRectToGridRatio(
-  rectangle: NaturalImageRect,
-  naturalImage: NaturalImageSize,
-): NaturalImageRect | null {
+  confirmedByInteraction: boolean,
+): IntegerGridSelection | null {
+  const cellSize = Math.round(
+    Math.min(
+      rectangle.width / PIXELANIM_GRID_COLUMNS,
+      rectangle.height / PIXELANIM_GRID_ROWS,
+    ),
+  );
+  const width = PIXELANIM_GRID_COLUMNS * cellSize;
+  const height = PIXELANIM_GRID_ROWS * cellSize;
   const centerX = rectangle.x + rectangle.width / 2;
   const centerY = rectangle.y + rectangle.height / 2;
-  const maxWidthAroundCenter = 2 * Math.min(centerX, naturalImage.width - centerX);
-  const maxHeightAroundCenter = 2 * Math.min(centerY, naturalImage.height - centerY);
 
-  const candidates = [
-    createExactRatioCandidate(rectangle.width, maxWidthAroundCenter, maxHeightAroundCenter),
-    createExactRatioCandidate(
-      rectangle.height * PIXELANIM_GRID_RATIO,
-      maxWidthAroundCenter,
-      maxHeightAroundCenter,
-    ),
-    createExactRatioCandidate(
-      Math.min(maxWidthAroundCenter, maxHeightAroundCenter * PIXELANIM_GRID_RATIO),
-      maxWidthAroundCenter,
-      maxHeightAroundCenter,
-    ),
-  ].filter(
-    (candidate): candidate is { readonly width: number; readonly height: number } =>
-      candidate !== null,
-  );
-
-  const candidate = candidates[0];
-
-  if (!candidate) {
-    return null;
-  }
-
-  return createNaturalRect(
-    centerX - candidate.width / 2,
-    centerY - candidate.height / 2,
-    centerX + candidate.width / 2,
-    centerY + candidate.height / 2,
+  return createIntegerGridSelection(
+    naturalImage,
+    centerX - width / 2,
+    centerY - height / 2,
+    cellSize,
+    confirmedByInteraction,
   );
 }
 
-function createExactRatioCandidate(
-  preferredWidth: number,
-  maxWidth: number,
-  maxHeight: number,
-): { readonly width: number; readonly height: number } | null {
-  const width = clamp(preferredWidth, MIN_GRID_SELECTION_WIDTH, maxWidth);
-  const height = width / PIXELANIM_GRID_RATIO;
-
-  if (
-    width < MIN_GRID_SELECTION_WIDTH ||
-    height < MIN_GRID_SELECTION_HEIGHT ||
-    width > maxWidth ||
-    height > maxHeight
-  ) {
-    return null;
-  }
-
-  return {
-    width,
-    height,
-  };
-}
-
-function formatPercent(value: number): string {
-  return `${Math.round(value * 100).toString()}%`;
+export function translateIntegerGridSelection(
+  selection: IntegerGridSelection,
+  deltaX: number,
+  deltaY: number,
+  confirmedByInteraction: boolean,
+): IntegerGridSelection {
+  return (
+    createIntegerGridSelection(
+      selection.naturalImage,
+      selection.left + deltaX,
+      selection.top + deltaY,
+      selection.cellSize,
+      confirmedByInteraction,
+    ) ?? selection
+  );
 }

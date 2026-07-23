@@ -22,32 +22,16 @@ export interface GridCellSize {
   readonly height: number;
 }
 
-export type GridSelectionSource = 'automatic' | 'manual';
-
-export interface GridSelection {
-  readonly source: GridSelectionSource;
+export interface IntegerGridSelection {
   readonly naturalImage: NaturalImageSize;
-  readonly rectangle: NaturalImageRect;
-  readonly boundaries: NaturalBoundaryArrays;
-  readonly cellSize: GridCellSize;
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly cellSize: number;
+  readonly columns: 34;
+  readonly rows: 27;
+  readonly verticalBoundaries: readonly number[];
+  readonly horizontalBoundaries: readonly number[];
+  readonly confirmedByInteraction: boolean;
 }
-
-export type GridSelectionValidationReason =
-  'outside-image' | 'too-small' | 'non-square-cells' | 'invalid-boundaries';
-
-interface GridSelectionValidationBase {
-  readonly cellSize: GridCellSize;
-  readonly mismatchRatio: number;
-  readonly message: string;
-}
-
-export interface ValidGridSelectionValidation extends GridSelectionValidationBase {
-  readonly ok: true;
-}
-
-export interface InvalidGridSelectionValidation extends GridSelectionValidationBase {
-  readonly ok: false;
-  readonly reason: GridSelectionValidationReason;
-}
-
-export type GridSelectionValidation = ValidGridSelectionValidation | InvalidGridSelectionValidation;

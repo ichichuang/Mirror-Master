@@ -1,24 +1,11 @@
-import type { PixelGridCalibration } from '../grid-precision/types';
-import type { NaturalImageSize } from '../grid-selection/types';
+import type {
+  IntegerGridSelection,
+  NaturalImageSize,
+} from '../grid-selection/types';
 
-export type GridMirrorProcessingState =
-  | 'waiting-for-confirmation'
-  | 'ready'
-  | 'processing'
-  | 'completed'
-  | 'failed'
-  | 'invalidated';
-
-export interface GridMirrorSourceImage {
+export interface GridMirrorInput {
   readonly file: File;
-  readonly fileName: string;
-  readonly objectUrl: string;
-  readonly naturalImage: NaturalImageSize;
-}
-
-export interface GridMirrorReadyInput {
-  readonly file: File;
-  readonly calibration: PixelGridCalibration;
+  readonly selection: IntegerGridSelection;
 }
 
 export interface GridMirrorResult {
@@ -35,7 +22,7 @@ export interface GridMirrorResult {
 }
 
 export type GridMirrorFailureReason =
-  | 'not-processing-ready'
+  | 'not-confirmed-by-interaction'
   | 'image-size-mismatch'
   | 'non-integer-geometry'
   | 'invalid-boundaries'

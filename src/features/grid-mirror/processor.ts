@@ -4,9 +4,15 @@ import {
   PIXELANIM_HORIZONTAL_BOUNDARY_COUNT,
   PIXELANIM_VERTICAL_BOUNDARY_COUNT,
 } from '../grid-selection/constants';
-import type { NaturalImageSize } from '../grid-selection/types';
-import type { GridMirrorProcessingFailure, GridMirrorProcessingOutcome } from './types';
-import type { PixelGridCalibration } from '../grid-precision/types';
+import type {
+  IntegerGridSelection,
+  NaturalImageSize,
+} from '../grid-selection/types';
+import type {
+  GridMirrorInput,
+  GridMirrorProcessingFailure,
+  GridMirrorProcessingOutcome,
+} from './types';
 
 interface LoadedRaster {
   readonly source: CanvasImageSource;
@@ -15,14 +21,11 @@ interface LoadedRaster {
   readonly close: () => void;
 }
 
-export async function mirrorGridCells(input: {
-  readonly file: File;
-  readonly calibration: PixelGridCalibration;
-}): Promise<GridMirrorProcessingOutcome> {
-  const calibrationValidation = validateCalibration(input.calibration);
+export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirrorProcessingOutcome> {
+  const selectionValidation = validateSelection(input.selection);
 
-  if (calibrationValidation) {
-    return calibrationValidation;
+  if (selectionValidation) {
+    return selectionValidation;
   }
 
   let raster: LoadedRaster;
@@ -35,10 +38,10 @@ export async function mirrorGridCells(input: {
 
   try {
     if (
-      raster.width !== input.calibration.naturalImage.width ||
-      raster.height !== input.calibration.naturalImage.height
+      raster.width !== input.selection.naturalImage.width ||
+      raster.height !== input.selection.naturalImage.height
     ) {
-      return failure('image-size-mismatch', '原始文件尺寸与已确认精确校准不一致，镜像预览已拒绝。');
+      return failure('image-size-mismatch', '当前图片已变化，请重新调整网格后再生成镜像。');
     }
 
     const sourceCanvas = createNaturalCanvas(raster.width, raster.height);
@@ -54,18 +57,18 @@ export async function mirrorGridCells(input: {
     outputContext.imageSmoothingEnabled = false;
     sourceContext.drawImage(raster.source, 0, 0);
     outputContext.putImageData(sourceContext.getImageData(0, 0, raster.width, raster.height), 0, 0);
-    moveGridCells(sourceCanvas, outputContext, input.calibration);
+    moveGridCells(sourceCanvas, outputContext, input.selection);
 
     return {
       ok: true,
       result: Object.freeze({
-        sourceDimensions: freezeSize(input.calibration.naturalImage),
-        resultDimensions: freezeSize(input.calibration.naturalImage),
+        sourceDimensions: freezeSize(input.selection.naturalImage),
+        resultDimensions: freezeSize(input.selection.naturalImage),
         gridOrigin: Object.freeze({
-          left: input.calibration.left,
-          top: input.calibration.top,
+          left: input.selection.left,
+          top: input.selection.top,
         }),
-        cellSize: input.calibration.cellSize,
+        cellSize: input.selection.cellSize,
         columns: PIXELANIM_GRID_COLUMNS,
         rows: PIXELANIM_GRID_ROWS,
         outputCanvas,
@@ -78,58 +81,68 @@ export async function mirrorGridCells(input: {
   }
 }
 
-function validateCalibration(calibration: PixelGridCalibration): GridMirrorProcessingFailure | null {
-  if (calibration.processingReady !== true) {
-    return failure('not-processing-ready', '只有显式确认且 processingReady: true 的精确校准才能生成镜像预览。');
+function validateSelection(selection: IntegerGridSelection): GridMirrorProcessingFailure | null {
+  if (!selection.confirmedByInteraction) {
+    return failure('not-confirmed-by-interaction', '请先在原图上移动或调整网格选区。');
   }
 
   if (
-    calibration.columns !== PIXELANIM_GRID_COLUMNS ||
-    calibration.rows !== PIXELANIM_GRID_ROWS ||
-    calibration.verticalBoundaries.length !== PIXELANIM_VERTICAL_BOUNDARY_COUNT ||
-    calibration.horizontalBoundaries.length !== PIXELANIM_HORIZONTAL_BOUNDARY_COUNT
+    selection.columns !== PIXELANIM_GRID_COLUMNS ||
+    selection.rows !== PIXELANIM_GRID_ROWS ||
+    selection.verticalBoundaries.length !== PIXELANIM_VERTICAL_BOUNDARY_COUNT ||
+    selection.horizontalBoundaries.length !== PIXELANIM_HORIZONTAL_BOUNDARY_COUNT
   ) {
-    return failure('invalid-boundaries', '精确校准必须固定为 34 × 27，并包含 35 条垂直边界和 28 条水平边界。');
+    return failure('invalid-boundaries', '当前网格选区无效，请返回原图重新调整。');
   }
 
   if (
     !allIntegers([
-      calibration.naturalImage.width,
-      calibration.naturalImage.height,
-      calibration.left,
-      calibration.top,
-      calibration.right,
-      calibration.bottom,
-      calibration.cellSize,
-      ...calibration.verticalBoundaries,
-      ...calibration.horizontalBoundaries,
+      selection.naturalImage.width,
+      selection.naturalImage.height,
+      selection.left,
+      selection.top,
+      selection.right,
+      selection.bottom,
+      selection.cellSize,
+      ...selection.verticalBoundaries,
+      ...selection.horizontalBoundaries,
     ])
   ) {
-    return failure('non-integer-geometry', '镜像预览只接受自然像素中的整数坐标、整数边界和整数单元尺寸。');
+    return failure('non-integer-geometry', '当前网格选区无效，请返回原图重新调整。');
   }
 
   if (
-    calibration.cellSize <= 0 ||
-    calibration.right !== calibration.left + PIXELANIM_GRID_COLUMNS * calibration.cellSize ||
-    calibration.bottom !== calibration.top + PIXELANIM_GRID_ROWS * calibration.cellSize
+    selection.cellSize <= 0 ||
+    selection.right !== selection.left + PIXELANIM_GRID_COLUMNS * selection.cellSize ||
+    selection.bottom !== selection.top + PIXELANIM_GRID_ROWS * selection.cellSize
   ) {
-    return failure('invalid-boundaries', '精确校准的右边界、下边界和单元尺寸无法推出完整 34 × 27 网格。');
+    return failure('invalid-boundaries', '当前网格选区无效，请返回原图重新调整。');
   }
 
   if (
-    calibration.left < 0 ||
-    calibration.top < 0 ||
-    calibration.right > calibration.naturalImage.width ||
-    calibration.bottom > calibration.naturalImage.height
+    selection.left < 0 ||
+    selection.top < 0 ||
+    selection.right > selection.naturalImage.width ||
+    selection.bottom > selection.naturalImage.height
   ) {
-    return failure('out-of-image', '已确认网格超出自然图片边界，镜像预览已拒绝。');
+    return failure('out-of-image', '当前网格选区超出图片，请返回原图重新调整。');
   }
 
   if (
-    !hasExactSpacing(calibration.verticalBoundaries, calibration.left, calibration.right, calibration.cellSize) ||
-    !hasExactSpacing(calibration.horizontalBoundaries, calibration.top, calibration.bottom, calibration.cellSize)
+    !hasExactSpacing(
+      selection.verticalBoundaries,
+      selection.left,
+      selection.right,
+      selection.cellSize,
+    ) ||
+    !hasExactSpacing(
+      selection.horizontalBoundaries,
+      selection.top,
+      selection.bottom,
+      selection.cellSize,
+    )
   ) {
-    return failure('unequal-spacing', '精确校准边界必须以单元尺寸严格等距排列。');
+    return failure('unequal-spacing', '当前网格选区无效，请返回原图重新调整。');
   }
 
   return null;
@@ -138,15 +151,15 @@ function validateCalibration(calibration: PixelGridCalibration): GridMirrorProce
 function moveGridCells(
   sourceCanvas: HTMLCanvasElement,
   outputContext: CanvasRenderingContext2D,
-  calibration: PixelGridCalibration,
+  selection: IntegerGridSelection,
 ): void {
-  const { left, top, cellSize } = calibration;
+  const { left, top, cellSize } = selection;
 
   for (let row = 0; row < PIXELANIM_GRID_ROWS; row += 1) {
     const sourceY = top + row * cellSize;
 
     for (let sourceColumn = 0; sourceColumn < PIXELANIM_GRID_COLUMNS; sourceColumn += 1) {
-      const targetColumn = PIXELANIM_GRID_COLUMNS - 1 - sourceColumn;
+      const targetColumn = 33 - sourceColumn;
       const sourceX = left + sourceColumn * cellSize;
       const targetX = left + targetColumn * cellSize;
 
