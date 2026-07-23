@@ -14,6 +14,7 @@ import type { GridSelection, NaturalImageRect, NaturalImageSize } from '../grid-
 import { PIXEL_GRID_PRECISION_STATE_LABELS } from '../grid-precision/constants';
 import {
   EMPTY_PRECISION_EVIDENCE,
+  canConfirmPixelGridCandidate,
   createPixelGridCalibration,
   createPixelGridCalibrationCandidate,
 } from '../grid-precision/geometry';
@@ -139,6 +140,13 @@ interface PrecisionUiState {
   readonly candidate: PixelGridCalibrationCandidate | null;
   readonly calibration: PixelGridCalibration | null;
   readonly message: string;
+}
+
+type PrecisionReadinessState = 'idle' | 'refining' | 'verified' | 'warning' | 'invalid' | 'ready';
+
+interface PrecisionReadinessDisplay {
+  readonly state: PrecisionReadinessState;
+  readonly text: string;
 }
 
 export function mountGridCorrectionEditor(
@@ -609,10 +617,10 @@ export function mountGridCorrectionEditor(
           status: 'candidate',
           candidate: outcome.candidate,
           calibration: null,
-          message: '已生成严格整数像素候选；请检查叠加层后手动确认。',
+          message: formatPrecisionCandidateMessage(outcome.candidate),
         };
         renderAll();
-        announce('已生成精确候选。确认前 processingReady 仍为 false。');
+        announce('几何有效，证据通过；确认前 processingReady 仍为 false。请检查叠加层后确认。');
         return;
       }
 
@@ -680,8 +688,16 @@ export function mountGridCorrectionEditor(
       return;
     }
 
-    if (!candidate || !candidate.validation.ok) {
-      announce(candidate ? `不能确认：${candidate.validation.message}` : '没有可确认的精确候选。');
+    if (
+      !candidate ||
+      precisionUi.status !== 'candidate' ||
+      !canConfirmPixelGridCandidate(candidate)
+    ) {
+      announce(
+        candidate
+          ? `不能确认：${getPrecisionBlockedMessage(candidate)}`
+          : '没有可确认的精确候选。',
+      );
       renderAll();
       return;
     }
@@ -698,7 +714,10 @@ export function mountGridCorrectionEditor(
       status: 'confirmed-ready',
       candidate,
       calibration,
-      message: '已显式确认精确整数像素网格；processingReady: true。',
+      message:
+        calibration.confirmationProvenance === 'manual-reviewed'
+          ? '已按人工检查确认精确整数像素网格；processingReady: true。'
+          : '已显式确认证据通过的精确整数像素网格；processingReady: true。',
     };
     renderAll();
     lifecycle.onPrecisionConfirmed?.({
@@ -792,33 +811,41 @@ export function mountGridCorrectionEditor(
     lifecycle.onPrecisionInvalidated?.('精修候选已改变，镜像预览已失效。');
 
     if (!precisionWorkspace) {
+      const candidate = createPixelGridCalibrationCandidate({
+        source: appliedSelection.source,
+        confirmationProvenance: 'manual-reviewed',
+        naturalImage: appliedSelection.naturalImage,
+        left,
+        top,
+        cellSize,
+        evidence: EMPTY_PRECISION_EVIDENCE,
+      });
       precisionUi = {
-        status: 'rejected',
-        candidate: createPixelGridCalibrationCandidate({
-          source: appliedSelection.source,
-          naturalImage: appliedSelection.naturalImage,
-          left,
-          top,
-          cellSize,
-          evidence: EMPTY_PRECISION_EVIDENCE,
-        }),
+        status: candidate.validation.ok ? 'candidate' : 'rejected',
+        candidate,
         calibration: null,
-        message: '请先点击“自动精修”，再进行整数候选微调。',
+        message: formatPrecisionCandidateMessage(candidate),
       };
       renderAll();
-      announce('请先点击“自动精修”，再进行整数候选微调。');
+      announce(formatPrecisionCandidateAnnouncement(candidate));
       return;
     }
 
-    const candidate = precisionWorkspace.evaluate(appliedSelection.source, left, top, cellSize);
+    const candidate = precisionWorkspace.evaluate(
+      appliedSelection.source,
+      left,
+      top,
+      cellSize,
+      'manual-reviewed',
+    );
     precisionUi = {
       status: candidate.validation.ok ? 'candidate' : 'rejected',
       candidate,
       calibration: null,
-      message: candidate.validation.message,
+      message: formatPrecisionCandidateMessage(candidate),
     };
     renderAll();
-    announce(candidate.validation.message);
+    announce(formatPrecisionCandidateAnnouncement(candidate));
   }
 
   function returnToPrecisionAdjustment(): void {
@@ -830,7 +857,7 @@ export function mountGridCorrectionEditor(
     cancelPendingPrecision();
     precisionVersion += 1;
     precisionUi = {
-      status: precisionUi.candidate.validation.ok ? 'candidate' : 'rejected',
+      status: canConfirmPixelGridCandidate(precisionUi.candidate) ? 'candidate' : 'rejected',
       candidate: precisionUi.candidate,
       calibration: null,
       message: '已返回精修调整；需要重新确认后才能再次生成镜像预览。',
@@ -1164,7 +1191,10 @@ export function mountGridCorrectionEditor(
   function renderPrecisionPanel(): void {
     const hasSelection = appliedSelection !== null;
     const grid = precisionUi.calibration ?? precisionUi.candidate;
+    const readiness = getPrecisionReadiness(precisionUi);
     elements.precisionPanel.hidden = !hasSelection;
+    elements.precisionPanel.dataset.state = readiness.state;
+    elements.precisionMessage.dataset.state = readiness.state;
 
     if (!hasSelection) {
       elements.precisionMessage.textContent = '等待粗校正选择。';
@@ -1189,12 +1219,8 @@ export function mountGridCorrectionEditor(
       elements.precisionBottomReadout.textContent = formatInteger(grid.bottom);
       elements.precisionSize.textContent = `${String(grid.columns)} 列 × ${String(grid.rows)} 行`;
       elements.precisionEvidence.textContent = formatPrecisionEvidence(grid.evidence);
-      elements.precisionReadiness.textContent =
-        precisionUi.calibration?.processingReady === true
-          ? 'processingReady: true'
-          : precisionUi.candidate?.validation.ok === true
-            ? '候选有效，等待确认'
-            : '未就绪';
+      elements.precisionReadiness.textContent = readiness.text;
+      elements.precisionReadiness.dataset.state = readiness.state;
       setPrecisionInputs(grid);
     }
 
@@ -1202,7 +1228,9 @@ export function mountGridCorrectionEditor(
     setPrecisionControlsDisabled(!canAdjust);
     elements.precisionRefineButton.disabled = precisionUi.status === 'refining';
     elements.precisionConfirmButton.disabled =
-      precisionUi.status !== 'candidate' || precisionUi.candidate?.validation.ok !== true;
+      precisionUi.status !== 'candidate' ||
+      !precisionUi.candidate ||
+      !canConfirmPixelGridCandidate(precisionUi.candidate);
     elements.precisionCancelButton.disabled = precisionUi.status === 'idle';
     elements.precisionReturnRoughButton.disabled = mode !== 'applied';
   }
@@ -1216,6 +1244,7 @@ export function mountGridCorrectionEditor(
     elements.precisionSize.textContent = '34 列 × 27 行';
     elements.precisionEvidence.textContent = '未评分';
     elements.precisionReadiness.textContent = '未就绪';
+    elements.precisionReadiness.dataset.state = 'idle';
   }
 
   function setPrecisionInputs(
@@ -1494,6 +1523,118 @@ function createPrecisionIdleState(message: string): PrecisionUiState {
     calibration: null,
     message,
   };
+}
+
+function getPrecisionReadiness(ui: PrecisionUiState): PrecisionReadinessDisplay {
+  if (ui.status === 'refining') {
+    return {
+      state: 'refining',
+      text: '正在精修',
+    };
+  }
+
+  if (ui.calibration?.processingReady === true) {
+    return {
+      state: 'ready',
+      text: `processingReady: true（${formatPrecisionProvenance(
+        ui.calibration.confirmationProvenance,
+      )}）`,
+    };
+  }
+
+  const candidate = ui.candidate;
+
+  if (!candidate) {
+    return {
+      state: 'idle',
+      text: '未就绪',
+    };
+  }
+
+  if (!candidate.validation.ok) {
+    return {
+      state: 'invalid',
+      text: '几何无效，不能确认',
+    };
+  }
+
+  if (candidate.evidenceAssessment.ok) {
+    return {
+      state: 'verified',
+      text: '几何有效，证据通过',
+    };
+  }
+
+  if (candidate.confirmationProvenance === 'manual-reviewed') {
+    return {
+      state: 'warning',
+      text: '几何有效，证据偏弱，需人工检查',
+    };
+  }
+
+  return {
+    state: 'invalid',
+    text: '几何有效，证据未通过，需重新精修',
+  };
+}
+
+function formatPrecisionCandidateMessage(candidate: PixelGridCalibrationCandidate): string {
+  if (!candidate.validation.ok) {
+    return `几何无效，不能确认：${candidate.validation.message}`;
+  }
+
+  if (candidate.evidenceAssessment.ok) {
+    return '几何有效，证据通过；请目视检查叠加线后确认。';
+  }
+
+  if (candidate.confirmationProvenance === 'manual-reviewed') {
+    return (
+      `几何有效，证据偏弱，需人工检查：${candidate.evidenceAssessment.message} ` +
+      '确认前必须目视核对所有叠加线。'
+    );
+  }
+
+  return `几何有效，但自动证据未通过：${candidate.evidenceAssessment.message}`;
+}
+
+function formatPrecisionCandidateAnnouncement(candidate: PixelGridCalibrationCandidate): string {
+  if (!candidate.validation.ok) {
+    return `不能确认：${candidate.validation.message}`;
+  }
+
+  if (
+    !candidate.evidenceAssessment.ok &&
+    candidate.confirmationProvenance === 'manual-reviewed'
+  ) {
+    return (
+      '几何有效，证据偏弱，需人工检查；确认前必须目视核对所有叠加线。' +
+      'processingReady 仍为 false。'
+    );
+  }
+
+  if (candidate.evidenceAssessment.ok) {
+    return '几何有效，证据通过；确认前 processingReady 仍为 false。';
+  }
+
+  return `自动证据未通过：${candidate.evidenceAssessment.message}`;
+}
+
+function getPrecisionBlockedMessage(candidate: PixelGridCalibrationCandidate): string {
+  if (!candidate.validation.ok) {
+    return candidate.validation.message;
+  }
+
+  if (!candidate.evidenceAssessment.ok) {
+    return candidate.evidenceAssessment.message;
+  }
+
+  return '当前候选尚未处于可确认状态。';
+}
+
+function formatPrecisionProvenance(
+  provenance: PixelGridCalibration['confirmationProvenance'],
+): string {
+  return provenance === 'manual-reviewed' ? '人工复核' : '证据通过';
 }
 
 function parsePrecisionAxis(value: string | undefined): PrecisionAxis | null {

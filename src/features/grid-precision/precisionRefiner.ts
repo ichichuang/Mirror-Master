@@ -9,6 +9,7 @@ import {
 import { EMPTY_PRECISION_EVIDENCE, createPixelGridCalibrationCandidate } from './geometry';
 import type {
   PixelGridCalibrationCandidate,
+  PixelGridConfirmationProvenance,
   PixelGridEvidenceMetrics,
   PixelGridPrecisionFailure,
   PixelGridPrecisionOutcome,
@@ -22,6 +23,7 @@ export interface PixelGridPrecisionWorkspace {
     left: number,
     top: number,
     cellSize: number,
+    confirmationProvenance?: PixelGridConfirmationProvenance,
   ) => PixelGridCalibrationCandidate;
 }
 
@@ -75,11 +77,12 @@ export async function createPixelGridPrecisionWorkspace(
       refine(selection) {
         return refineWithAnalysis(analysis, selection);
       },
-      evaluate(source, left, top, cellSize) {
+      evaluate(source, left, top, cellSize, confirmationProvenance) {
         const evidence = scoreManualCandidate(analysis, left, top, cellSize);
 
         return createPixelGridCalibrationCandidate({
           source,
+          ...(confirmationProvenance ? { confirmationProvenance } : {}),
           naturalImage: expectedNaturalImage,
           left,
           top,
@@ -188,7 +191,7 @@ function refineWithAnalysis(
     },
   });
 
-  if (!candidate.validation.ok) {
+  if (!candidate.validation.ok || !candidate.evidenceAssessment.ok) {
     return rejectCandidate(candidate);
   }
 
@@ -201,7 +204,21 @@ function refineWithAnalysis(
 function rejectCandidate(candidate: PixelGridCalibrationCandidate): PixelGridPrecisionFailure {
   const validation = candidate.validation;
 
-  if (validation.ok) {
+  if (!validation.ok) {
+    const reason =
+      validation.reason === 'out-of-bounds' ? 'out-of-bounds' : 'rough-selection-invalid';
+
+    return {
+      ok: false,
+      reason,
+      message: validation.message,
+      candidate,
+    };
+  }
+
+  const evidenceAssessment = candidate.evidenceAssessment;
+
+  if (evidenceAssessment.ok) {
     return {
       ok: false,
       reason: 'rough-selection-invalid',
@@ -211,20 +228,16 @@ function rejectCandidate(candidate: PixelGridCalibrationCandidate): PixelGridPre
   }
 
   const reason =
-    validation.reason === 'weak-evidence'
+    evidenceAssessment.reason === 'weak-evidence'
       ? 'weak-evidence'
-      : validation.reason === 'ambiguous-candidate'
+      : evidenceAssessment.reason === 'ambiguous-candidate'
         ? 'ambiguous-candidate'
-        : validation.reason === 'non-integer-scale'
-          ? 'non-integer-scale'
-          : validation.reason === 'out-of-bounds'
-            ? 'out-of-bounds'
-            : 'rough-selection-invalid';
+        : 'non-integer-scale';
 
   return {
     ok: false,
     reason,
-    message: validation.message,
+    message: evidenceAssessment.message,
     candidate,
   };
 }

@@ -698,6 +698,21 @@ h3 {
   border-radius: var(--radius-medium);
 }
 
+.precision-panel[data-state='verified'],
+.precision-panel[data-state='ready'] {
+  border-left-color: var(--color-success);
+}
+
+.precision-panel[data-state='warning'],
+.precision-panel[data-state='invalid'] {
+  border-left-color: var(--color-warn);
+}
+
+.precision-panel[data-state='refining'] {
+  border-left-color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 7%, var(--color-surface));
+}
+
 .precision-panel[hidden] {
   display: none;
 }
@@ -751,6 +766,23 @@ h3 {
   overflow-wrap: anywhere;
   color: var(--color-text);
   font-weight: 700;
+}
+
+.precision-heading p[data-state='verified'],
+.precision-heading p[data-state='ready'],
+.precision-details dd[data-state='verified'],
+.precision-details dd[data-state='ready'] {
+  color: var(--color-success);
+}
+
+.precision-heading p[data-state='warning'],
+.precision-details dd[data-state='warning'] {
+  color: var(--color-code-text);
+}
+
+.precision-heading p[data-state='invalid'],
+.precision-details dd[data-state='invalid'] {
+  color: var(--color-code-text);
 }
 
 .precision-details {

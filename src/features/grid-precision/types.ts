@@ -13,15 +13,14 @@ export interface PixelGridEvidenceMetrics {
   readonly ambiguityGap: number;
 }
 
+export type PixelGridConfirmationProvenance = 'evidence-verified' | 'manual-reviewed';
+
 export type PixelGridCandidateValidationReason =
   | 'non-integer'
   | 'non-positive-cell'
   | 'out-of-bounds'
   | 'wrong-grid-size'
-  | 'invalid-boundaries'
-  | 'weak-evidence'
-  | 'ambiguous-candidate'
-  | 'non-integer-scale';
+  | 'invalid-boundaries';
 
 export interface ValidPixelGridCandidateValidation {
   readonly ok: true;
@@ -37,8 +36,29 @@ export interface InvalidPixelGridCandidateValidation {
 export type PixelGridCandidateValidation =
   ValidPixelGridCandidateValidation | InvalidPixelGridCandidateValidation;
 
+export type PixelGridEvidenceAssessmentReason =
+  | 'weak-evidence'
+  | 'ambiguous-candidate'
+  | 'non-integer-scale';
+
+export interface ValidPixelGridEvidenceAssessment {
+  readonly ok: true;
+  readonly message: string;
+}
+
+export interface InvalidPixelGridEvidenceAssessment {
+  readonly ok: false;
+  readonly reason: PixelGridEvidenceAssessmentReason;
+  readonly message: string;
+}
+
+export type PixelGridEvidenceAssessment =
+  | ValidPixelGridEvidenceAssessment
+  | InvalidPixelGridEvidenceAssessment;
+
 export interface PixelGridCalibrationCandidate {
   readonly source: GridSelectionSource;
+  readonly confirmationProvenance: PixelGridConfirmationProvenance;
   readonly naturalImage: NaturalImageSize;
   readonly left: number;
   readonly top: number;
@@ -50,12 +70,14 @@ export interface PixelGridCalibrationCandidate {
   readonly verticalBoundaries: readonly number[];
   readonly horizontalBoundaries: readonly number[];
   readonly evidence: PixelGridEvidenceMetrics;
+  readonly evidenceAssessment: PixelGridEvidenceAssessment;
   readonly validation: PixelGridCandidateValidation;
   readonly processingReady: false;
 }
 
 export interface PixelGridCalibration {
   readonly source: GridSelectionSource;
+  readonly confirmationProvenance: PixelGridConfirmationProvenance;
   readonly naturalImage: NaturalImageSize;
   readonly left: number;
   readonly top: number;

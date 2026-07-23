@@ -19,11 +19,14 @@ import type {
   PixelGridCalibration,
   PixelGridCalibrationCandidate,
   PixelGridCandidateValidation,
+  PixelGridConfirmationProvenance,
+  PixelGridEvidenceAssessment,
   PixelGridEvidenceMetrics,
 } from './types';
 
 export interface PixelGridCandidateSeed {
   readonly source: GridSelectionSource;
+  readonly confirmationProvenance?: PixelGridConfirmationProvenance;
   readonly naturalImage: NaturalImageSize;
   readonly left: number;
   readonly top: number;
@@ -55,6 +58,7 @@ export function createPixelGridCalibrationCandidate(
     ...seed.evidence,
     ambiguityGap: seed.ambiguityGap ?? seed.evidence.ambiguityGap,
   });
+  const evidenceAssessment = assessPixelGridEvidence(evidence);
   const validation = validatePixelGridCandidate({
     naturalImage: seed.naturalImage,
     left,
@@ -64,11 +68,11 @@ export function createPixelGridCalibrationCandidate(
     cellSize,
     verticalBoundaries,
     horizontalBoundaries,
-    evidence,
   });
 
   return Object.freeze({
     source: seed.source,
+    confirmationProvenance: seed.confirmationProvenance ?? 'evidence-verified',
     naturalImage: Object.freeze({ ...seed.naturalImage }),
     left,
     top,
@@ -80,6 +84,7 @@ export function createPixelGridCalibrationCandidate(
     verticalBoundaries: Object.freeze([...verticalBoundaries]),
     horizontalBoundaries: Object.freeze([...horizontalBoundaries]),
     evidence,
+    evidenceAssessment,
     validation,
     processingReady: false,
   });
@@ -88,12 +93,13 @@ export function createPixelGridCalibrationCandidate(
 export function createPixelGridCalibration(
   candidate: PixelGridCalibrationCandidate,
 ): PixelGridCalibration | null {
-  if (!candidate.validation.ok) {
+  if (!canConfirmPixelGridCandidate(candidate)) {
     return null;
   }
 
   return Object.freeze({
     source: candidate.source,
+    confirmationProvenance: candidate.confirmationProvenance,
     naturalImage: Object.freeze({ ...candidate.naturalImage }),
     left: candidate.left,
     top: candidate.top,
@@ -107,6 +113,16 @@ export function createPixelGridCalibration(
     evidence: Object.freeze({ ...candidate.evidence }),
     processingReady: true,
   });
+}
+
+export function canConfirmPixelGridCandidate(candidate: PixelGridCalibrationCandidate): boolean {
+  if (!candidate.validation.ok) {
+    return false;
+  }
+
+  return (
+    candidate.evidenceAssessment.ok || candidate.confirmationProvenance === 'manual-reviewed'
+  );
 }
 
 export function createIntegerBoundaryArray(
@@ -158,7 +174,6 @@ function validatePixelGridCandidate(input: {
   readonly cellSize: number;
   readonly verticalBoundaries: readonly number[];
   readonly horizontalBoundaries: readonly number[];
-  readonly evidence: PixelGridEvidenceMetrics;
 }): PixelGridCandidateValidation {
   if (
     !Number.isInteger(input.naturalImage.width) ||
@@ -236,10 +251,19 @@ function validatePixelGridCandidate(input: {
     };
   }
 
+  return {
+    ok: true,
+    message: '硬几何合同有效；仍需点击确认才会进入 processingReady。',
+  };
+}
+
+function assessPixelGridEvidence(
+  evidence: PixelGridEvidenceMetrics,
+): PixelGridEvidenceAssessment {
   if (
-    input.evidence.score < PRECISION_MIN_SCORE ||
-    input.evidence.boundaryStrength < PRECISION_MIN_BOUNDARY_STRENGTH ||
-    input.evidence.centerContrast < PRECISION_MIN_CENTER_CONTRAST
+    evidence.score < PRECISION_MIN_SCORE ||
+    evidence.boundaryStrength < PRECISION_MIN_BOUNDARY_STRENGTH ||
+    evidence.centerContrast < PRECISION_MIN_CENTER_CONTRAST
   ) {
     return {
       ok: false,
@@ -249,8 +273,8 @@ function validatePixelGridCandidate(input: {
   }
 
   if (
-    input.evidence.periodicConsistency < PRECISION_MIN_PERIODIC_CONSISTENCY ||
-    input.evidence.outerEdgeSupport < PRECISION_MIN_OUTER_EDGE_SUPPORT
+    evidence.periodicConsistency < PRECISION_MIN_PERIODIC_CONSISTENCY ||
+    evidence.outerEdgeSupport < PRECISION_MIN_OUTER_EDGE_SUPPORT
   ) {
     return {
       ok: false,
@@ -259,7 +283,7 @@ function validatePixelGridCandidate(input: {
     };
   }
 
-  if (input.evidence.ambiguityGap < PRECISION_MIN_AMBIGUITY_GAP) {
+  if (evidence.ambiguityGap < PRECISION_MIN_AMBIGUITY_GAP) {
     return {
       ok: false,
       reason: 'ambiguous-candidate',
@@ -269,7 +293,7 @@ function validatePixelGridCandidate(input: {
 
   return {
     ok: true,
-    message: '精确整数像素校准有效；仍需点击确认才会进入 processingReady。',
+    message: '几何有效，证据通过。',
   };
 }
 
