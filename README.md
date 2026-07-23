@@ -2,6 +2,8 @@
 
 Mirror Master 是一个 Pixelanim 网格镜像工具。前端负责上传、预览、选区交互、结果展示和下载；FastAPI 服务使用 OpenCV/NumPy 识别网格，并使用 Pillow 按完整单元列生成 PNG。浏览器不会推断单元尺寸、行列数或边界。
 
+> 生产部署请参见 [完整中文部署指南](docs/DEPLOYMENT.zh-CN.md)。
+
 ## 使用流程
 
 1. 上传一张 PNG、JPEG 或 WebP 图片。
