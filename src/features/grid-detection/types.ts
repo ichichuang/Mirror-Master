@@ -17,6 +17,7 @@ export type GridDetectionFailureReason =
   | 'no-shared-spacing'
   | 'insufficient-span'
   | 'invalid-boundaries'
+  | 'snap-failed'
   | 'stale-work'
   | 'canvas-unavailable'
   | 'decode-failed'

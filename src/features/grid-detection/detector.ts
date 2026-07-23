@@ -1,10 +1,16 @@
 import { loadOpenCV, type OpenCV } from '@opencvjs/web';
 
 import {
+  createNaturalRect,
   createGridBoundarySelection,
   isValidGridBoundarySelection,
 } from '../grid-selection/geometry';
 import type { NaturalImageRect, NaturalImageSize } from '../grid-selection/types';
+import {
+  snapBoundaryRectangle,
+  type SnappedBoundaryModel,
+  type SupportedGridLine,
+} from './userRectangleSnap';
 import type {
   GridDetectionFailure,
   GridDetectionFailureReason,
@@ -104,7 +110,7 @@ const MAX_SPACING_DISAGREEMENT = 2;
 
 let openCvPromise: Promise<OpenCvApi> | null = null;
 
-export async function detectPixelanimGrid(
+export async function discoverInitialGrid(
   input: GridDetectionInput,
 ): Promise<GridDetectionOutcome> {
   if (!isValidSearchRectangle(input.searchRect, input.naturalImage)) {
@@ -176,6 +182,90 @@ export async function detectPixelanimGrid(
   }
 }
 
+export async function snapUserRectangle(input: GridDetectionInput): Promise<GridDetectionOutcome> {
+  if (!isValidSearchRectangle(input.searchRect, input.naturalImage)) {
+    return failure('invalid-search-rectangle', '搜索区域无效，请重新调整。');
+  }
+
+  let raster: LoadedRaster;
+
+  try {
+    raster = await loadRasterFromFile(input.file);
+  } catch (error) {
+    return failure('decode-failed', '无法读取当前图片。', error);
+  }
+
+  try {
+    if (raster.width !== input.naturalImage.width || raster.height !== input.naturalImage.height) {
+      return failure('image-size-mismatch', '当前图片已变化，请重新选择图片。');
+    }
+
+    const evidenceRect = createSnapEvidenceRectangle(input.searchRect, input.naturalImage);
+    const imageData = readSearchPixels(raster, evidenceRect);
+
+    if (!imageData) {
+      return failure('canvas-unavailable', '当前浏览器无法读取图片像素。');
+    }
+
+    let cv: OpenCvApi;
+
+    try {
+      cv = await getOpenCv();
+    } catch (error) {
+      return failure(
+        'opencv-loading-failed',
+        '网格识别组件加载失败，请重新选择图片后再试。',
+        error,
+      );
+    }
+
+    let model: SnappedBoundaryModel | null;
+
+    try {
+      model = detectUserRectangleModel(cv, imageData, evidenceRect, input.searchRect);
+    } catch (error) {
+      return failure('morphology-failed', '网格线提取失败，请调整搜索区域后重试。', error);
+    }
+
+    if (!model) {
+      return failure('snap-failed', '未能吸附完整网格，请继续调整边缘');
+    }
+
+    const snappedSearchRect = createNaturalRect(
+      input.naturalImage,
+      model.left,
+      model.top,
+      model.right,
+      model.bottom,
+    );
+
+    if (!snappedSearchRect) {
+      return failure('invalid-boundaries', '识别出的网格边界无效，请重新调整搜索区域。');
+    }
+
+    const selection = createGridBoundarySelection({
+      naturalImage: input.naturalImage,
+      searchRect: snappedSearchRect,
+      cellSize: model.cellSize,
+      xBoundaries: model.xBoundaries,
+      yBoundaries: model.yBoundaries,
+    });
+
+    if (!selection || !isValidGridBoundarySelection(selection)) {
+      return failure('invalid-boundaries', '识别出的网格边界无效，请重新调整搜索区域。');
+    }
+
+    logSnapResult(input.searchRect, model);
+
+    return {
+      ok: true,
+      selection,
+    };
+  } finally {
+    raster.close();
+  }
+}
+
 function getOpenCv(): Promise<OpenCvApi> {
   openCvPromise ??= loadOpenCV();
   return openCvPromise;
@@ -218,6 +308,110 @@ function detectBoundaryModel(cv: OpenCvApi, imageData: ImageData): BoundaryInfer
     gray.delete();
     binary.delete();
   }
+}
+
+function detectUserRectangleModel(
+  cv: OpenCvApi,
+  imageData: ImageData,
+  evidenceRect: NaturalImageRect,
+  userRect: NaturalImageRect,
+): SnappedBoundaryModel | null {
+  const rgba = cv.matFromImageData(imageData);
+  const gray = new cv.Mat();
+  const binary = new cv.Mat();
+
+  try {
+    cv.cvtColor(rgba, gray, cv.COLOR_RGBA2GRAY);
+    cv.adaptiveThreshold(
+      gray,
+      binary,
+      255,
+      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+      cv.THRESH_BINARY_INV,
+      chooseAdaptiveBlockSize(imageData.width, imageData.height),
+      5,
+    );
+
+    const primaryEvidence = extractLineEvidence(cv, gray, binary, false);
+    const primaryModel = snapEvidenceToUserRectangle(primaryEvidence, evidenceRect, userRect);
+
+    if (primaryModel) {
+      return primaryModel;
+    }
+
+    const fallbackEvidence = extractLineEvidence(cv, gray, binary, true);
+    return snapEvidenceToUserRectangle(fallbackEvidence, evidenceRect, userRect);
+  } finally {
+    rgba.delete();
+    gray.delete();
+    binary.delete();
+  }
+}
+
+function snapEvidenceToUserRectangle(
+  evidence: LineEvidence,
+  evidenceRect: NaturalImageRect,
+  userRect: NaturalImageRect,
+): SnappedBoundaryModel | null {
+  if (
+    evidence.x.clusters.length < MIN_CLUSTER_COUNT ||
+    evidence.y.clusters.length < MIN_CLUSTER_COUNT
+  ) {
+    return null;
+  }
+
+  const xSpacing = collectSpacingObservations(evidence.x.clusters);
+  const ySpacing = collectSpacingObservations(evidence.y.clusters);
+  const candidates = createSharedSpacingCandidates(xSpacing, ySpacing);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const xLines = createSupportedGridLines(evidence.x, evidenceRect.x);
+  const yLines = createSupportedGridLines(evidence.y, evidenceRect.y);
+  logSnapEvidence(userRect, candidates, xLines, yLines);
+
+  return snapBoundaryRectangle({
+    rectangle: userRect,
+    candidates,
+    xLines,
+    yLines,
+  });
+}
+
+function createSupportedGridLines(
+  evidence: AxisEvidence,
+  offset: number,
+): readonly SupportedGridLine[] {
+  const peak = maximum(evidence.profile);
+
+  if (peak <= 0) {
+    return [];
+  }
+
+  return evidence.clusters.map((cluster) => ({
+    position: cluster.center + offset,
+    support: sampleMeasuredBoundaryEvidence(evidence.profile, cluster.center, 1) / peak,
+    width: cluster.width,
+  }));
+}
+
+function createSnapEvidenceRectangle(
+  userRect: NaturalImageRect,
+  naturalImage: NaturalImageSize,
+): NaturalImageRect {
+  const padding = Math.max(12, Math.round(Math.min(userRect.width, userRect.height) * 0.08));
+
+  return (
+    createNaturalRect(
+      naturalImage,
+      userRect.x - padding,
+      userRect.y - padding,
+      userRect.right + padding,
+      userRect.bottom + padding,
+    ) ?? userRect
+  );
 }
 
 function extractLineEvidence(
@@ -274,8 +468,8 @@ function addHoughFallback(
 ): void {
   const edges = new cv.Mat();
   const lines = new cv.Mat();
-  const houghVertical = new cv.Mat(gray.rows, gray.cols, cv.CV_8UC1, cv.Scalar.all(0));
-  const houghHorizontal = new cv.Mat(gray.rows, gray.cols, cv.CV_8UC1, cv.Scalar.all(0));
+  const houghVertical = new cv.Mat(gray.rows, gray.cols, cv.CV_8UC1, new cv.Scalar(0, 0, 0, 0));
+  const houghHorizontal = new cv.Mat(gray.rows, gray.cols, cv.CV_8UC1, new cv.Scalar(0, 0, 0, 0));
 
   try {
     cv.Canny(gray, edges, 50, 150, 3, false);
@@ -289,7 +483,7 @@ function addHoughFallback(
       Math.max(4, Math.round(Math.min(gray.cols, gray.rows) * 0.025)),
     );
 
-    const color = cv.Scalar.all(255);
+    const color = new cv.Scalar(255, 255, 255, 255);
 
     for (let row = 0; row < lines.rows; row += 1) {
       const offset = row * 4;
@@ -935,6 +1129,58 @@ function logCandidateComparison(
     `[grid-detection:candidates] ${JSON.stringify({
       selectedCellSize: selected?.candidate.cellSize ?? null,
       comparison,
+    })}`,
+  );
+}
+
+function logSnapResult(userRect: NaturalImageRect, model: SnappedBoundaryModel): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  console.debug(
+    `[grid-detection:user-snap] ${JSON.stringify({
+      userRect: {
+        left: userRect.x,
+        top: userRect.y,
+        right: userRect.right,
+        bottom: userRect.bottom,
+      },
+      snappedRect: {
+        left: model.left,
+        top: model.top,
+        right: model.right,
+        bottom: model.bottom,
+      },
+      offsets: model.offsets,
+      cellSize: model.cellSize,
+      columns: model.columns,
+      rows: model.rows,
+    })}`,
+  );
+}
+
+function logSnapEvidence(
+  userRect: NaturalImageRect,
+  candidates: readonly SharedSpacingCandidate[],
+  xLines: readonly SupportedGridLine[],
+  yLines: readonly SupportedGridLine[],
+): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  const nearby = (
+    lines: readonly SupportedGridLine[],
+    edges: readonly number[],
+  ): readonly SupportedGridLine[] =>
+    lines.filter((line) => edges.some((edge) => Math.abs(line.position - edge) <= 12));
+
+  console.debug(
+    `[grid-detection:snap-evidence] ${JSON.stringify({
+      candidates: candidates.slice(0, 16).map((candidate) => candidate.cellSize),
+      xEdges: nearby(xLines, [userRect.x, userRect.right]),
+      yEdges: nearby(yLines, [userRect.y, userRect.bottom]),
     })}`,
   );
 }

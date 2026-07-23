@@ -1,4 +1,4 @@
-import { detectPixelanimGrid } from '../grid-detection/detector';
+import { discoverInitialGrid, snapUserRectangle } from '../grid-detection/detector';
 import {
   clamp,
   createFullImageSearchRect,
@@ -10,6 +10,7 @@ import type {
   NaturalImageRect,
   NaturalImageSize,
 } from '../grid-selection/types';
+import { isDetectionTaskCurrent } from './detectionTask';
 
 type HandleType = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
 type ZoomMode = 'fit' | 'manual';
@@ -95,6 +96,7 @@ export function mountGridEditor(
   const elements = getElements(root);
   let currentImage: GridEditorImage | null = null;
   let selection: GridBoundarySelection | null = null;
+  let lastValidSelection: GridBoundarySelection | null = null;
   let searchRect: NaturalImageRect | null = null;
   let initialSearchRect: NaturalImageRect | null = null;
   let activePointer: ActivePointer | null = null;
@@ -164,6 +166,7 @@ export function mountGridEditor(
     activePointer = null;
     currentImage = image;
     selection = null;
+    lastValidSelection = null;
     initialSearchRect = createFullImageSearchRect(image.naturalImage);
     searchRect = initialSearchRect;
     zoomMode = 'fit';
@@ -181,7 +184,7 @@ export function mountGridEditor(
     updateFitScale();
     renderStage();
     lifecycle.onSelectionChange?.(null);
-    void runDetection(initialSearchRect);
+    void runInitialDiscovery(initialSearchRect);
 
     window.requestAnimationFrame(() => {
       if (zoomMode === 'fit') {
@@ -195,17 +198,28 @@ export function mountGridEditor(
     const rectangle = getVisibleRect();
 
     if (rectangle) {
-      void runDetection(rectangle);
+      void runUserSnap(rectangle);
     }
   }
 
   function resetSelection(): void {
     if (initialSearchRect) {
-      void runDetection(initialSearchRect);
+      void runUserSnap(initialSearchRect);
     }
   }
 
-  async function runDetection(rectangle: NaturalImageRect): Promise<void> {
+  function runInitialDiscovery(rectangle: NaturalImageRect): Promise<void> {
+    return runDetection(rectangle, 'initial');
+  }
+
+  function runUserSnap(rectangle: NaturalImageRect): Promise<void> {
+    return runDetection(rectangle, 'user');
+  }
+
+  async function runDetection(
+    rectangle: NaturalImageRect,
+    mode: 'initial' | 'user',
+  ): Promise<void> {
     const image = currentImage;
 
     if (!image) {
@@ -213,24 +227,28 @@ export function mountGridEditor(
     }
 
     detectionVersion += 1;
-    const currentVersion = detectionVersion;
+    const task = {
+      version: detectionVersion,
+      file: image.file,
+    };
     detecting = true;
-    selection = null;
+    selection = mode === 'user' ? lastValidSelection : null;
     searchRect = rectangle;
     clearResult();
     renderOverlay();
-    lifecycle.onSelectionChange?.(null);
+    lifecycle.onSelectionChange?.(selection);
     lifecycle.onDetectionChange?.(true);
     setHint('正在识别网格…');
 
     try {
-      const outcome = await detectPixelanimGrid({
+      const detector = mode === 'initial' ? discoverInitialGrid : snapUserRectangle;
+      const outcome = await detector({
         file: image.file,
         naturalImage: image.naturalImage,
         searchRect: rectangle,
       });
 
-      if (currentVersion !== detectionVersion || currentImage?.file !== image.file) {
+      if (!isDetectionTaskCurrent(task, detectionVersion, currentImage?.file ?? null)) {
         logDetectionRuntimeFailure('stale-work');
         return;
       }
@@ -240,6 +258,7 @@ export function mountGridEditor(
 
       if (outcome.ok) {
         selection = outcome.selection;
+        lastValidSelection = outcome.selection;
         searchRect =
           createNaturalRect(
             image.naturalImage,
@@ -248,17 +267,24 @@ export function mountGridEditor(
             selection.right,
             selection.bottom,
           ) ?? rectangle;
+
+        if (mode === 'initial') {
+          initialSearchRect = searchRect;
+        }
+
         renderOverlay();
         lifecycle.onSelectionChange?.(selection);
         setHint(formatSelectionStatus(selection));
         return;
       }
 
+      selection = null;
+      searchRect = rectangle;
       renderOverlay();
       lifecycle.onSelectionChange?.(null);
       setHint(outcome.message);
     } catch (error) {
-      if (currentVersion === detectionVersion && currentImage?.file === image.file) {
+      if (isDetectionTaskCurrent(task, detectionVersion, currentImage?.file ?? null)) {
         logDetectionRuntimeFailure('morphology-failed', error);
         detecting = false;
         lifecycle.onDetectionChange?.(false);
@@ -381,7 +407,7 @@ export function mountGridEditor(
     }
 
     if (moved && searchRect) {
-      void runDetection(searchRect);
+      void runUserSnap(searchRect);
     } else if (!selection) {
       setHint('拖动搜索区域或边缘后重新识别。');
     }
@@ -412,7 +438,7 @@ export function mountGridEditor(
     clearResult();
     lifecycle.onSelectionChange?.(null);
     renderOverlay();
-    void runDetection(nextRect);
+    void runUserSnap(nextRect);
     event.preventDefault();
   }
 

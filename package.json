@@ -8,11 +8,12 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "node --test tests/*.test.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build"
+    "check": "pnpm run test && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
