@@ -22,12 +22,8 @@ export interface GridMirrorResult {
 }
 
 export type GridMirrorFailureReason =
-  | 'not-confirmed-by-interaction'
   | 'image-size-mismatch'
-  | 'non-integer-geometry'
   | 'invalid-boundaries'
-  | 'unequal-spacing'
-  | 'out-of-image'
   | 'canvas-unavailable'
   | 'decode-failed';
 

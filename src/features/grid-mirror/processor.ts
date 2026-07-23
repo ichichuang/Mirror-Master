@@ -1,13 +1,9 @@
 import {
   PIXELANIM_GRID_COLUMNS,
   PIXELANIM_GRID_ROWS,
-  PIXELANIM_HORIZONTAL_BOUNDARY_COUNT,
-  PIXELANIM_VERTICAL_BOUNDARY_COUNT,
 } from '../grid-selection/constants';
-import type {
-  IntegerGridSelection,
-  NaturalImageSize,
-} from '../grid-selection/types';
+import { isValidIntegerGridSelection } from '../grid-selection/geometry';
+import type { IntegerGridSelection, NaturalImageSize } from '../grid-selection/types';
 import type {
   GridMirrorInput,
   GridMirrorProcessingFailure,
@@ -22,10 +18,8 @@ interface LoadedRaster {
 }
 
 export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirrorProcessingOutcome> {
-  const selectionValidation = validateSelection(input.selection);
-
-  if (selectionValidation) {
-    return selectionValidation;
+  if (!isValidIntegerGridSelection(input.selection)) {
+    return failure('invalid-boundaries', '当前网格选区无效，请返回原图重新调整。');
   }
 
   let raster: LoadedRaster;
@@ -81,73 +75,6 @@ export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirro
   }
 }
 
-function validateSelection(selection: IntegerGridSelection): GridMirrorProcessingFailure | null {
-  if (!selection.confirmedByInteraction) {
-    return failure('not-confirmed-by-interaction', '请先在原图上移动或调整网格选区。');
-  }
-
-  if (
-    selection.columns !== PIXELANIM_GRID_COLUMNS ||
-    selection.rows !== PIXELANIM_GRID_ROWS ||
-    selection.verticalBoundaries.length !== PIXELANIM_VERTICAL_BOUNDARY_COUNT ||
-    selection.horizontalBoundaries.length !== PIXELANIM_HORIZONTAL_BOUNDARY_COUNT
-  ) {
-    return failure('invalid-boundaries', '当前网格选区无效，请返回原图重新调整。');
-  }
-
-  if (
-    !allIntegers([
-      selection.naturalImage.width,
-      selection.naturalImage.height,
-      selection.left,
-      selection.top,
-      selection.right,
-      selection.bottom,
-      selection.cellSize,
-      ...selection.verticalBoundaries,
-      ...selection.horizontalBoundaries,
-    ])
-  ) {
-    return failure('non-integer-geometry', '当前网格选区无效，请返回原图重新调整。');
-  }
-
-  if (
-    selection.cellSize <= 0 ||
-    selection.right !== selection.left + PIXELANIM_GRID_COLUMNS * selection.cellSize ||
-    selection.bottom !== selection.top + PIXELANIM_GRID_ROWS * selection.cellSize
-  ) {
-    return failure('invalid-boundaries', '当前网格选区无效，请返回原图重新调整。');
-  }
-
-  if (
-    selection.left < 0 ||
-    selection.top < 0 ||
-    selection.right > selection.naturalImage.width ||
-    selection.bottom > selection.naturalImage.height
-  ) {
-    return failure('out-of-image', '当前网格选区超出图片，请返回原图重新调整。');
-  }
-
-  if (
-    !hasExactSpacing(
-      selection.verticalBoundaries,
-      selection.left,
-      selection.right,
-      selection.cellSize,
-    ) ||
-    !hasExactSpacing(
-      selection.horizontalBoundaries,
-      selection.top,
-      selection.bottom,
-      selection.cellSize,
-    )
-  ) {
-    return failure('unequal-spacing', '当前网格选区无效，请返回原图重新调整。');
-  }
-
-  return null;
-}
-
 function moveGridCells(
   sourceCanvas: HTMLCanvasElement,
   outputContext: CanvasRenderingContext2D,
@@ -178,28 +105,6 @@ function moveGridCells(
   }
 }
 
-function hasExactSpacing(
-  boundaries: readonly number[],
-  expectedStart: number,
-  expectedEnd: number,
-  cellSize: number,
-): boolean {
-  if (boundaries[0] !== expectedStart || boundaries[boundaries.length - 1] !== expectedEnd) {
-    return false;
-  }
-
-  for (let index = 1; index < boundaries.length; index += 1) {
-    const previous = boundaries[index - 1];
-    const current = boundaries[index];
-
-    if (previous === undefined || current === undefined || current - previous !== cellSize) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 function createNaturalCanvas(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -212,10 +117,6 @@ function freezeSize(size: NaturalImageSize): NaturalImageSize {
     width: size.width,
     height: size.height,
   });
-}
-
-function allIntegers(values: readonly number[]): boolean {
-  return values.every((value) => Number.isInteger(value));
 }
 
 function failure(

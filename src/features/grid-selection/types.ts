@@ -33,5 +33,4 @@ export interface IntegerGridSelection {
   readonly rows: 27;
   readonly verticalBoundaries: readonly number[];
   readonly horizontalBoundaries: readonly number[];
-  readonly confirmedByInteraction: boolean;
 }

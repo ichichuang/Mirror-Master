@@ -8,6 +8,7 @@ import {
   type GridEditorController,
 } from './features/grid-editor/gridEditor';
 import { mirrorGridCells } from './features/grid-mirror/processor';
+import { isValidIntegerGridSelection } from './features/grid-selection/geometry';
 import { mountLocalImageInput } from './features/local-image-input/localImageInput';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -82,7 +83,7 @@ async function generateMirror(): Promise<void> {
   const file = currentFile;
   const selection = editor.getSelection();
 
-  if (!file || !selection?.confirmedByInteraction || generating) {
+  if (!file || !selection || !isValidIntegerGridSelection(selection) || generating) {
     return;
   }
 
@@ -122,7 +123,8 @@ async function generateMirror(): Promise<void> {
 function updateActions(): void {
   const hasImage = currentFile !== null;
   const selection = editor.getSelection();
-  const canGenerate = hasImage && selection?.confirmedByInteraction === true && !generating;
+  const canGenerate =
+    hasImage && selection !== null && isValidIntegerGridSelection(selection) && !generating;
 
   redetectButton.disabled = !hasImage || generating;
   resetSelectionButton.disabled = !hasImage || generating;

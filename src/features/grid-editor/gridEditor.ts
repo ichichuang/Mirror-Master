@@ -208,14 +208,13 @@ export function mountGridEditor(
           detectedSeed.left,
           detectedSeed.top,
           detectedSeed.cellSize,
-          false,
         )
       : null;
     renderOverlay();
     lifecycle.onSelectionChange?.(selection);
 
     if (selection) {
-      setHint('请检查网格是否对齐，拖动选区或手柄即可调整。');
+      setHint('网格已识别；可直接生成镜像，也可拖动调整。');
     } else {
       setHint('请在图片上拖出网格区域。');
     }
@@ -246,7 +245,6 @@ export function mountGridEditor(
         const nextSelection = createIntegerSelectionFromRectangle(
           image.naturalImage,
           outcome.rectangle,
-          false,
         );
 
         if (nextSelection) {
@@ -254,7 +252,7 @@ export function mountGridEditor(
           detectedSeed = nextSelection;
           renderOverlay();
           lifecycle.onSelectionChange?.(selection);
-          setHint('请检查网格是否对齐，拖动选区或手柄即可调整。');
+          setHint('网格已识别；可直接生成镜像，也可拖动调整。');
           return;
         }
       }
@@ -344,7 +342,6 @@ export function mountGridEditor(
               activePointer.startSelection,
               point.x - activePointer.startPoint.x,
               point.y - activePointer.startPoint.y,
-              true,
             )
           : resizeSelectionFromPointer(
               activePointer.startSelection,
@@ -395,7 +392,7 @@ export function mountGridEditor(
 
     if (handle === 'move') {
       const delta = getMoveKeyDelta(event.key, amount);
-      selection = translateIntegerGridSelection(selection, delta.x, delta.y, true);
+      selection = translateIntegerGridSelection(selection, delta.x, delta.y);
     } else {
       const direction = getResizeKeyDirection(handle, event.key);
 
@@ -407,7 +404,6 @@ export function mountGridEditor(
         selection,
         handle,
         selection.cellSize + direction * amount,
-        true,
       );
     }
 
@@ -654,7 +650,7 @@ function createDrawnSelection(
   const left = point.x < start.x ? start.x - width : start.x;
   const top = point.y < start.y ? start.y - height : start.y;
 
-  return createIntegerGridSelection(naturalImage, left, top, cellSize, true);
+  return createIntegerGridSelection(naturalImage, left, top, cellSize);
 }
 
 function resizeSelectionFromPointer(
@@ -682,14 +678,13 @@ function resizeSelectionFromPointer(
         : verticalCell;
   }
 
-  return placeResizedSelection(selection, handle, desiredCell, true);
+  return placeResizedSelection(selection, handle, desiredCell);
 }
 
 function placeResizedSelection(
   selection: IntegerGridSelection,
   handle: Exclude<HandleType, 'move'>,
   desiredCell: number,
-  confirmedByInteraction: boolean,
 ): IntegerGridSelection {
   const maximumCell = getMaximumCellForHandle(selection, handle);
   const cellSize = clamp(Math.round(desiredCell), 1, maximumCell);
@@ -718,7 +713,6 @@ function placeResizedSelection(
       left,
       top,
       cellSize,
-      confirmedByInteraction,
     ) ?? selection
   );
 }
