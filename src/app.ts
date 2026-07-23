@@ -59,7 +59,7 @@ export function renderApp(): string {
             aria-atomic="true"
             data-file-status
           >
-            图片只在当前浏览器中处理。
+            图片将上传到你控制的 Mirror Master 服务并仅在内存中处理。
           </p>
         </section>
 
@@ -105,6 +105,7 @@ export function renderApp(): string {
           <div class="editor-frame" data-editor-frame>
             <div class="editor-stage" data-editor-stage>
               <img class="editor-image" alt="" data-editor-image />
+              <img class="result-image" alt="" data-editor-result hidden />
               <svg
                 class="grid-overlay"
                 data-editor-overlay
@@ -124,7 +125,7 @@ export function renderApp(): string {
             <div class="details-content">
               <span data-selected-file-name>未选择</span>
               <span data-selected-dimensions>未选择</span>
-              <span>全程本地处理，不上传图片。</span>
+              <span>上传到用户控制的服务；不持久存储，也不发送给第三方。</span>
             </div>
           </details>
 

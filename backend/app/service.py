@@ -4,16 +4,17 @@ import hashlib
 import hmac
 import io
 import json
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 
 from app import limits
+from app.detection import detect_grid
 from app.errors import ApiError
 from app.mirror import mirror_cells, validate_grid_contract
-from app.models import GridContract
+from app.models import DetectionRectangle, GridContract, GridDetectionResponse
 
 ALLOWED_IMAGE_FORMATS = {
     "image/jpeg": {"JPEG"},
@@ -140,6 +141,67 @@ def _encode_png(image: Image.Image) -> bytes:
     output = io.BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
+
+
+def _parse_rectangle(
+    rectangle_text: str | None,
+) -> DetectionRectangle | None:
+    if rectangle_text is None or rectangle_text == "":
+        return None
+    try:
+        payload: Any = json.loads(
+            rectangle_text, parse_constant=_reject_nonstandard_json_constant
+        )
+    except (json.JSONDecodeError, ValueError) as error:
+        raise ApiError(
+            422,
+            "GRID_RECTANGLE_INVALID",
+            "手动选区不是有效的 JSON 半开整数矩形。",
+        ) from error
+    try:
+        return DetectionRectangle.model_validate(payload)
+    except ValidationError as error:
+        raise ApiError(
+            422,
+            "GRID_RECTANGLE_INVALID",
+            "手动选区必须只包含 left、top、right、bottom 四个整数。",
+        ) from error
+
+
+async def create_detection_contract(
+    upload: UploadFile,
+    mode_text: str,
+    rectangle_text: str | None,
+) -> GridDetectionResponse:
+    try:
+        if mode_text not in {"auto", "manual"}:
+            raise ApiError(
+                422,
+                "GRID_DETECTION_MODE_INVALID",
+                "识别模式必须是 auto 或 manual。",
+            )
+        mode: Literal["auto", "manual"] = mode_text
+        rectangle = _parse_rectangle(rectangle_text)
+        if mode == "auto" and rectangle is not None:
+            raise ApiError(
+                422,
+                "GRID_RECTANGLE_UNEXPECTED",
+                "自动模式不接受手动选区。",
+            )
+        if mode == "manual" and rectangle is None:
+            raise ApiError(
+                422,
+                "GRID_RECTANGLE_REQUIRED",
+                "手动模式缺少完整的半开坐标选区。",
+            )
+        image_bytes = await _read_upload(upload)
+        image_sha256 = hashlib.sha256(image_bytes).hexdigest()
+        source = _decode_normalized_rgba(
+            image_bytes, upload.content_type or ""
+        )
+        return detect_grid(source, image_sha256, mode, rectangle)
+    finally:
+        await upload.close()
 
 
 async def create_mirror_png(

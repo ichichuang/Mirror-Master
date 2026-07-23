@@ -6,10 +6,6 @@ settings:
 
 importers:
   .:
-    dependencies:
-      '@opencvjs/web':
-        specifier: 5.0.0-release.2
-        version: 5.0.0-release.2
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -161,18 +157,6 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
-
-  '@opencvjs/types@5.0.0-release.2':
-    resolution:
-      {
-        integrity: sha512-f0ufjw6QDVKyR/I6gxc14V6xDnS/FD1cIwTrwUorPQDd8Rn1SBssUTo+OE92V2jg+eynDjGev8ud2pnLaUvVww==,
-      }
-
-  '@opencvjs/web@5.0.0-release.2':
-    resolution:
-      {
-        integrity: sha512-Rdu/mJ4qeNLlqwI1D5AEltyM2zuW03Z7nejTVTSCnwiTMZXnPHfXa+SXgP6+NvVMYCl3FiINGPwF1+pXwUO3dw==,
-      }
 
   '@oxc-project/types@0.139.0':
     resolution:
@@ -1195,12 +1179,6 @@ snapshots:
       '@emnapi/runtime': 1.11.1
       '@tybys/wasm-util': 0.10.3
     optional: true
-
-  '@opencvjs/types@5.0.0-release.2': {}
-
-  '@opencvjs/web@5.0.0-release.2':
-    dependencies:
-      '@opencvjs/types': 5.0.0-release.2
 
   '@oxc-project/types@0.139.0': {}
 

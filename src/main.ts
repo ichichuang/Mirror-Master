@@ -3,9 +3,12 @@ import './styles/base.css';
 import './styles/page.css';
 
 import { renderApp } from './app';
+import {
+  mirrorGrid,
+  MirrorMasterApiError,
+  type GridDetectionContract,
+} from './features/grid-api/client';
 import { mountGridEditor, type GridEditorController } from './features/grid-editor/gridEditor';
-import { mirrorGridCells } from './features/grid-mirror/processor';
-import { isValidGridBoundarySelection } from './features/grid-selection/geometry';
 import { mountLocalImageInput } from './features/local-image-input/localImageInput';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -28,16 +31,21 @@ const downloadButtons = [
 ];
 
 let currentFile: File | null = null;
+let currentFileHash: string | null = null;
+let currentContract: GridDetectionContract | null = null;
+let contractFile: File | null = null;
 let generationVersion = 0;
-let downloadVersion = 0;
+let fileHashVersion = 0;
 let generating = false;
 let detecting = false;
-let resultCanvas: HTMLCanvasElement | null = null;
-let downloadObjectUrl: string | null = null;
+let resultObjectUrl: string | null = null;
+
 const editor: GridEditorController = mountGridEditor(app, {
-  onSelectionChange() {
+  onContractChange(contract, file) {
     generationVersion += 1;
     generating = false;
+    currentContract = contract;
+    contractFile = file;
     clearGeneratedResult();
     updateActions();
   },
@@ -50,7 +58,12 @@ const editor: GridEditorController = mountGridEditor(app, {
 mountLocalImageInput(app, {
   onImageReady(payload) {
     generationVersion += 1;
+    fileHashVersion += 1;
+    const hashVersion = fileHashVersion;
     currentFile = payload.file;
+    currentFileHash = null;
+    currentContract = null;
+    contractFile = null;
     generating = false;
     detecting = false;
     clearGeneratedResult();
@@ -61,6 +74,25 @@ mountLocalImageInput(app, {
       naturalImage: payload.dimensions,
     });
     updateActions();
+
+    void sha256File(payload.file)
+      .then((hash) => {
+        if (hashVersion !== fileHashVersion || currentFile !== payload.file) {
+          return;
+        }
+
+        currentFileHash = hash;
+        updateActions();
+      })
+      .catch(() => {
+        if (hashVersion !== fileHashVersion || currentFile !== payload.file) {
+          return;
+        }
+
+        currentFileHash = null;
+        editor.setMessage('无法校验当前图片，请重新选择图片。');
+        updateActions();
+      });
   },
 });
 
@@ -89,15 +121,23 @@ for (const button of downloadButtons) {
 }
 
 window.addEventListener('beforeunload', () => {
-  downloadVersion += 1;
-  revokeDownloadObjectUrl();
+  generationVersion += 1;
+  fileHashVersion += 1;
+  editor.clearResult();
+  revokeResultObjectUrl();
 });
 
 async function generateMirror(): Promise<void> {
   const file = currentFile;
-  const selection = editor.getSelection();
+  const contract = currentContract;
 
-  if (!file || !selection || !isValidGridBoundarySelection(selection) || generating || detecting) {
+  if (
+    file === null ||
+    contract === null ||
+    !canGenerate(file, contract) ||
+    generating ||
+    detecting
+  ) {
     return;
   }
 
@@ -105,118 +145,105 @@ async function generateMirror(): Promise<void> {
   const currentVersion = generationVersion;
   generating = true;
   clearGeneratedResult();
-  editor.setMessage('正在本地生成镜像…');
+  editor.setMessage('正在由 Mirror Master 服务生成镜像…');
   updateActions();
 
-  const outcome = await mirrorGridCells({
-    file,
-    selection,
-  });
+  try {
+    const blob = await mirrorGrid(file, contract);
 
-  if (currentVersion !== generationVersion || currentFile !== file) {
-    if (outcome.ok) {
-      outcome.result.outputCanvas.width = 0;
-      outcome.result.outputCanvas.height = 0;
+    if (currentVersion !== generationVersion || currentFile !== file) {
+      return;
     }
 
-    return;
-  }
+    generating = false;
+    const objectUrl = URL.createObjectURL(blob);
 
-  generating = false;
+    if (currentVersion !== generationVersion || currentFile !== file) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
 
-  if (!outcome.ok) {
-    editor.setMessage(outcome.message);
+    resultObjectUrl = objectUrl;
+    editor.showResult(objectUrl);
+    editor.setMessage(
+      `镜像已生成：${String(contract.columns)} 列 × ${String(
+        contract.rows,
+      )} 行，单元 ${String(contract.cellSize)} px`,
+    );
     updateActions();
-    return;
-  }
+  } catch (error) {
+    if (currentVersion !== generationVersion || currentFile !== file) {
+      return;
+    }
 
-  resultCanvas = outcome.result.outputCanvas;
-  editor.showResult(resultCanvas);
-  editor.setMessage(
-    `镜像已生成：${String(outcome.result.columns)} 列 × ${String(
-      outcome.result.rows,
-    )} 行，单元 ${String(outcome.result.cellSize)} px`,
-  );
-  prepareDownload(resultCanvas);
-  updateActions();
+    generating = false;
+    editor.setMessage(
+      error instanceof MirrorMasterApiError ? error.message : '镜像生成失败，请重新识别后再试。',
+    );
+    updateActions();
+  }
 }
 
 function updateActions(): void {
   const hasImage = currentFile !== null;
-  const hasResult = resultCanvas !== null;
-  const selection = editor.getSelection();
-  const canGenerate =
-    hasImage &&
-    selection !== null &&
-    isValidGridBoundarySelection(selection) &&
-    !detecting &&
-    !generating;
+  const hasResult = resultObjectUrl !== null;
+  const canStartGeneration = canGenerate(currentFile, currentContract) && !detecting && !generating;
 
   redetectButton.disabled = !hasImage || detecting || generating;
   resetSelectionButton.disabled = !hasImage || detecting || generating;
 
   for (const button of generateButtons) {
-    button.disabled = !canGenerate;
+    button.disabled = !canStartGeneration;
     button.textContent = generating ? '生成中…' : '生成镜像';
   }
 
   for (const button of downloadButtons) {
     button.hidden = !hasResult;
-    button.disabled = !hasResult || downloadObjectUrl === null;
+    button.disabled = !hasResult;
   }
 }
 
-function clearGeneratedResult(): void {
-  downloadVersion += 1;
-  resultCanvas = null;
-  revokeDownloadObjectUrl();
-  editor.clearResult();
+function canGenerate(file: File | null, contract: GridDetectionContract | null): boolean {
+  return (
+    file !== null &&
+    contract !== null &&
+    contractFile === file &&
+    currentFileHash !== null &&
+    contract.imageSha256 === currentFileHash
+  );
 }
 
-function prepareDownload(canvas: HTMLCanvasElement): void {
-  downloadVersion += 1;
-  const currentVersion = downloadVersion;
-  revokeDownloadObjectUrl();
-  updateActions();
-
-  canvas.toBlob((blob) => {
-    if (!blob || currentVersion !== downloadVersion || resultCanvas !== canvas) {
-      return;
-    }
-
-    const objectUrl = URL.createObjectURL(blob);
-
-    if (currentVersion !== downloadVersion || resultCanvas !== canvas) {
-      URL.revokeObjectURL(objectUrl);
-      return;
-    }
-
-    downloadObjectUrl = objectUrl;
-    updateActions();
-  }, 'image/png');
+function clearGeneratedResult(): void {
+  editor.clearResult();
+  revokeResultObjectUrl();
 }
 
 function downloadResult(): void {
-  if (!downloadObjectUrl || !resultCanvas) {
+  if (!resultObjectUrl) {
     return;
   }
 
   const link = document.createElement('a');
   const sourceName = currentFile?.name.replace(/\.[^.]+$/, '') || 'mirror-master';
-  link.href = downloadObjectUrl;
+  link.href = resultObjectUrl;
   link.download = `${sourceName}-mirror.png`;
   document.body.append(link);
   link.click();
   link.remove();
 }
 
-function revokeDownloadObjectUrl(): void {
-  if (!downloadObjectUrl) {
+function revokeResultObjectUrl(): void {
+  if (!resultObjectUrl) {
     return;
   }
 
-  URL.revokeObjectURL(downloadObjectUrl);
-  downloadObjectUrl = null;
+  URL.revokeObjectURL(resultObjectUrl);
+  resultObjectUrl = null;
+}
+
+async function sha256File(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function getRequiredElement<ElementType extends HTMLElement>(

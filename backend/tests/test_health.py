@@ -17,4 +17,8 @@ def test_no_unrequested_api_routes_exist(client: TestClient) -> None:
         route.path for route in app.routes if isinstance(route, APIRoute)
     }
 
-    assert paths == {"/api/health", "/api/grid/mirror"}
+    assert paths == {
+        "/api/health",
+        "/api/grid/detect",
+        "/api/grid/mirror",
+    }

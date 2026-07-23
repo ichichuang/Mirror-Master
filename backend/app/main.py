@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from app.errors import ApiError
-from app.service import create_mirror_png
+from app.service import create_detection_contract, create_mirror_png
 
 app = FastAPI(
     title="Mirror Master Backend",
@@ -43,7 +45,7 @@ async def handle_request_validation_error(
     error = ApiError(
         422,
         "REQUEST_INVALID",
-        "请求必须包含一个图片文件和一个 JSON 网格合同字段。",
+        "请求必须包含有效的图片文件、模式和接口所需 JSON 字段。",
     )
     return JSONResponse(status_code=error.status_code, content=error.as_response())
 
@@ -65,4 +67,23 @@ async def mirror_grid(
         headers={
             "Content-Disposition": 'attachment; filename="mirrored.png"',
         },
+    )
+
+
+@app.post("/api/grid/detect")
+async def detect_grid(
+    file: Annotated[UploadFile, File()],
+    mode: Annotated[str, Form()],
+    rectangle: Annotated[str | None, Form()] = None,
+) -> JSONResponse:
+    contract = await create_detection_contract(file, mode, rectangle)
+    return JSONResponse(contract.model_dump(by_alias=True))
+
+
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "dist"
+if FRONTEND_DIST.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=FRONTEND_DIST, html=True),
+        name="frontend",
     )

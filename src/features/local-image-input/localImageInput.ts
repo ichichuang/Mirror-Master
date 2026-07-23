@@ -42,7 +42,7 @@ export function mountLocalImageInput(
     elements.appShell.dataset.state = 'loading';
     elements.uploadView.hidden = false;
     elements.editorWorkspace.hidden = true;
-    setStatus(`正在本地读取 ${file.name}…`, 'loading');
+    setStatus(`正在读取 ${file.name}…`, 'loading');
 
     try {
       const dimensions = await decodeImageFromObjectUrl(objectUrl);

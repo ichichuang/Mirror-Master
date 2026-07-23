@@ -1,137 +1,117 @@
-# Mirror Master Python 镜像后端
+# Mirror Master Python 服务
 
-本目录是 `PY-BACKEND-MIRROR-001` 的独立后端节点。当前前端的
-OpenCV.js 检测器和 Canvas 镜像处理器保持冻结；本节点不删除、不调用，也不改写它们。
+Python 是网格识别、边界验证、单元镜像和 PNG 编码的唯一权威。前端只提交图片、识别模式、可选手动矩形，以及服务已返回并由用户确认的网格合同。
 
-后端仅提供两个接口：
+生产服务同时提供：
 
 - `GET /api/health`
+- `POST /api/grid/detect`
 - `POST /api/grid/mirror`
+- 根路径下的已构建 `dist` 前端
 
-交互式 API 文档默认关闭。服务没有数据库、认证、远程存储、分析 SDK 或第三方图片服务。
+交互式 API 文档默认关闭。服务没有数据库、远程存储、分析 SDK 或第三方图片服务。
 
-## 本地开发
+## 启动
 
-要求 Python 3.12。仓库使用 `mise` 时可在仓库根目录执行：
+从仓库根目录执行：
 
 ```bash
-mise exec python@3.12.10 -- python -m venv backend/.venv
-backend/.venv/bin/python -m pip install -r backend/requirements-dev.txt
-cd backend
-.venv/bin/python -m uvicorn app.main:app --reload
+./scripts/start-local.sh
 ```
 
-`--reload` 只用于本地开发。生产运行不得启用自动重载，并应由反向代理配置 HTTPS、
-可信 Host、请求体上限和速率限制。
+统一服务地址为 `http://127.0.0.1:8000`，健康检查为：
 
-## API 合同
+```text
+http://127.0.0.1:8000/api/health
+```
 
-### `GET /api/health`
+Docker 部署：
 
-成功响应：
+```bash
+docker compose up -d --build
+```
+
+容器内 Uvicorn 监听 `0.0.0.0:8000`，不启用 reload，也不输出访问日志。
+
+## `POST /api/grid/detect`
+
+请求为 `multipart/form-data`：
+
+- `file`：JPEG、PNG 或 WebP。
+- `mode`：`auto` 或 `manual`。
+- `rectangle`：手动模式必需的 JSON 字符串，使用自然图片半开整数坐标：
 
 ```json
-{ "status": "ok" }
+{ "left": 40, "top": 101, "right": 1400, "bottom": 1181 }
 ```
 
-### `POST /api/grid/mirror`
+服务校验 MIME、20 MiB 字节上限、2500 万解码像素上限，并只执行一次 EXIF 方向归一化。原始上传字节的 SHA-256 会进入返回合同。
 
-请求类型为 `multipart/form-data`，且只包含以下业务字段：
+自动模式通过自适应阈值、形态学线段和必要时的 `HoughLinesP` 提取横纵证据；比较基础格距与 2–6 倍谐波，优先选择能解释至少同等贯通证据和更多边界的最小基础格距。候选网格会排除标题带、外围坐标标签、图例、水印、短内部线段和大段空白尾部。
 
-- `file`：一个 JPEG、PNG 或 WebP 图片文件。
-- `contract`：一个 JSON 字符串。
+手动模式不搜索或替换为更短的内部子网格。用户矩形是完整范围，每条边只允许在 `max(3, round(cellSize * 0.25))` 内吸附。吸附后的完整矩形必须形成整数个正方形单元；线条较弱但完整矩形仍满足合同条件时，会返回中文复核警告。
 
-合同示例：
+成功响应示例：
 
 ```json
 {
   "imageSha256": "64 位小写十六进制 SHA-256",
-  "naturalWidth": 8,
-  "naturalHeight": 6,
-  "cellSize": 2,
-  "columns": 2,
-  "rows": 2,
-  "xBoundaries": [2, 4, 6],
-  "yBoundaries": [1, 3, 5],
-  "confirmed": true
+  "naturalWidth": 1440,
+  "naturalHeight": 1526,
+  "left": 40,
+  "top": 101,
+  "right": 1400,
+  "bottom": 1181,
+  "cellSize": 40,
+  "columns": 34,
+  "rows": 27,
+  "xBoundaries": [40, 80, 120],
+  "yBoundaries": [101, 141, 181],
+  "confidence": 0.8438,
+  "warning": null
 }
 ```
 
-所有数值字段必须是 JSON 整数，`columns`、`rows`、`cellSize` 和自然尺寸必须为正数。
-`confirmed` 必须显式等于布尔值 `true`。未知字段会被拒绝。
+示例边界数组为缩写；真实响应始终包含 `columns + 1` 个 X 边界和 `rows + 1` 个 Y 边界。
 
-服务器按以下顺序执行约束检查：
+## `POST /api/grid/mirror`
 
-1. 合同大小、JSON 结构和严格字段类型；
-2. MIME 白名单，以及声明 MIME 与实际解码格式的一致性；
-3. 20 MiB 上传字节上限；
-4. 原始上传字节的 SHA-256 与合同一致性；
-5. EXIF 方向归一化；
-6. 2500 万解码像素上限和归一化后的自然尺寸；
-7. 边界数量、严格递增、严格等距、正方形单元、半开坐标范围；
-8. 边界跨度、`cellSize`、行数和列数完全一致。
+请求为 `multipart/form-data`：
 
-服务不推断网格、不吸附边界，也不接受谐波猜测。边界合同必须由上游明确确认。
-成功时直接返回内存中的 `image/png`；不产生持久文件。
+- `file`：与识别时完全相同的图片。
+- `contract`：`/api/grid/detect` 的完整响应加上 `"confirmed": true`。
 
-镜像算法只使用 Pillow：先将 EXIF 归一化图片转换为 RGBA，再复制完整图片；随后始终从
-未修改的源图用 `crop((left, top, right, bottom))` 读取每个完整单元（包括空白单元），
-并粘贴到 `columns - 1 - sourceColumn`。网格外像素不参与写入。
+服务严格验证哈希、EXIF 归一化尺寸、范围、边界数量、严格递增、严格等距、正方形格距、跨度和行列数。未知字段会被拒绝。
 
-错误响应均为中文结构化 JSON，且不回显文件名、哈希、边界或请求内容：
+Pillow 先复制归一化 RGBA 原图，再始终从未修改源图读取每个完整单元，并粘贴到 `columns - 1 - sourceColumn`。网格外像素不参与写入。成功响应直接返回内存中的 `image/png`。
+
+## 错误与隐私
+
+错误为中文结构化 JSON，不回显文件名、哈希、边界或请求内容：
 
 ```json
 {
   "error": {
-    "code": "GRID_IMAGE_HASH_MISMATCH",
-    "message": "网格合同与当前上传图片不匹配，可能已经过期。"
+    "code": "GRID_RECTANGLE_NOT_COMPLETE_SQUARES",
+    "message": "手动选区无法在允许吸附距离内形成完整的整数正方形单元。"
   }
 }
 ```
 
-## 隐私变化
+图片上传到用户控制的 Mirror Master 服务，仅在内存中处理，不写入持久目录，也不发送给第三方。请求结束会关闭 `UploadFile`；服务不记录文件名、请求体、图片哈希、图片字节或边界数组；所有响应设置 `Cache-Control: no-store`。
 
-引入后端后，图片会离开浏览器并上传到运行该服务的服务器，因此不再是纯本地处理。
-本节点采取以下控制：
-
-- 不写入持久目录，结果只在内存中编码；
-- 每次请求结束始终关闭 `UploadFile`；
-- 不记录文件名、请求体、图片哈希、图片字节或边界数组；
-- 所有响应设置 `Cache-Control: no-store`；
-- 不连接数据库、对象存储、分析平台或第三方图片服务；
-- 对上传字节、合同大小和解码像素实施上限。
-
-部署方仍必须使用 HTTPS，并确认反向代理、平台访问日志和错误采集没有额外记录请求体。
-
-## 验证命令
-
-生成式测试直接运行：
-
-```bash
-cd backend
-.venv/bin/python -m pytest
-```
-
-所有者真实样本必须只作为本地未跟踪文件放在：
-
-```text
-backend/tests/fixtures/owner-grid.jpg
-```
-
-该目录由 Git 忽略。真实样本验收合同固定为：
-
-```text
-(left, top) = (40, 101)
-(right, bottom) = (1400, 1181)
-cellSize = 40
-columns × rows = 34 × 27
-```
-
-若未提供该文件，真实样本用例会明确报告跳过；提供后会验证 Python/NumPy 独立参考零
-RGBA 差异、网格外零差异、918 个单元全部正确。完整仓库验收：
+## 验证
 
 ```bash
 backend/.venv/bin/python -m pytest -q backend/tests
-pnpm run check
-git diff --check
+pnpm run build
+```
+
+所有者真实样本只作为未跟踪文件放在 `backend/tests/fixtures/owner-grid.jpg`。自动识别固定验收合同为：
+
+```text
+[40, 1400) × [101, 1181)
+cellSize = 40
+columns × rows = 34 × 27
+35 个 X 边界，28 个 Y 边界
 ```

@@ -89,6 +89,19 @@ def validate_grid_contract(
         image_extent=contract.natural_height,
     )
 
+    if contract.left is not None:
+        if (
+            contract.left != contract.x_boundaries[0]
+            or contract.right != contract.x_boundaries[-1]
+            or contract.top != contract.y_boundaries[0]
+            or contract.bottom != contract.y_boundaries[-1]
+        ):
+            raise ApiError(
+                422,
+                "GRID_BOUNDS_MISMATCH",
+                "网格边界数组与网格范围合同不一致。",
+            )
+
 
 def mirror_cells(source: Image.Image, contract: GridContract) -> Image.Image:
     result = source.copy()

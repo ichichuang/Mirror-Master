@@ -323,7 +323,7 @@
 
 .editor-image,
 .grid-overlay,
-.result-canvas {
+.result-image {
   position: absolute;
   inset: 0;
   display: block;
@@ -332,7 +332,7 @@
 }
 
 .editor-image,
-.result-canvas {
+.result-image {
   user-select: none;
   -webkit-user-drag: none;
 }

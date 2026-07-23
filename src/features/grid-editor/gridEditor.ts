@@ -1,16 +1,16 @@
-import { discoverInitialGrid, snapUserRectangle } from '../grid-detection/detector';
+import {
+  detectGrid,
+  MirrorMasterApiError,
+  type DetectionRectangle,
+  type GridDetectionContract,
+} from '../grid-api/client';
 import {
   clamp,
   createFullImageSearchRect,
   createNaturalRect,
   translateNaturalRect,
 } from '../grid-selection/geometry';
-import type {
-  GridBoundarySelection,
-  NaturalImageRect,
-  NaturalImageSize,
-} from '../grid-selection/types';
-import { isDetectionTaskCurrent } from './detectionTask';
+import type { NaturalImageRect, NaturalImageSize } from '../grid-selection/types';
 
 type HandleType = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
 type ZoomMode = 'fit' | 'manual';
@@ -41,6 +41,7 @@ interface GridEditorElements {
   readonly frame: HTMLElement;
   readonly stage: HTMLElement;
   readonly image: HTMLImageElement;
+  readonly resultImage: HTMLImageElement;
   readonly overlay: SVGSVGElement;
   readonly hint: HTMLElement;
   readonly live: HTMLElement;
@@ -55,7 +56,7 @@ interface GridEditorElements {
 }
 
 export interface GridEditorLifecycle {
-  readonly onSelectionChange?: (selection: GridBoundarySelection | null) => void;
+  readonly onContractChange?: (contract: GridDetectionContract | null, file: File | null) => void;
   readonly onDetectionChange?: (isDetecting: boolean) => void;
 }
 
@@ -64,10 +65,10 @@ export interface GridEditorController {
   readonly redetect: () => void;
   readonly resetSelection: () => void;
   readonly clearResult: () => void;
-  readonly showResult: (canvas: HTMLCanvasElement) => void;
+  readonly showResult: (objectUrl: string) => void;
   readonly showOriginal: () => void;
   readonly setMessage: (message: string) => void;
-  readonly getSelection: () => GridBoundarySelection | null;
+  readonly getContract: () => GridDetectionContract | null;
 }
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -78,15 +79,15 @@ const HANDLE_TARGET_CSS_SIZE = 44;
 const HANDLE_VISUAL_CSS_SIZE = 12;
 
 const HANDLE_LABELS: Record<HandleType, string> = {
-  move: '移动搜索区域',
-  n: '调整搜索区域上边缘',
-  e: '调整搜索区域右边缘',
-  s: '调整搜索区域下边缘',
-  w: '调整搜索区域左边缘',
-  nw: '调整搜索区域左上角',
-  ne: '调整搜索区域右上角',
-  se: '调整搜索区域右下角',
-  sw: '调整搜索区域左下角',
+  move: '移动网格选区',
+  n: '调整网格选区上边缘',
+  e: '调整网格选区右边缘',
+  s: '调整网格选区下边缘',
+  w: '调整网格选区左边缘',
+  nw: '调整网格选区左上角',
+  ne: '调整网格选区右上角',
+  se: '调整网格选区右下角',
+  sw: '调整网格选区左下角',
 };
 
 export function mountGridEditor(
@@ -95,12 +96,12 @@ export function mountGridEditor(
 ): GridEditorController {
   const elements = getElements(root);
   let currentImage: GridEditorImage | null = null;
-  let selection: GridBoundarySelection | null = null;
-  let lastValidSelection: GridBoundarySelection | null = null;
+  let contract: GridDetectionContract | null = null;
+  let lastValidContract: GridDetectionContract | null = null;
+  let initialContract: GridDetectionContract | null = null;
   let searchRect: NaturalImageRect | null = null;
-  let initialSearchRect: NaturalImageRect | null = null;
   let activePointer: ActivePointer | null = null;
-  let resultCanvas: HTMLCanvasElement | null = null;
+  let resultObjectUrl: string | null = null;
   let view: EditorView = 'original';
   let zoomMode: ZoomMode = 'fit';
   let zoomScale = 1;
@@ -134,23 +135,19 @@ export function mountGridEditor(
     renderStage();
     announce('已适合窗口显示。');
   });
-
   elements.zoomOutButton.addEventListener('click', () => {
     setManualZoom(zoomScale / 1.25);
   });
-
   elements.zoomActualButton.addEventListener('click', () => {
     setManualZoom(1);
   });
-
   elements.zoomInButton.addEventListener('click', () => {
     setManualZoom(zoomScale * 1.25);
   });
-
   elements.originalTab.addEventListener('click', showOriginal);
   elements.returnButton.addEventListener('click', showOriginal);
   elements.resultTab.addEventListener('click', () => {
-    if (resultCanvas) {
+    if (resultObjectUrl) {
       setView('result');
     }
   });
@@ -165,26 +162,23 @@ export function mountGridEditor(
     cancelDetection();
     activePointer = null;
     currentImage = image;
-    selection = null;
-    lastValidSelection = null;
-    initialSearchRect = createFullImageSearchRect(image.naturalImage);
-    searchRect = initialSearchRect;
+    contract = null;
+    lastValidContract = null;
+    initialContract = null;
+    searchRect = createFullImageSearchRect(image.naturalImage);
     zoomMode = 'fit';
     view = 'original';
     clearResult();
     elements.image.src = image.objectUrl;
     elements.image.alt = `${image.fileName} 的原图`;
-    elements.overlay.setAttribute(
-      'viewBox',
-      `0 0 ${String(image.naturalImage.width)} ${String(image.naturalImage.height)}`,
-    );
+    setOverlayViewBox(image.naturalImage);
     elements.overlay.removeAttribute('hidden');
     elements.overlay.tabIndex = 0;
-    elements.overlay.setAttribute('aria-label', '网格搜索区域编辑区');
+    elements.overlay.setAttribute('aria-label', '网格选区编辑区');
     updateFitScale();
     renderStage();
-    lifecycle.onSelectionChange?.(null);
-    void runInitialDiscovery(initialSearchRect);
+    lifecycle.onContractChange?.(null, image.file);
+    void runDetection('auto');
 
     window.requestAnimationFrame(() => {
       if (zoomMode === 'fit') {
@@ -195,30 +189,30 @@ export function mountGridEditor(
   }
 
   function redetect(): void {
-    const rectangle = getVisibleRect();
-
-    if (rectangle) {
-      void runUserSnap(rectangle);
+    if (currentImage) {
+      void runDetection('auto');
     }
   }
 
   function resetSelection(): void {
-    if (initialSearchRect) {
-      void runUserSnap(initialSearchRect);
+    if (initialContract && currentImage) {
+      cancelDetection();
+      contract = initialContract;
+      lastValidContract = initialContract;
+      searchRect = rectangleFromContract(initialContract, currentImage.naturalImage);
+      clearResult();
+      renderOverlay();
+      lifecycle.onContractChange?.(contract, currentImage.file);
+      setHint(formatContractStatus(initialContract));
+      return;
     }
-  }
 
-  function runInitialDiscovery(rectangle: NaturalImageRect): Promise<void> {
-    return runDetection(rectangle, 'initial');
-  }
-
-  function runUserSnap(rectangle: NaturalImageRect): Promise<void> {
-    return runDetection(rectangle, 'user');
+    redetect();
   }
 
   async function runDetection(
-    rectangle: NaturalImageRect,
-    mode: 'initial' | 'user',
+    mode: 'auto' | 'manual',
+    rectangle?: NaturalImageRect,
   ): Promise<void> {
     const image = currentImage;
 
@@ -227,75 +221,82 @@ export function mountGridEditor(
     }
 
     detectionVersion += 1;
-    const task = {
-      version: detectionVersion,
-      file: image.file,
-    };
+    const taskVersion = detectionVersion;
     detecting = true;
-    selection = mode === 'user' ? lastValidSelection : null;
-    searchRect = rectangle;
+    contract = null;
+    if (rectangle) {
+      searchRect = rectangle;
+    }
     clearResult();
     renderOverlay();
-    lifecycle.onSelectionChange?.(selection);
+    lifecycle.onContractChange?.(null, image.file);
     lifecycle.onDetectionChange?.(true);
-    setHint('正在识别网格…');
+    setHint(mode === 'auto' ? '正在自动识别网格…' : '正在按选区识别网格…');
 
     try {
-      const detector = mode === 'initial' ? discoverInitialGrid : snapUserRectangle;
-      const outcome = await detector({
-        file: image.file,
-        naturalImage: image.naturalImage,
-        searchRect: rectangle,
-      });
+      const nextContract =
+        mode === 'manual' && rectangle
+          ? await detectGrid(image.file, 'manual', toDetectionRectangle(rectangle))
+          : await detectGrid(image.file, 'auto');
 
-      if (!isDetectionTaskCurrent(task, detectionVersion, currentImage?.file ?? null)) {
-        logDetectionRuntimeFailure('stale-work');
+      if (taskVersion !== detectionVersion || currentImage?.file !== image.file) {
         return;
       }
 
       detecting = false;
       lifecycle.onDetectionChange?.(false);
-
-      if (outcome.ok) {
-        selection = outcome.selection;
-        lastValidSelection = outcome.selection;
-        searchRect =
-          createNaturalRect(
-            image.naturalImage,
-            selection.left,
-            selection.top,
-            selection.right,
-            selection.bottom,
-          ) ?? rectangle;
-
-        if (mode === 'initial') {
-          initialSearchRect = searchRect;
-        }
-
-        renderOverlay();
-        lifecycle.onSelectionChange?.(selection);
-        setHint(formatSelectionStatus(selection));
+      applyContract(nextContract, image, mode);
+    } catch (error) {
+      if (taskVersion !== detectionVersion || currentImage?.file !== image.file) {
         return;
       }
 
-      selection = null;
-      searchRect = rectangle;
+      detecting = false;
+      lifecycle.onDetectionChange?.(false);
+      contract = lastValidContract;
+      searchRect = contract
+        ? rectangleFromContract(contract, currentImage.naturalImage)
+        : (rectangle ?? searchRect);
       renderOverlay();
-      lifecycle.onSelectionChange?.(null);
-      setHint(outcome.message);
-    } catch (error) {
-      if (isDetectionTaskCurrent(task, detectionVersion, currentImage?.file ?? null)) {
-        logDetectionRuntimeFailure('morphology-failed', error);
-        detecting = false;
-        lifecycle.onDetectionChange?.(false);
-        selection = null;
-        renderOverlay();
-        lifecycle.onSelectionChange?.(null);
-        setHint('网格识别运行失败，请重新调整搜索区域。');
-      } else {
-        logDetectionRuntimeFailure('stale-work', error);
-      }
+      lifecycle.onContractChange?.(contract, image.file);
+      const message =
+        error instanceof MirrorMasterApiError ? error.message : '网格识别失败，请重新调整选区。';
+      setHint(contract ? `${message} 上次有效网格已保留。` : message);
     }
+  }
+
+  function applyContract(
+    nextContract: GridDetectionContract,
+    image: GridEditorImage,
+    mode: 'auto' | 'manual',
+  ): void {
+    if (
+      image.naturalImage.width !== nextContract.naturalWidth ||
+      image.naturalImage.height !== nextContract.naturalHeight
+    ) {
+      currentImage = {
+        ...image,
+        naturalImage: {
+          width: nextContract.naturalWidth,
+          height: nextContract.naturalHeight,
+        },
+      };
+      setOverlayViewBox(currentImage.naturalImage);
+      updateFitScale();
+    }
+
+    contract = nextContract;
+    lastValidContract = nextContract;
+    if (mode === 'auto') {
+      initialContract = nextContract;
+    }
+    searchRect = rectangleFromContract(nextContract, {
+      width: nextContract.naturalWidth,
+      height: nextContract.naturalHeight,
+    });
+    renderStage();
+    lifecycle.onContractChange?.(nextContract, image.file);
+    setHint(formatContractStatus(nextContract));
   }
 
   function cancelDetection(): void {
@@ -381,16 +382,16 @@ export function mountGridEditor(
 
     if (!activePointer.moved) {
       cancelDetection();
-      selection = null;
+      contract = null;
       clearResult();
-      lifecycle.onSelectionChange?.(null);
+      lifecycle.onContractChange?.(null, currentImage.file);
     }
 
     activePointer.moved = true;
     searchRect = nextRect;
-    selection = null;
+    contract = null;
     renderOverlay();
-    setHint('调整搜索区域后松开以重新识别。');
+    setHint('松开后将按当前完整选区重新识别。');
     event.preventDefault();
   }
 
@@ -407,9 +408,9 @@ export function mountGridEditor(
     }
 
     if (moved && searchRect) {
-      void runUserSnap(searchRect);
-    } else if (!selection) {
-      setHint('拖动搜索区域或边缘后重新识别。');
+      void runDetection('manual', searchRect);
+    } else if (!contract) {
+      setHint('拖动选区或边缘后重新识别。');
     }
   }
 
@@ -433,33 +434,29 @@ export function mountGridEditor(
         ? translateNaturalRect(currentImage.naturalImage, rectangle, delta.x, delta.y)
         : resizeNaturalRectWithDelta(currentImage.naturalImage, rectangle, handle, delta);
 
+    cancelDetection();
     searchRect = nextRect;
-    selection = null;
+    contract = null;
     clearResult();
-    lifecycle.onSelectionChange?.(null);
+    lifecycle.onContractChange?.(null, currentImage.file);
     renderOverlay();
-    void runUserSnap(nextRect);
+    void runDetection('manual', nextRect);
     event.preventDefault();
   }
 
-  function showResult(canvas: HTMLCanvasElement): void {
+  function showResult(objectUrl: string): void {
     clearResult();
-    resultCanvas = canvas;
-    resultCanvas.className = 'result-canvas';
-    resultCanvas.setAttribute('aria-label', '网格单元镜像结果');
-    elements.stage.append(resultCanvas);
+    resultObjectUrl = objectUrl;
+    elements.resultImage.src = objectUrl;
+    elements.resultImage.alt = '网格单元镜像结果';
     elements.resultTab.disabled = false;
     setView('result');
   }
 
   function clearResult(): void {
-    if (resultCanvas) {
-      resultCanvas.remove();
-      resultCanvas.width = 0;
-      resultCanvas.height = 0;
-      resultCanvas = null;
-    }
-
+    resultObjectUrl = null;
+    elements.resultImage.removeAttribute('src');
+    elements.resultImage.hidden = true;
     elements.resultTab.disabled = true;
 
     if (view === 'result') {
@@ -521,14 +518,10 @@ export function mountGridEditor(
   }
 
   function renderView(): void {
-    const showingResult = view === 'result' && resultCanvas !== null;
+    const showingResult = view === 'result' && resultObjectUrl !== null;
     elements.image.hidden = showingResult;
     elements.overlay.toggleAttribute('hidden', showingResult || !currentImage);
-
-    if (resultCanvas) {
-      resultCanvas.hidden = !showingResult;
-    }
-
+    elements.resultImage.hidden = !showingResult;
     elements.originalTab.ariaSelected = showingResult ? 'false' : 'true';
     elements.originalTab.tabIndex = showingResult ? -1 : 0;
     elements.resultTab.ariaSelected = showingResult ? 'true' : 'false';
@@ -561,38 +554,38 @@ export function mountGridEditor(
         rectangle.width,
         rectangle.height,
         'move',
-        selection ? 'grid-move-area' : 'grid-move-area grid-search-area',
+        contract ? 'grid-move-area' : 'grid-move-area grid-search-area',
       ),
     );
 
-    if (selection) {
-      for (let index = 0; index < selection.xBoundaries.length; index += 1) {
-        const x = selection.xBoundaries[index];
+    if (contract) {
+      for (let index = 0; index < contract.xBoundaries.length; index += 1) {
+        const x = contract.xBoundaries[index];
 
         if (x !== undefined) {
           elements.overlay.append(
             createLine(
               x,
-              selection.top,
+              contract.top,
               x,
-              selection.bottom,
-              index === 0 || index === selection.xBoundaries.length - 1,
+              contract.bottom,
+              index === 0 || index === contract.xBoundaries.length - 1,
             ),
           );
         }
       }
 
-      for (let index = 0; index < selection.yBoundaries.length; index += 1) {
-        const y = selection.yBoundaries[index];
+      for (let index = 0; index < contract.yBoundaries.length; index += 1) {
+        const y = contract.yBoundaries[index];
 
         if (y !== undefined) {
           elements.overlay.append(
             createLine(
-              selection.left,
+              contract.left,
               y,
-              selection.right,
+              contract.right,
               y,
-              index === 0 || index === selection.yBoundaries.length - 1,
+              index === 0 || index === contract.yBoundaries.length - 1,
             ),
           );
         }
@@ -616,14 +609,8 @@ export function mountGridEditor(
   }
 
   function getVisibleRect(): NaturalImageRect | null {
-    if (selection && currentImage) {
-      return createNaturalRect(
-        currentImage.naturalImage,
-        selection.left,
-        selection.top,
-        selection.right,
-        selection.bottom,
-      );
+    if (contract && currentImage) {
+      return rectangleFromContract(contract, currentImage.naturalImage);
     }
 
     return searchRect;
@@ -652,6 +639,13 @@ export function mountGridEditor(
     };
   }
 
+  function setOverlayViewBox(naturalImage: NaturalImageSize): void {
+    elements.overlay.setAttribute(
+      'viewBox',
+      `0 0 ${String(naturalImage.width)} ${String(naturalImage.height)}`,
+    );
+  }
+
   function setHint(message: string): void {
     elements.hint.textContent = message;
     elements.live.textContent = message;
@@ -672,7 +666,35 @@ export function mountGridEditor(
     showResult,
     showOriginal,
     setMessage: setHint,
-    getSelection: () => selection,
+    getContract: () => contract,
+  };
+}
+
+function rectangleFromContract(
+  contract: GridDetectionContract,
+  naturalImage: NaturalImageSize,
+): NaturalImageRect {
+  const rectangle = createNaturalRect(
+    naturalImage,
+    contract.left,
+    contract.top,
+    contract.right,
+    contract.bottom,
+  );
+
+  if (!rectangle) {
+    throw new Error('Backend grid contract contains an invalid rectangle.');
+  }
+
+  return rectangle;
+}
+
+function toDetectionRectangle(rectangle: NaturalImageRect): DetectionRectangle {
+  return {
+    left: rectangle.x,
+    top: rectangle.y,
+    right: rectangle.right,
+    bottom: rectangle.bottom,
   };
 }
 
@@ -700,15 +722,12 @@ function updateSearchRectFromPointer(
   if (handle.includes('w')) {
     left = clamp(point.x, 0, rectangle.right - MIN_SEARCH_RECT_SIZE);
   }
-
   if (handle.includes('e')) {
     right = clamp(point.x, rectangle.x + MIN_SEARCH_RECT_SIZE, naturalImage.width);
   }
-
   if (handle.includes('n')) {
     top = clamp(point.y, 0, rectangle.bottom - MIN_SEARCH_RECT_SIZE);
   }
-
   if (handle.includes('s')) {
     bottom = clamp(point.y, rectangle.y + MIN_SEARCH_RECT_SIZE, naturalImage.height);
   }
@@ -796,14 +815,14 @@ function createInteractiveRect(
   handle: HandleType,
   className: string,
 ): SVGRectElement {
-  const rect = document.createElementNS(SVG_NAMESPACE, 'rect');
-  rect.setAttribute('x', String(x));
-  rect.setAttribute('y', String(y));
-  rect.setAttribute('width', String(width));
-  rect.setAttribute('height', String(height));
-  rect.setAttribute('class', className);
-  decorateHandle(rect, handle);
-  return rect;
+  const rectangle = document.createElementNS(SVG_NAMESPACE, 'rect');
+  rectangle.setAttribute('x', String(x));
+  rectangle.setAttribute('y', String(y));
+  rectangle.setAttribute('width', String(width));
+  rectangle.setAttribute('height', String(height));
+  rectangle.setAttribute('class', className);
+  decorateHandle(rectangle, handle);
+  return rectangle;
 }
 
 function createCornerHandle(
@@ -891,29 +910,11 @@ function formatPercent(scale: number): string {
   return `${String(Math.round(scale * 100))}%`;
 }
 
-function logDetectionRuntimeFailure(
-  reason: 'morphology-failed' | 'stale-work',
-  internalCause?: unknown,
-): void {
-  if (!import.meta.env.DEV) {
-    return;
-  }
-
-  const detail =
-    internalCause instanceof Error
-      ? `${internalCause.name}: ${internalCause.message}`
-      : internalCause === undefined
-        ? ''
-        : typeof internalCause === 'string'
-          ? internalCause
-          : '未知内部错误';
-  console.warn(`[grid-detection:${reason}]${detail ? ` ${detail}` : ''}`);
-}
-
-function formatSelectionStatus(selection: GridBoundarySelection): string {
-  return `识别到 ${String(selection.columns)} 列 × ${String(
-    selection.rows,
-  )} 行，单元 ${String(selection.cellSize)} px`;
+function formatContractStatus(contract: GridDetectionContract): string {
+  const grid = `识别到 ${String(contract.columns)} 列 × ${String(
+    contract.rows,
+  )} 行，单元 ${String(contract.cellSize)} px`;
+  return contract.warning ? `${grid}。${contract.warning}` : grid;
 }
 
 function getElements(root: HTMLElement): GridEditorElements {
@@ -921,6 +922,7 @@ function getElements(root: HTMLElement): GridEditorElements {
     frame: getRequiredElement(root, '[data-editor-frame]', HTMLElement),
     stage: getRequiredElement(root, '[data-editor-stage]', HTMLElement),
     image: getRequiredElement(root, '[data-editor-image]', HTMLImageElement),
+    resultImage: getRequiredElement(root, '[data-editor-result]', HTMLImageElement),
     overlay: getRequiredElement(root, '[data-editor-overlay]', SVGSVGElement),
     hint: getRequiredElement(root, '[data-editor-hint]', HTMLElement),
     live: getRequiredElement(root, '[data-editor-live]', HTMLElement),
