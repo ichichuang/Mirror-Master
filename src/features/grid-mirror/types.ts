@@ -1,7 +1,4 @@
-import type {
-  GridBoundarySelection,
-  NaturalImageSize,
-} from '../grid-selection/types';
+import type { GridBoundarySelection, NaturalImageSize } from '../grid-selection/types';
 
 export interface GridMirrorInput {
   readonly file: File;
@@ -22,10 +19,7 @@ export interface GridMirrorResult {
 }
 
 export type GridMirrorFailureReason =
-  | 'image-size-mismatch'
-  | 'invalid-boundaries'
-  | 'canvas-unavailable'
-  | 'decode-failed';
+  'image-size-mismatch' | 'invalid-boundaries' | 'canvas-unavailable' | 'decode-failed';
 
 export interface GridMirrorProcessingSuccess {
   readonly ok: true;
@@ -38,6 +32,4 @@ export interface GridMirrorProcessingFailure {
   readonly message: string;
 }
 
-export type GridMirrorProcessingOutcome =
-  | GridMirrorProcessingSuccess
-  | GridMirrorProcessingFailure;
+export type GridMirrorProcessingOutcome = GridMirrorProcessingSuccess | GridMirrorProcessingFailure;

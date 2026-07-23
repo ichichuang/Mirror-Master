@@ -4,10 +4,7 @@ import {
   createGridBoundarySelection,
   isValidGridBoundarySelection,
 } from '../grid-selection/geometry';
-import type {
-  NaturalImageRect,
-  NaturalImageSize,
-} from '../grid-selection/types';
+import type { NaturalImageRect, NaturalImageSize } from '../grid-selection/types';
 import type {
   GridDetectionFailure,
   GridDetectionFailureReason,
@@ -56,9 +53,16 @@ interface SharedSpacingCandidate {
 
 interface AxisFit {
   readonly start: number;
-  readonly lineCount: number;
-  readonly coverage: number;
-  readonly score: number;
+  readonly end: number;
+  readonly expectedBoundaryCount: number;
+  readonly matchedBoundaryCount: number;
+  readonly explainedPixelSpan: number;
+  readonly explainedSpanRatio: number;
+  readonly evidenceCoverage: number;
+  readonly clusterCoverage: number;
+  readonly startSupport: boolean;
+  readonly endSupport: boolean;
+  readonly evidenceScore: number;
 }
 
 interface BoundaryModel {
@@ -67,20 +71,36 @@ interface BoundaryModel {
   readonly yBoundaries: readonly number[];
 }
 
-interface CellStatistics {
-  readonly darkRatio: number;
-  readonly colorRatio: number;
+type BoundaryInferenceFailureReason =
+  'insufficient-clusters' | 'no-shared-spacing' | 'insufficient-span' | 'invalid-boundaries';
+
+interface BoundaryInferenceSuccess {
+  readonly ok: true;
+  readonly model: BoundaryModel;
+}
+
+interface BoundaryInferenceFailure {
+  readonly ok: false;
+  readonly reason: BoundaryInferenceFailureReason;
+}
+
+type BoundaryInferenceOutcome = BoundaryInferenceSuccess | BoundaryInferenceFailure;
+
+interface EvaluatedSpacingCandidate {
+  readonly candidate: SharedSpacingCandidate;
+  readonly xFit: AxisFit;
+  readonly yFit: AxisFit;
 }
 
 const MIN_CELL_SIZE = 3;
-const MIN_BOUNDARY_COUNT = 4;
-const MIN_MATCH_COVERAGE = 0.8;
-const HARMONIC_SCORE_RETENTION = 0.9;
+const MIN_CLUSTER_COUNT = 6;
+const MIN_EXPLAINED_SPAN_RATIO = 0.65;
+const MIN_EVIDENCE_COVERAGE = 0.75;
+const MIN_GENERATED_BOUNDARY_EVIDENCE = 0.7;
 const MAX_HARMONIC_DIVISOR = 6;
 const MAX_AXIS_SPACING_OBSERVATIONS = 64;
 const MAX_SHARED_SPACING_CANDIDATES = 72;
 const MAX_SPACING_DISAGREEMENT = 2;
-const LABEL_BAND_CELL_RATIO = 0.62;
 
 let openCvPromise: Promise<OpenCvApi> | null = null;
 
@@ -88,79 +108,63 @@ export async function detectPixelanimGrid(
   input: GridDetectionInput,
 ): Promise<GridDetectionOutcome> {
   if (!isValidSearchRectangle(input.searchRect, input.naturalImage)) {
-    return failure(
-      'invalid-search-rectangle',
-      '搜索区域无效，请重新调整。',
-    );
+    return failure('invalid-search-rectangle', '搜索区域无效，请重新调整。');
   }
 
   let raster: LoadedRaster;
 
   try {
     raster = await loadRasterFromFile(input.file);
-  } catch {
-    return failure('decode-failed', '无法读取当前图片。');
+  } catch (error) {
+    return failure('decode-failed', '无法读取当前图片。', error);
   }
 
   try {
-    if (
-      raster.width !== input.naturalImage.width ||
-      raster.height !== input.naturalImage.height
-    ) {
-      return failure(
-        'image-size-mismatch',
-        '当前图片已变化，请重新选择图片。',
-      );
+    if (raster.width !== input.naturalImage.width || raster.height !== input.naturalImage.height) {
+      return failure('image-size-mismatch', '当前图片已变化，请重新选择图片。');
     }
 
     const imageData = readSearchPixels(raster, input.searchRect);
 
     if (!imageData) {
-      return failure(
-        'canvas-unavailable',
-        '当前浏览器无法读取图片像素。',
-      );
+      return failure('canvas-unavailable', '当前浏览器无法读取图片像素。');
     }
 
     let cv: OpenCvApi;
 
     try {
       cv = await getOpenCv();
-    } catch {
+    } catch (error) {
       return failure(
-        'opencv-unavailable',
-        '网格识别组件无法初始化。',
+        'opencv-loading-failed',
+        '网格识别组件加载失败，请重新选择图片后再试。',
+        error,
       );
     }
 
-    const localModel = detectBoundaryModel(cv, imageData);
+    let inference: BoundaryInferenceOutcome;
 
-    if (!localModel) {
-      return failure(
-        'no-grid-boundaries',
-        '未识别到完整网格，请调整搜索区域。',
-      );
+    try {
+      inference = detectBoundaryModel(cv, imageData);
+    } catch (error) {
+      return failure('morphology-failed', '网格线提取失败，请调整搜索区域后重试。', error);
     }
 
-    const naturalModel = offsetBoundaryModel(localModel, input.searchRect);
-    const trimmedModel = trimLabelBands(
-      naturalModel,
-      imageData,
-      input.searchRect,
-    );
+    if (!inference.ok) {
+      return inferenceFailure(inference.reason);
+    }
+
+    const naturalModel = offsetBoundaryModel(inference.model, input.searchRect);
     const selection = createGridBoundarySelection({
       naturalImage: input.naturalImage,
       searchRect: input.searchRect,
-      cellSize: trimmedModel.cellSize,
-      xBoundaries: trimmedModel.xBoundaries,
-      yBoundaries: trimmedModel.yBoundaries,
+      cellSize: naturalModel.cellSize,
+      xBoundaries: naturalModel.xBoundaries,
+      yBoundaries: naturalModel.yBoundaries,
     });
 
     if (!selection || !isValidGridBoundarySelection(selection)) {
-      return failure(
-        'no-grid-boundaries',
-        '未识别到完整网格，请调整搜索区域。',
-      );
+      return failure('invalid-boundaries', '识别出的网格边界无效，请重新调整搜索区域。');
     }
 
     return {
@@ -177,10 +181,7 @@ function getOpenCv(): Promise<OpenCvApi> {
   return openCvPromise;
 }
 
-function detectBoundaryModel(
-  cv: OpenCvApi,
-  imageData: ImageData,
-): BoundaryModel | null {
+function detectBoundaryModel(cv: OpenCvApi, imageData: ImageData): BoundaryInferenceOutcome {
   const rgba = cv.matFromImageData(imageData);
   const gray = new cv.Mat();
   const binary = new cv.Mat();
@@ -200,12 +201,18 @@ function detectBoundaryModel(
     const primaryEvidence = extractLineEvidence(cv, gray, binary, false);
     const primaryModel = inferBoundaryModel(primaryEvidence);
 
-    if (primaryModel) {
+    if (primaryModel.ok) {
       return primaryModel;
     }
 
     const fallbackEvidence = extractLineEvidence(cv, gray, binary, true);
-    return inferBoundaryModel(fallbackEvidence);
+    const fallbackModel = inferBoundaryModel(fallbackEvidence);
+
+    if (fallbackModel.ok) {
+      return fallbackModel;
+    }
+
+    return preferInferenceFailure(primaryModel, fallbackModel);
   } finally {
     rgba.delete();
     gray.delete();
@@ -267,18 +274,8 @@ function addHoughFallback(
 ): void {
   const edges = new cv.Mat();
   const lines = new cv.Mat();
-  const houghVertical = new cv.Mat(
-    gray.rows,
-    gray.cols,
-    cv.CV_8UC1,
-    cv.Scalar.all(0),
-  );
-  const houghHorizontal = new cv.Mat(
-    gray.rows,
-    gray.cols,
-    cv.CV_8UC1,
-    cv.Scalar.all(0),
-  );
+  const houghVertical = new cv.Mat(gray.rows, gray.cols, cv.CV_8UC1, cv.Scalar.all(0));
+  const houghHorizontal = new cv.Mat(gray.rows, gray.cols, cv.CV_8UC1, cv.Scalar.all(0));
 
   try {
     cv.Canny(gray, edges, 50, 150, 3, false);
@@ -301,12 +298,7 @@ function addHoughFallback(
       const x2 = lines.data32S[offset + 2];
       const y2 = lines.data32S[offset + 3];
 
-      if (
-        x1 === undefined ||
-        y1 === undefined ||
-        x2 === undefined ||
-        y2 === undefined
-      ) {
+      if (x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
         continue;
       }
 
@@ -346,13 +338,15 @@ function projectMask(mask: CvMat, axis: Axis): Float32Array {
   const length = axis === 'x' ? mask.cols : mask.rows;
   const crossLength = axis === 'x' ? mask.rows : mask.cols;
   const profile = new Float32Array(length);
+  const runtimeData8U: unknown = Reflect.get(mask, 'data8U');
+  const maskData = runtimeData8U instanceof Uint8Array ? runtimeData8U : mask.data;
 
   if (axis === 'x') {
     for (let y = 0; y < mask.rows; y += 1) {
       const rowOffset = y * mask.cols;
 
       for (let x = 0; x < mask.cols; x += 1) {
-        if ((mask.data8U[rowOffset + x] ?? 0) > 0) {
+        if ((maskData[rowOffset + x] ?? 0) > 0) {
           profile[x] = (profile[x] ?? 0) + 1;
         }
       }
@@ -363,7 +357,7 @@ function projectMask(mask: CvMat, axis: Axis): Float32Array {
       let count = 0;
 
       for (let x = 0; x < mask.cols; x += 1) {
-        if ((mask.data8U[rowOffset + x] ?? 0) > 0) {
+        if ((maskData[rowOffset + x] ?? 0) > 0) {
           count += 1;
         }
       }
@@ -386,15 +380,8 @@ function clusterLinePixels(profile: Float32Array): readonly LineCluster[] {
     return [];
   }
 
-  const threshold = Math.max(
-    0.02,
-    peak * 0.12,
-    percentile(profile, 0.82) * 0.42,
-  );
-  const maximumClusterWidth = Math.max(
-    7,
-    Math.round(profile.length * 0.012),
-  );
+  const threshold = Math.max(0.02, peak * 0.12, percentile(profile, 0.82) * 0.42);
+  const maximumClusterWidth = Math.max(7, Math.round(profile.length * 0.012));
   const clusters: LineCluster[] = [];
   let start = -1;
   let lastEvidence = -1;
@@ -449,12 +436,8 @@ function clusterLinePixels(profile: Float32Array): readonly LineCluster[] {
   return mergeDuplicateClusters(clusters);
 }
 
-function mergeDuplicateClusters(
-  clusters: readonly LineCluster[],
-): readonly LineCluster[] {
-  const ordered = [...clusters].sort(
-    (left, right) => left.center - right.center,
-  );
+function mergeDuplicateClusters(clusters: readonly LineCluster[]): readonly LineCluster[] {
+  const ordered = [...clusters].sort((left, right) => left.center - right.center);
   const merged: LineCluster[] = [];
 
   for (const cluster of ordered) {
@@ -468,9 +451,7 @@ function mergeDuplicateClusters(
     const totalWeight = previous.weight + cluster.weight;
     merged[merged.length - 1] = {
       center: Math.round(
-        (previous.center * previous.weight +
-          cluster.center * cluster.weight) /
-          totalWeight,
+        (previous.center * previous.weight + cluster.center * cluster.weight) / totalWeight,
       ),
       weight: totalWeight,
       width: Math.max(previous.width, cluster.width),
@@ -480,42 +461,35 @@ function mergeDuplicateClusters(
   return merged;
 }
 
-function inferBoundaryModel(
-  evidence: LineEvidence,
-): BoundaryModel | null {
+function inferBoundaryModel(evidence: LineEvidence): BoundaryInferenceOutcome {
   if (
-    evidence.x.clusters.length < MIN_BOUNDARY_COUNT ||
-    evidence.y.clusters.length < MIN_BOUNDARY_COUNT
+    evidence.x.clusters.length < MIN_CLUSTER_COUNT ||
+    evidence.y.clusters.length < MIN_CLUSTER_COUNT
   ) {
-    return null;
+    return {
+      ok: false,
+      reason: 'insufficient-clusters',
+    };
   }
 
   const xSpacing = collectSpacingObservations(evidence.x.clusters);
   const ySpacing = collectSpacingObservations(evidence.y.clusters);
   const sharedCandidates = createSharedSpacingCandidates(xSpacing, ySpacing);
-  const evaluated: Array<{
-    readonly candidate: SharedSpacingCandidate;
-    readonly xFit: AxisFit;
-    readonly yFit: AxisFit;
-    readonly score: number;
-  }> = [];
+
+  if (sharedCandidates.length === 0) {
+    return {
+      ok: false,
+      reason: 'no-shared-spacing',
+    };
+  }
+
+  const evaluated: EvaluatedSpacingCandidate[] = [];
 
   for (const candidate of sharedCandidates) {
-    const xFit = evaluateAxisSpacing(
-      evidence.x,
-      candidate.cellSize,
-    );
-    const yFit = evaluateAxisSpacing(
-      evidence.y,
-      candidate.cellSize,
-    );
+    const xFit = evaluateAxisSpacing(evidence.x, candidate.cellSize);
+    const yFit = evaluateAxisSpacing(evidence.y, candidate.cellSize);
 
-    if (
-      !xFit ||
-      !yFit ||
-      xFit.coverage < MIN_MATCH_COVERAGE ||
-      yFit.coverage < MIN_MATCH_COVERAGE
-    ) {
+    if (!xFit || !yFit) {
       continue;
     }
 
@@ -523,53 +497,44 @@ function inferBoundaryModel(
       candidate,
       xFit,
       yFit,
-      score: (xFit.score + yFit.score) / 2,
     });
   }
 
-  const bestScore = evaluated.reduce(
-    (best, current) => Math.max(best, current.score),
-    0,
-  );
-  const selected = evaluated
-    .filter(
-      (current) =>
-        current.score >= bestScore * HARMONIC_SCORE_RETENTION &&
-        Math.abs(current.candidate.rawX - current.candidate.rawY) <=
-          MAX_SPACING_DISAGREEMENT,
-    )
-    .sort(
-      (left, right) =>
-        left.candidate.cellSize - right.candidate.cellSize ||
-        right.score - left.score,
-    )[0];
+  const ranked = [...evaluated].sort(compareEvaluatedCandidates);
+  const mostComplete = ranked[0];
 
-  if (!selected) {
-    return null;
+  if (!mostComplete) {
+    logCandidateComparison(sharedCandidates, evaluated, null);
+    return {
+      ok: false,
+      reason: 'insufficient-span',
+    };
   }
 
-  const xBoundaries = refineAxisBoundaries(
-    evidence.x.profile,
-    selected.xFit,
-    selected.candidate.cellSize,
-  );
-  const yBoundaries = refineAxisBoundaries(
-    evidence.y.profile,
-    selected.yFit,
-    selected.candidate.cellSize,
-  );
+  const selected = preferSupportedFundamental(mostComplete, ranked);
+  logCandidateComparison(sharedCandidates, evaluated, selected);
+  const xBoundaries = createAxisBoundaries(selected.xFit, selected.candidate.cellSize);
+  const yBoundaries = createAxisBoundaries(selected.yFit, selected.candidate.cellSize);
 
   if (
-    xBoundaries.length < MIN_BOUNDARY_COUNT ||
-    yBoundaries.length < MIN_BOUNDARY_COUNT
+    xBoundaries.length < MIN_CLUSTER_COUNT ||
+    yBoundaries.length < MIN_CLUSTER_COUNT ||
+    !areValidAxisBoundaries(xBoundaries, selected.candidate.cellSize) ||
+    !areValidAxisBoundaries(yBoundaries, selected.candidate.cellSize)
   ) {
-    return null;
+    return {
+      ok: false,
+      reason: 'invalid-boundaries',
+    };
   }
 
   return {
-    cellSize: selected.candidate.cellSize,
-    xBoundaries,
-    yBoundaries,
+    ok: true,
+    model: {
+      cellSize: selected.candidate.cellSize,
+      xBoundaries,
+      yBoundaries,
+    },
   };
 }
 
@@ -587,11 +552,7 @@ function collectSpacingObservations(
 
     const lastIndex = Math.min(clusters.length, leftIndex + 10);
 
-    for (
-      let rightIndex = leftIndex + 1;
-      rightIndex < lastIndex;
-      rightIndex += 1
-    ) {
+    for (let rightIndex = leftIndex + 1; rightIndex < lastIndex; rightIndex += 1) {
       const right = clusters[rightIndex];
 
       if (!right) {
@@ -600,11 +561,7 @@ function collectSpacingObservations(
 
       const distance = right.center - left.center;
 
-      for (
-        let divisor = 1;
-        divisor <= MAX_HARMONIC_DIVISOR;
-        divisor += 1
-      ) {
+      for (let divisor = 1; divisor <= MAX_HARMONIC_DIVISOR; divisor += 1) {
         const spacing = distance / divisor;
 
         if (spacing < MIN_CELL_SIZE) {
@@ -613,26 +570,19 @@ function collectSpacingObservations(
 
         raw.push({
           value: spacing,
-          weight:
-            Math.min(left.weight, right.weight) /
-            Math.max(1, divisor * 0.75),
+          weight: Math.min(left.weight, right.weight) / Math.max(1, divisor * 0.75),
         });
       }
     }
   }
 
-  return groupSpacingObservations(raw).slice(
-    0,
-    MAX_AXIS_SPACING_OBSERVATIONS,
-  );
+  return groupSpacingObservations(raw).slice(0, MAX_AXIS_SPACING_OBSERVATIONS);
 }
 
 function groupSpacingObservations(
   observations: readonly SpacingObservation[],
 ): readonly SpacingObservation[] {
-  const ordered = [...observations].sort(
-    (left, right) => left.value - right.value,
-  );
+  const ordered = [...observations].sort((left, right) => left.value - right.value);
   const groups: Array<{
     weightedValue: number;
     weight: number;
@@ -672,160 +622,134 @@ function createSharedSpacingCandidates(
 
   for (const xObservation of xObservations) {
     for (const yObservation of yObservations) {
-      if (
-        Math.abs(xObservation.value - yObservation.value) >
-        MAX_SPACING_DISAGREEMENT
-      ) {
+      if (Math.abs(xObservation.value - yObservation.value) > MAX_SPACING_DISAGREEMENT) {
         continue;
       }
 
-      for (
-        let divisor = 1;
-        divisor <= MAX_HARMONIC_DIVISOR;
-        divisor += 1
+      const rawX = xObservation.value;
+      const rawY = yObservation.value;
+      const cellSize = Math.round((rawX + rawY) / 2);
+
+      if (cellSize < MIN_CELL_SIZE || Math.abs(rawX - rawY) > MAX_SPACING_DISAGREEMENT) {
+        continue;
+      }
+
+      const existing = byCellSize.get(cellSize);
+      const next: SharedSpacingCandidate = {
+        cellSize,
+        rawX,
+        rawY,
+        evidenceWeight: Math.sqrt(xObservation.weight * yObservation.weight),
+      };
+
+      if (
+        !existing ||
+        next.evidenceWeight > existing.evidenceWeight ||
+        (next.evidenceWeight === existing.evidenceWeight &&
+          Math.abs(rawX - rawY) < Math.abs(existing.rawX - existing.rawY))
       ) {
-        const rawX = xObservation.value / divisor;
-        const rawY = yObservation.value / divisor;
-        const cellSize = Math.round((rawX + rawY) / 2);
-
-        if (
-          cellSize < MIN_CELL_SIZE ||
-          Math.abs(rawX - rawY) > MAX_SPACING_DISAGREEMENT
-        ) {
-          continue;
-        }
-
-        const existing = byCellSize.get(cellSize);
-        const next: SharedSpacingCandidate = {
-          cellSize,
-          rawX,
-          rawY,
-          evidenceWeight:
-            Math.sqrt(xObservation.weight * yObservation.weight) /
-            divisor,
-        };
-
-        if (
-          !existing ||
-          next.evidenceWeight > existing.evidenceWeight ||
-          (next.evidenceWeight === existing.evidenceWeight &&
-            Math.abs(rawX - rawY) <
-              Math.abs(existing.rawX - existing.rawY))
-        ) {
-          byCellSize.set(cellSize, next);
-        }
+        byCellSize.set(cellSize, next);
       }
     }
   }
 
   return [...byCellSize.values()]
     .sort(
-      (left, right) =>
-        right.evidenceWeight - left.evidenceWeight ||
-        left.cellSize - right.cellSize,
+      (left, right) => right.evidenceWeight - left.evidenceWeight || left.cellSize - right.cellSize,
     )
     .slice(0, MAX_SHARED_SPACING_CANDIDATES);
 }
 
-function evaluateAxisSpacing(
-  evidence: AxisEvidence,
-  cellSize: number,
-): AxisFit | null {
-  const phases = new Set<number>();
-
-  for (const cluster of evidence.clusters) {
-    phases.add(positiveModulo(cluster.center, cellSize));
-  }
-
+function evaluateAxisSpacing(evidence: AxisEvidence, cellSize: number): AxisFit | null {
+  const axisLength = evidence.profile.length;
+  const maximumEdgeInset = Math.max(
+    2,
+    Math.min(Math.round(cellSize * 0.6), Math.round(axisLength * 0.18)),
+  );
+  const candidateStarts = collectCandidateStarts(evidence.clusters, cellSize, maximumEdgeInset);
   const peak = maximum(evidence.profile);
   const matchThreshold = Math.max(0.018, peak * 0.1);
-  const matchRadius = Math.max(
-    1,
-    Math.min(4, Math.round(cellSize * 0.1)),
-  );
+  const matchRadius = Math.max(1, Math.min(4, Math.round(cellSize * 0.1)));
   let best: AxisFit | null = null;
 
-  for (const phase of phases) {
-    const positions: number[] = [];
+  for (const start of candidateStarts) {
+    const maximumCellCount = Math.floor((axisLength - start) / cellSize);
+    const minimumCellCount = Math.max(
+      MIN_CLUSTER_COUNT - 1,
+      Math.floor((axisLength * MIN_EXPLAINED_SPAN_RATIO) / cellSize),
+    );
+    const candidateCellCounts = new Set([maximumCellCount, maximumCellCount - 1]);
 
-    for (
-      let position = phase;
-      position <= evidence.profile.length;
-      position += cellSize
-    ) {
-      positions.push(position);
-    }
+    for (const cellCount of candidateCellCounts) {
+      if (cellCount < minimumCellCount) {
+        continue;
+      }
 
-    if (positions.length < MIN_BOUNDARY_COUNT) {
-      continue;
-    }
+      const end = start + cellCount * cellSize;
+      const endInset = axisLength - end;
 
-    const evidencePrefix = [0];
-    const matchPrefix = [0];
+      if (endInset < 0 || endInset > maximumEdgeInset) {
+        continue;
+      }
 
-    for (const position of positions) {
-      const lineEvidence = sampleBoundaryEvidence(
-        evidence.profile,
-        position,
-        matchRadius,
-        peak,
+      const expectedBoundaryCount = cellCount + 1;
+      const positions = Array.from(
+        { length: expectedBoundaryCount },
+        (_, index) => start + index * cellSize,
       );
-      evidencePrefix.push(
-        (evidencePrefix[evidencePrefix.length - 1] ?? 0) + lineEvidence,
+      const lineEvidence = positions.map((position) =>
+        sampleMeasuredBoundaryEvidence(evidence.profile, position, matchRadius),
       );
-      matchPrefix.push(
-        (matchPrefix[matchPrefix.length - 1] ?? 0) +
-          (lineEvidence >= matchThreshold ? 1 : 0),
+      const phaseEvidence = positions.map((position) =>
+        sampleMeasuredBoundaryEvidence(evidence.profile, position, 1),
       );
-    }
+      const matchedBoundaryCount = lineEvidence.reduce(
+        (count, value) => count + (value >= matchThreshold ? 1 : 0),
+        0,
+      );
+      const requiredMatches = Math.max(
+        MIN_CLUSTER_COUNT,
+        Math.ceil(expectedBoundaryCount * MIN_EXPLAINED_SPAN_RATIO),
+      );
+      const evidenceCoverage = matchedBoundaryCount / expectedBoundaryCount;
+      const explainedPixelSpan = end - start;
+      const explainedSpanRatio = explainedPixelSpan / axisLength;
 
-    for (
-      let startIndex = 0;
-      startIndex <= positions.length - MIN_BOUNDARY_COUNT;
-      startIndex += 1
-    ) {
-      for (
-        let endIndex = startIndex + MIN_BOUNDARY_COUNT;
-        endIndex <= positions.length;
-        endIndex += 1
+      if (
+        explainedSpanRatio < MIN_EXPLAINED_SPAN_RATIO ||
+        matchedBoundaryCount < requiredMatches ||
+        evidenceCoverage < MIN_EVIDENCE_COVERAGE ||
+        evidenceCoverage < MIN_GENERATED_BOUNDARY_EVIDENCE
       ) {
-        const lineCount = endIndex - startIndex;
-        const matches =
-          (matchPrefix[endIndex] ?? 0) -
-          (matchPrefix[startIndex] ?? 0);
-        const coverage = matches / lineCount;
+        continue;
+      }
 
-        if (coverage < MIN_MATCH_COVERAGE) {
-          continue;
-        }
+      const clusterCoverage = calculateClusterCoverage(
+        evidence.clusters,
+        start,
+        end,
+        cellSize,
+        matchRadius,
+      );
+      const evidenceScore =
+        phaseEvidence.reduce((sum, value) => sum + value / Math.max(peak, 0.000_001), 0) /
+        expectedBoundaryCount;
+      const fit: AxisFit = {
+        start,
+        end,
+        expectedBoundaryCount,
+        matchedBoundaryCount,
+        explainedPixelSpan,
+        explainedSpanRatio,
+        evidenceCoverage,
+        clusterCoverage,
+        startSupport: (phaseEvidence[0] ?? 0) >= matchThreshold,
+        endSupport: (phaseEvidence[phaseEvidence.length - 1] ?? 0) >= matchThreshold,
+        evidenceScore,
+      };
 
-        const evidenceAverage =
-          ((evidencePrefix[endIndex] ?? 0) -
-            (evidencePrefix[startIndex] ?? 0)) /
-          lineCount;
-        const lengthEvidence = Math.min(
-          1,
-          (lineCount - 1) / 24,
-        );
-        const score =
-          evidenceAverage * 0.45 +
-          coverage * 0.35 +
-          lengthEvidence * 0.2;
-        const start = positions[startIndex];
-
-        if (
-          start !== undefined &&
-          (!best ||
-            score > best.score ||
-            (score === best.score && lineCount > best.lineCount))
-        ) {
-          best = {
-            start,
-            lineCount,
-            coverage,
-            score,
-          };
-        }
+      if (!best || compareAxisFits(fit, best) < 0) {
+        best = fit;
       }
     }
   }
@@ -833,293 +757,201 @@ function evaluateAxisSpacing(
   return best;
 }
 
-function refineAxisBoundaries(
-  profile: Float32Array,
-  fit: AxisFit,
-  cellSize: number,
-): readonly number[] {
-  const searchRadius = Math.max(
-    3,
-    Math.min(10, Math.round(cellSize * 0.25)),
-  );
-  let bestStart = fit.start;
-  let bestScore = Number.NEGATIVE_INFINITY;
-  const peak = maximum(profile);
-
-  for (
-    let start = fit.start - searchRadius;
-    start <= fit.start + searchRadius;
-    start += 1
-  ) {
-    const end = start + (fit.lineCount - 1) * cellSize;
-
-    if (start < 0 || end > profile.length) {
-      continue;
-    }
-
-    let score = 0;
-
-    for (let index = 0; index < fit.lineCount; index += 1) {
-      score += sampleBoundaryEvidence(
-        profile,
-        start + index * cellSize,
-        1,
-        peak,
-      );
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestStart = start;
-    }
-  }
-
+function createAxisBoundaries(fit: AxisFit, cellSize: number): readonly number[] {
   return Object.freeze(
-    Array.from(
-      { length: fit.lineCount },
-      (_, index) => bestStart + index * cellSize,
-    ),
+    Array.from({ length: fit.expectedBoundaryCount }, (_, index) => fit.start + index * cellSize),
   );
 }
 
-function offsetBoundaryModel(
-  model: BoundaryModel,
-  searchRect: NaturalImageRect,
-): BoundaryModel {
-  return {
-    cellSize: model.cellSize,
-    xBoundaries: Object.freeze(
-      model.xBoundaries.map((boundary) => boundary + searchRect.x),
-    ),
-    yBoundaries: Object.freeze(
-      model.yBoundaries.map((boundary) => boundary + searchRect.y),
-    ),
-  };
-}
+function collectCandidateStarts(
+  clusters: readonly LineCluster[],
+  cellSize: number,
+  maximumEdgeInset: number,
+): readonly number[] {
+  const starts = new Set<number>();
 
-function trimLabelBands(
-  model: BoundaryModel,
-  imageData: ImageData,
-  searchRect: NaturalImageRect,
-): BoundaryModel {
-  let xBoundaries = [...model.xBoundaries];
-  let yBoundaries = [...model.yBoundaries];
-
-  if (xBoundaries.length >= 6 && yBoundaries.length >= 6) {
-    const topScore = scoreHorizontalLabelBand(
-      imageData,
-      searchRect,
-      xBoundaries,
-      yBoundaries[0],
-      yBoundaries[1],
-    );
-    const bottomScore = scoreHorizontalLabelBand(
-      imageData,
-      searchRect,
-      xBoundaries,
-      yBoundaries[yBoundaries.length - 2],
-      yBoundaries[yBoundaries.length - 1],
-    );
-    const trimTop = topScore >= LABEL_BAND_CELL_RATIO;
-    const trimBottom = bottomScore >= LABEL_BAND_CELL_RATIO;
-
-    yBoundaries = yBoundaries.slice(
-      trimTop ? 1 : 0,
-      trimBottom ? -1 : undefined,
-    );
+  for (let start = 0; start <= maximumEdgeInset; start += 1) {
+    starts.add(start);
   }
 
-  if (xBoundaries.length >= 6 && yBoundaries.length >= 6) {
-    const leftScore = scoreVerticalLabelBand(
-      imageData,
-      searchRect,
-      xBoundaries[0],
-      xBoundaries[1],
-      yBoundaries,
-    );
-    const rightScore = scoreVerticalLabelBand(
-      imageData,
-      searchRect,
-      xBoundaries[xBoundaries.length - 2],
-      xBoundaries[xBoundaries.length - 1],
-      yBoundaries,
-    );
-    const trimLeft = leftScore >= LABEL_BAND_CELL_RATIO;
-    const trimRight = rightScore >= LABEL_BAND_CELL_RATIO;
+  for (const cluster of clusters) {
+    const phase = positiveModulo(cluster.center, cellSize);
 
-    xBoundaries = xBoundaries.slice(
-      trimLeft ? 1 : 0,
-      trimRight ? -1 : undefined,
-    );
+    if (phase <= maximumEdgeInset) {
+      starts.add(phase);
+    }
   }
 
-  return {
-    cellSize: model.cellSize,
-    xBoundaries: Object.freeze(xBoundaries),
-    yBoundaries: Object.freeze(yBoundaries),
-  };
+  return [...starts].sort((left, right) => left - right);
 }
 
-function scoreHorizontalLabelBand(
-  imageData: ImageData,
-  searchRect: NaturalImageRect,
-  xBoundaries: readonly number[],
-  top: number | undefined,
-  bottom: number | undefined,
+function calculateClusterCoverage(
+  clusters: readonly LineCluster[],
+  start: number,
+  end: number,
+  cellSize: number,
+  matchRadius: number,
 ): number {
-  if (top === undefined || bottom === undefined) {
-    return 0;
-  }
+  let coveredWeight = 0;
+  let totalWeight = 0;
 
-  let labelCells = 0;
-  let cellCount = 0;
+  for (const cluster of clusters) {
+    totalWeight += cluster.weight;
 
-  for (let index = 1; index < xBoundaries.length; index += 1) {
-    const left = xBoundaries[index - 1];
-    const right = xBoundaries[index];
-
-    if (left === undefined || right === undefined) {
+    if (cluster.center < start - matchRadius || cluster.center > end + matchRadius) {
       continue;
     }
 
-    if (
-      isLabelCell(
-        readCellStatistics(
-          imageData,
-          searchRect,
-          left,
-          top,
-          right,
-          bottom,
-        ),
-      )
-    ) {
-      labelCells += 1;
-    }
+    const nearestIndex = Math.round((cluster.center - start) / cellSize);
+    const nearestBoundary = start + nearestIndex * cellSize;
 
-    cellCount += 1;
+    if (Math.abs(cluster.center - nearestBoundary) <= matchRadius) {
+      coveredWeight += cluster.weight;
+    }
   }
 
-  return cellCount > 0 ? labelCells / cellCount : 0;
+  return totalWeight > 0 ? coveredWeight / totalWeight : 0;
 }
 
-function scoreVerticalLabelBand(
-  imageData: ImageData,
-  searchRect: NaturalImageRect,
-  left: number | undefined,
-  right: number | undefined,
-  yBoundaries: readonly number[],
-): number {
-  if (left === undefined || right === undefined) {
-    return 0;
-  }
-
-  let labelCells = 0;
-  let cellCount = 0;
-
-  for (let index = 1; index < yBoundaries.length; index += 1) {
-    const top = yBoundaries[index - 1];
-    const bottom = yBoundaries[index];
-
-    if (top === undefined || bottom === undefined) {
-      continue;
-    }
-
-    if (
-      isLabelCell(
-        readCellStatistics(
-          imageData,
-          searchRect,
-          left,
-          top,
-          right,
-          bottom,
-        ),
-      )
-    ) {
-      labelCells += 1;
-    }
-
-    cellCount += 1;
-  }
-
-  return cellCount > 0 ? labelCells / cellCount : 0;
-}
-
-function readCellStatistics(
-  imageData: ImageData,
-  searchRect: NaturalImageRect,
-  naturalLeft: number,
-  naturalTop: number,
-  naturalRight: number,
-  naturalBottom: number,
-): CellStatistics {
-  const insetX = Math.max(1, Math.round((naturalRight - naturalLeft) * 0.18));
-  const insetY = Math.max(1, Math.round((naturalBottom - naturalTop) * 0.18));
-  const left = Math.max(
-    0,
-    Math.round(naturalLeft - searchRect.x + insetX),
-  );
-  const right = Math.min(
-    imageData.width,
-    Math.round(naturalRight - searchRect.x - insetX),
-  );
-  const top = Math.max(
-    0,
-    Math.round(naturalTop - searchRect.y + insetY),
-  );
-  const bottom = Math.min(
-    imageData.height,
-    Math.round(naturalBottom - searchRect.y - insetY),
-  );
-  const stride = Math.max(
-    1,
-    Math.floor(Math.min(right - left, bottom - top) / 18),
-  );
-  let samples = 0;
-  let darkPixels = 0;
-  let colorPixels = 0;
-
-  for (let y = top; y < bottom; y += stride) {
-    for (let x = left; x < right; x += stride) {
-      const offset = (y * imageData.width + x) * 4;
-      const red = imageData.data[offset] ?? 255;
-      const green = imageData.data[offset + 1] ?? 255;
-      const blue = imageData.data[offset + 2] ?? 255;
-      const maximumChannel = Math.max(red, green, blue);
-      const minimumChannel = Math.min(red, green, blue);
-      const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
-
-      if (luminance < 190) {
-        darkPixels += 1;
-      }
-
-      if (maximumChannel - minimumChannel > 28 && luminance < 240) {
-        colorPixels += 1;
-      }
-
-      samples += 1;
-    }
-  }
-
-  return {
-    darkRatio: samples > 0 ? darkPixels / samples : 0,
-    colorRatio: samples > 0 ? colorPixels / samples : 0,
-  };
-}
-
-function isLabelCell(statistics: CellStatistics): boolean {
+function compareAxisFits(left: AxisFit, right: AxisFit): number {
   return (
-    statistics.darkRatio >= 0.025 &&
-    statistics.darkRatio <= 0.32 &&
-    statistics.colorRatio <= 0.1
+    right.explainedSpanRatio - left.explainedSpanRatio ||
+    right.matchedBoundaryCount - left.matchedBoundaryCount ||
+    right.evidenceCoverage - left.evidenceCoverage ||
+    right.clusterCoverage - left.clusterCoverage ||
+    right.evidenceScore - left.evidenceScore ||
+    Number(right.startSupport) - Number(left.startSupport) ||
+    Number(right.endSupport) - Number(left.endSupport) ||
+    left.start - right.start
   );
 }
 
-function readSearchPixels(
-  raster: LoadedRaster,
-  searchRect: NaturalImageRect,
-): ImageData | null {
+function compareEvaluatedCandidates(
+  left: EvaluatedSpacingCandidate,
+  right: EvaluatedSpacingCandidate,
+): number {
+  const leftMinimumSpan = Math.min(left.xFit.explainedSpanRatio, left.yFit.explainedSpanRatio);
+  const rightMinimumSpan = Math.min(right.xFit.explainedSpanRatio, right.yFit.explainedSpanRatio);
+  const leftTotalSpan = left.xFit.explainedSpanRatio + left.yFit.explainedSpanRatio;
+  const rightTotalSpan = right.xFit.explainedSpanRatio + right.yFit.explainedSpanRatio;
+  const leftMatched = left.xFit.matchedBoundaryCount + left.yFit.matchedBoundaryCount;
+  const rightMatched = right.xFit.matchedBoundaryCount + right.yFit.matchedBoundaryCount;
+  const leftCoverage = Math.min(left.xFit.evidenceCoverage, left.yFit.evidenceCoverage);
+  const rightCoverage = Math.min(right.xFit.evidenceCoverage, right.yFit.evidenceCoverage);
+  const leftClusterCoverage = Math.min(left.xFit.clusterCoverage, left.yFit.clusterCoverage);
+  const rightClusterCoverage = Math.min(right.xFit.clusterCoverage, right.yFit.clusterCoverage);
+  const leftEvidence = left.xFit.evidenceScore + left.yFit.evidenceScore;
+  const rightEvidence = right.xFit.evidenceScore + right.yFit.evidenceScore;
+
+  return (
+    rightMinimumSpan - leftMinimumSpan ||
+    rightTotalSpan - leftTotalSpan ||
+    rightMatched - leftMatched ||
+    rightCoverage - leftCoverage ||
+    rightClusterCoverage - leftClusterCoverage ||
+    rightEvidence - leftEvidence ||
+    right.candidate.evidenceWeight - left.candidate.evidenceWeight
+  );
+}
+
+function preferSupportedFundamental(
+  mostComplete: EvaluatedSpacingCandidate,
+  ranked: readonly EvaluatedSpacingCandidate[],
+): EvaluatedSpacingCandidate {
+  let selected = mostComplete;
+
+  for (const candidate of ranked) {
+    if (
+      candidate.candidate.cellSize >= selected.candidate.cellSize ||
+      !isHarmonicPair(candidate.candidate.cellSize, selected.candidate.cellSize)
+    ) {
+      continue;
+    }
+
+    if (
+      candidate.xFit.explainedPixelSpan < selected.xFit.explainedPixelSpan * 0.9 ||
+      candidate.yFit.explainedPixelSpan < selected.yFit.explainedPixelSpan * 0.9 ||
+      candidate.xFit.matchedBoundaryCount < selected.xFit.matchedBoundaryCount ||
+      candidate.yFit.matchedBoundaryCount < selected.yFit.matchedBoundaryCount
+    ) {
+      continue;
+    }
+
+    selected = candidate;
+  }
+
+  return selected;
+}
+
+function isHarmonicPair(smallerCellSize: number, largerCellSize: number): boolean {
+  for (let divisor = 2; divisor <= MAX_HARMONIC_DIVISOR; divisor += 1) {
+    if (Math.abs(largerCellSize - smallerCellSize * divisor) <= MAX_SPACING_DISAGREEMENT) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function areValidAxisBoundaries(boundaries: readonly number[], cellSize: number): boolean {
+  return boundaries.every(
+    (boundary, index) =>
+      Number.isInteger(boundary) &&
+      boundary >= 0 &&
+      (index === 0 || boundary - (boundaries[index - 1] ?? boundary) === cellSize),
+  );
+}
+
+function logCandidateComparison(
+  sharedCandidates: readonly SharedSpacingCandidate[],
+  evaluated: readonly EvaluatedSpacingCandidate[],
+  selected: EvaluatedSpacingCandidate | null,
+): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  const acceptedCellSizes = new Set(evaluated.map((entry) => entry.candidate.cellSize));
+  const comparison = sharedCandidates.slice(0, 16).map((candidate) => {
+    const entry = evaluated.find((current) => current.candidate.cellSize === candidate.cellSize);
+
+    return entry
+      ? {
+          cellSize: candidate.cellSize,
+          accepted: true,
+          xSpan: roundMetric(entry.xFit.explainedSpanRatio),
+          ySpan: roundMetric(entry.yFit.explainedSpanRatio),
+          matched: entry.xFit.matchedBoundaryCount + entry.yFit.matchedBoundaryCount,
+          expected: entry.xFit.expectedBoundaryCount + entry.yFit.expectedBoundaryCount,
+          coverage: roundMetric(Math.min(entry.xFit.evidenceCoverage, entry.yFit.evidenceCoverage)),
+        }
+      : {
+          cellSize: candidate.cellSize,
+          accepted: acceptedCellSizes.has(candidate.cellSize),
+        };
+  });
+
+  console.debug(
+    `[grid-detection:candidates] ${JSON.stringify({
+      selectedCellSize: selected?.candidate.cellSize ?? null,
+      comparison,
+    })}`,
+  );
+}
+
+function roundMetric(value: number): number {
+  return Math.round(value * 1_000) / 1_000;
+}
+
+function offsetBoundaryModel(model: BoundaryModel, searchRect: NaturalImageRect): BoundaryModel {
+  return {
+    cellSize: model.cellSize,
+    xBoundaries: Object.freeze(model.xBoundaries.map((boundary) => boundary + searchRect.x)),
+    yBoundaries: Object.freeze(model.yBoundaries.map((boundary) => boundary + searchRect.y)),
+  };
+}
+
+function readSearchPixels(raster: LoadedRaster, searchRect: NaturalImageRect): ImageData | null {
   const canvas = document.createElement('canvas');
   canvas.width = searchRect.width;
   canvas.height = searchRect.height;
@@ -1178,11 +1010,7 @@ function positiveModulo(value: number, divisor: number): number {
   return ((Math.round(value) % divisor) + divisor) % divisor;
 }
 
-function localProfileMax(
-  profile: Float32Array,
-  position: number,
-  radius: number,
-): number {
+function localProfileMax(profile: Float32Array, position: number, radius: number): number {
   const center = Math.round(position);
   const start = Math.max(0, center - radius);
   const end = Math.min(profile.length - 1, center + radius);
@@ -1195,23 +1023,12 @@ function localProfileMax(
   return result;
 }
 
-function sampleBoundaryEvidence(
+function sampleMeasuredBoundaryEvidence(
   profile: Float32Array,
   position: number,
   radius: number,
-  peak: number,
 ): number {
-  const measured = localProfileMax(profile, position, radius);
-  const roundedPosition = Math.round(position);
-
-  if (
-    roundedPosition === 0 ||
-    roundedPosition === profile.length
-  ) {
-    return Math.max(measured, peak * 0.5);
-  }
-
-  return measured;
+  return localProfileMax(profile, position, radius);
 }
 
 function maximum(values: Float32Array): number {
@@ -1226,22 +1043,65 @@ function maximum(values: Float32Array): number {
 
 function percentile(values: Float32Array, ratio: number): number {
   const ordered = Array.from(values).sort((left, right) => left - right);
-  const index = Math.min(
-    ordered.length - 1,
-    Math.max(0, Math.round((ordered.length - 1) * ratio)),
-  );
+  const index = Math.min(ordered.length - 1, Math.max(0, Math.round((ordered.length - 1) * ratio)));
   return ordered[index] ?? 0;
 }
 
 function failure(
   reason: GridDetectionFailureReason,
   message: string,
+  internalCause?: unknown,
 ): GridDetectionFailure {
+  logDetectionFailure(reason, internalCause);
+
   return {
     ok: false,
     reason,
     message,
   };
+}
+
+function inferenceFailure(reason: BoundaryInferenceFailureReason): GridDetectionFailure {
+  switch (reason) {
+    case 'insufficient-clusters':
+      return failure(reason, '搜索区域内可用网格线不足，请让搜索区域覆盖完整网格。');
+    case 'no-shared-spacing':
+      return failure(reason, '横纵网格间距不一致，请重新调整搜索区域。');
+    case 'insufficient-span':
+      return failure(reason, '识别到的网格未覆盖完整搜索区域，请扩大或对齐搜索区域。');
+    case 'invalid-boundaries':
+      return failure(reason, '识别出的网格边界无效，请重新调整搜索区域。');
+  }
+}
+
+function preferInferenceFailure(
+  primary: BoundaryInferenceFailure,
+  fallback: BoundaryInferenceFailure,
+): BoundaryInferenceFailure {
+  const priority: Record<BoundaryInferenceFailureReason, number> = {
+    'invalid-boundaries': 4,
+    'insufficient-span': 3,
+    'no-shared-spacing': 2,
+    'insufficient-clusters': 1,
+  };
+
+  return priority[fallback.reason] >= priority[primary.reason] ? fallback : primary;
+}
+
+function logDetectionFailure(reason: GridDetectionFailureReason, internalCause?: unknown): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  const detail =
+    internalCause instanceof Error
+      ? (internalCause.stack ?? `${internalCause.name}: ${internalCause.message}`)
+      : internalCause === undefined
+        ? ''
+        : typeof internalCause === 'string'
+          ? internalCause
+          : '未知内部错误';
+  console.warn(`[grid-detection:${reason}]${detail ? ` ${detail}` : ''}`);
 }
 
 async function loadRasterFromFile(file: File): Promise<LoadedRaster> {

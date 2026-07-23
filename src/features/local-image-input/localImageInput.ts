@@ -1,10 +1,7 @@
 import { decodeImageFromObjectUrl } from './imageDecoder';
 import { toDecodedImage, validateSingleImageFile } from './fileValidation';
 import { createObjectUrlStore } from './objectUrlStore';
-import type {
-  DecodedImage,
-  LocalImageInputLifecycle,
-} from './types';
+import type { DecodedImage, LocalImageInputLifecycle } from './types';
 
 interface LocalImageInputElements {
   readonly appShell: HTMLElement;
@@ -150,7 +147,6 @@ export function mountLocalImageInput(
     elements.status.textContent = message;
     elements.status.dataset.state = state;
   }
-
 }
 
 function getElements(root: HTMLElement): LocalImageInputElements {

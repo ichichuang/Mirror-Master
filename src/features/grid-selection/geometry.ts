@@ -1,8 +1,4 @@
-import type {
-  GridBoundarySelection,
-  NaturalImageRect,
-  NaturalImageSize,
-} from './types';
+import type { GridBoundarySelection, NaturalImageRect, NaturalImageSize } from './types';
 
 const MIN_SEARCH_RECT_SIZE = 8;
 
@@ -26,10 +22,7 @@ export function createNaturalRect(
   const safeRight = clamp(Math.round(Math.max(left, right)), 0, naturalImage.width);
   const safeBottom = clamp(Math.round(Math.max(top, bottom)), 0, naturalImage.height);
 
-  if (
-    safeRight - safeLeft < MIN_SEARCH_RECT_SIZE ||
-    safeBottom - safeTop < MIN_SEARCH_RECT_SIZE
-  ) {
+  if (safeRight - safeLeft < MIN_SEARCH_RECT_SIZE || safeBottom - safeTop < MIN_SEARCH_RECT_SIZE) {
     return null;
   }
 
@@ -43,16 +36,8 @@ export function createNaturalRect(
   });
 }
 
-export function createFullImageSearchRect(
-  naturalImage: NaturalImageSize,
-): NaturalImageRect {
-  const rectangle = createNaturalRect(
-    naturalImage,
-    0,
-    0,
-    naturalImage.width,
-    naturalImage.height,
-  );
+export function createFullImageSearchRect(naturalImage: NaturalImageSize): NaturalImageRect {
+  const rectangle = createNaturalRect(naturalImage, 0, 0, naturalImage.width, naturalImage.height);
 
   if (!rectangle) {
     throw new Error('Cannot create a search rectangle for an invalid image.');
@@ -67,25 +52,12 @@ export function translateNaturalRect(
   deltaX: number,
   deltaY: number,
 ): NaturalImageRect {
-  const left = clamp(
-    Math.round(rectangle.x + deltaX),
-    0,
-    naturalImage.width - rectangle.width,
-  );
-  const top = clamp(
-    Math.round(rectangle.y + deltaY),
-    0,
-    naturalImage.height - rectangle.height,
-  );
+  const left = clamp(Math.round(rectangle.x + deltaX), 0, naturalImage.width - rectangle.width);
+  const top = clamp(Math.round(rectangle.y + deltaY), 0, naturalImage.height - rectangle.height);
 
   return (
-    createNaturalRect(
-      naturalImage,
-      left,
-      top,
-      left + rectangle.width,
-      top + rectangle.height,
-    ) ?? rectangle
+    createNaturalRect(naturalImage, left, top, left + rectangle.width, top + rectangle.height) ??
+    rectangle
   );
 }
 
@@ -103,12 +75,7 @@ export function createGridBoundarySelection(input: {
   const right = xBoundaries[xBoundaries.length - 1];
   const bottom = yBoundaries[yBoundaries.length - 1];
 
-  if (
-    left === undefined ||
-    top === undefined ||
-    right === undefined ||
-    bottom === undefined
-  ) {
+  if (left === undefined || top === undefined || right === undefined || bottom === undefined) {
     return null;
   }
 
@@ -126,14 +93,10 @@ export function createGridBoundarySelection(input: {
     yBoundaries,
   };
 
-  return isValidGridBoundarySelection(selection)
-    ? Object.freeze(selection)
-    : null;
+  return isValidGridBoundarySelection(selection) ? Object.freeze(selection) : null;
 }
 
-export function isValidGridBoundarySelection(
-  selection: GridBoundarySelection,
-): boolean {
+export function isValidGridBoundarySelection(selection: GridBoundarySelection): boolean {
   const {
     naturalImage,
     searchRect,
@@ -192,8 +155,7 @@ export function isValidGridBoundarySelection(
   }
 
   return (
-    hasExactIntegerSpacing(xBoundaries, cellSize) &&
-    hasExactIntegerSpacing(yBoundaries, cellSize)
+    hasExactIntegerSpacing(xBoundaries, cellSize) && hasExactIntegerSpacing(yBoundaries, cellSize)
   );
 }
 
@@ -206,10 +168,7 @@ function isValidNaturalImage(naturalImage: NaturalImageSize): boolean {
   );
 }
 
-function hasExactIntegerSpacing(
-  boundaries: readonly number[],
-  cellSize: number,
-): boolean {
+function hasExactIntegerSpacing(boundaries: readonly number[], cellSize: number): boolean {
   if (boundaries.length < 2 || !boundaries.every(Number.isInteger)) {
     return false;
   }

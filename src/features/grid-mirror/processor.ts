@@ -1,8 +1,5 @@
 import { isValidGridBoundarySelection } from '../grid-selection/geometry';
-import type {
-  GridBoundarySelection,
-  NaturalImageSize,
-} from '../grid-selection/types';
+import type { GridBoundarySelection, NaturalImageSize } from '../grid-selection/types';
 import type {
   GridMirrorInput,
   GridMirrorProcessingFailure,
@@ -16,11 +13,10 @@ interface LoadedRaster {
   readonly close: () => void;
 }
 
-export async function mirrorGridCells(input: GridMirrorInput): Promise<GridMirrorProcessingOutcome> {
-  if (
-    !isValidGridBoundarySelection(input.selection) ||
-    !hasIdenticalSquareCells(input.selection)
-  ) {
+export async function mirrorGridCells(
+  input: GridMirrorInput,
+): Promise<GridMirrorProcessingOutcome> {
+  if (!isValidGridBoundarySelection(input.selection) || !hasIdenticalSquareCells(input.selection)) {
     return failure('invalid-boundaries', '当前网格选区无效，请返回原图重新调整。');
   }
 
@@ -82,12 +78,7 @@ function moveGridCells(
   outputContext: CanvasRenderingContext2D,
   selection: GridBoundarySelection,
 ): void {
-  const {
-    columns,
-    rows,
-    xBoundaries,
-    yBoundaries,
-  } = selection;
+  const { columns, rows, xBoundaries, yBoundaries } = selection;
 
   for (let row = 0; row < rows; row += 1) {
     const sourceTop = yBoundaries[row];
@@ -128,9 +119,7 @@ function moveGridCells(
   }
 }
 
-function hasIdenticalSquareCells(
-  selection: GridBoundarySelection,
-): boolean {
+function hasIdenticalSquareCells(selection: GridBoundarySelection): boolean {
   const { cellSize, columns, rows, xBoundaries, yBoundaries } = selection;
 
   for (let column = 0; column < columns; column += 1) {
@@ -156,11 +145,7 @@ function hasIdenticalSquareCells(
     const top = yBoundaries[row];
     const bottom = yBoundaries[row + 1];
 
-    if (
-      top === undefined ||
-      bottom === undefined ||
-      bottom - top !== cellSize
-    ) {
+    if (top === undefined || bottom === undefined || bottom - top !== cellSize) {
       return false;
     }
   }

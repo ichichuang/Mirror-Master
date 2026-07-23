@@ -11,16 +11,7 @@ import type {
   NaturalImageSize,
 } from '../grid-selection/types';
 
-type HandleType =
-  | 'move'
-  | 'n'
-  | 'e'
-  | 's'
-  | 'w'
-  | 'nw'
-  | 'ne'
-  | 'se'
-  | 'sw';
+type HandleType = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
 type ZoomMode = 'fit' | 'manual';
 type EditorView = 'original' | 'result';
 
@@ -63,9 +54,7 @@ interface GridEditorElements {
 }
 
 export interface GridEditorLifecycle {
-  readonly onSelectionChange?: (
-    selection: GridBoundarySelection | null,
-  ) => void;
+  readonly onSelectionChange?: (selection: GridBoundarySelection | null) => void;
   readonly onDetectionChange?: (isDetecting: boolean) => void;
 }
 
@@ -184,11 +173,9 @@ export function mountGridEditor(
     elements.image.alt = `${image.fileName} 的原图`;
     elements.overlay.setAttribute(
       'viewBox',
-      `0 0 ${String(image.naturalImage.width)} ${String(
-        image.naturalImage.height,
-      )}`,
+      `0 0 ${String(image.naturalImage.width)} ${String(image.naturalImage.height)}`,
     );
-    elements.overlay.hidden = false;
+    elements.overlay.removeAttribute('hidden');
     elements.overlay.tabIndex = 0;
     elements.overlay.setAttribute('aria-label', '网格搜索区域编辑区');
     updateFitScale();
@@ -243,10 +230,8 @@ export function mountGridEditor(
         searchRect: rectangle,
       });
 
-      if (
-        currentVersion !== detectionVersion ||
-        currentImage?.file !== image.file
-      ) {
+      if (currentVersion !== detectionVersion || currentImage?.file !== image.file) {
+        logDetectionRuntimeFailure('stale-work');
         return;
       }
 
@@ -272,17 +257,17 @@ export function mountGridEditor(
       renderOverlay();
       lifecycle.onSelectionChange?.(null);
       setHint(outcome.message);
-    } catch {
-      if (
-        currentVersion === detectionVersion &&
-        currentImage?.file === image.file
-      ) {
+    } catch (error) {
+      if (currentVersion === detectionVersion && currentImage?.file === image.file) {
+        logDetectionRuntimeFailure('morphology-failed', error);
         detecting = false;
         lifecycle.onDetectionChange?.(false);
         selection = null;
         renderOverlay();
         lifecycle.onSelectionChange?.(null);
-        setHint('未识别到完整网格，请调整搜索区域。');
+        setHint('网格识别运行失败，请重新调整搜索区域。');
+      } else {
+        logDetectionRuntimeFailure('stale-work', error);
       }
     }
   }
@@ -332,11 +317,7 @@ export function mountGridEditor(
   }
 
   function handlePointerMove(event: PointerEvent): void {
-    if (
-      !activePointer ||
-      activePointer.pointerId !== event.pointerId ||
-      !currentImage
-    ) {
+    if (!activePointer || activePointer.pointerId !== event.pointerId || !currentImage) {
       return;
     }
 
@@ -423,18 +404,8 @@ export function mountGridEditor(
     const delta = getMoveKeyDelta(event.key, amount);
     const nextRect =
       handle === 'move'
-        ? translateNaturalRect(
-            currentImage.naturalImage,
-            rectangle,
-            delta.x,
-            delta.y,
-          )
-        : resizeNaturalRectWithDelta(
-            currentImage.naturalImage,
-            rectangle,
-            handle,
-            delta,
-          );
+        ? translateNaturalRect(currentImage.naturalImage, rectangle, delta.x, delta.y)
+        : resizeNaturalRectWithDelta(currentImage.naturalImage, rectangle, handle, delta);
 
     searchRect = nextRect;
     selection = null;
@@ -479,11 +450,7 @@ export function mountGridEditor(
   function setView(nextView: EditorView): void {
     view = nextView;
     renderView();
-    announce(
-      nextView === 'original'
-        ? '已返回原图调整。'
-        : '正在查看镜像结果。',
-    );
+    announce(nextView === 'original' ? '已返回原图调整。' : '正在查看镜像结果。');
   }
 
   function setManualZoom(scale: number): void {
@@ -519,16 +486,10 @@ export function mountGridEditor(
       return;
     }
 
-    elements.stage.style.width = `${String(
-      currentImage.naturalImage.width * zoomScale,
-    )}px`;
-    elements.stage.style.height = `${String(
-      currentImage.naturalImage.height * zoomScale,
-    )}px`;
+    elements.stage.style.width = `${String(currentImage.naturalImage.width * zoomScale)}px`;
+    elements.stage.style.height = `${String(currentImage.naturalImage.height * zoomScale)}px`;
     elements.zoomStatus.textContent =
-      zoomMode === 'fit'
-        ? `适合 · ${formatPercent(zoomScale)}`
-        : formatPercent(zoomScale);
+      zoomMode === 'fit' ? `适合 · ${formatPercent(zoomScale)}` : formatPercent(zoomScale);
     renderOverlay();
     renderView();
   }
@@ -536,7 +497,7 @@ export function mountGridEditor(
   function renderView(): void {
     const showingResult = view === 'result' && resultCanvas !== null;
     elements.image.hidden = showingResult;
-    elements.overlay.hidden = showingResult || !currentImage;
+    elements.overlay.toggleAttribute('hidden', showingResult || !currentImage);
 
     if (resultCanvas) {
       resultCanvas.hidden = !showingResult;
@@ -612,60 +573,19 @@ export function mountGridEditor(
       }
     } else {
       elements.overlay.append(
-        createOutlineRect(
-          rectangle.x,
-          rectangle.y,
-          rectangle.width,
-          rectangle.height,
-        ),
+        createOutlineRect(rectangle.x, rectangle.y, rectangle.width, rectangle.height),
       );
     }
 
     elements.overlay.append(
       createEdgeHandle(centerX, rectangle.y, visualSize, targetSize, 'n'),
-      createEdgeHandle(
-        rectangle.right,
-        centerY,
-        visualSize,
-        targetSize,
-        'e',
-      ),
-      createEdgeHandle(
-        centerX,
-        rectangle.bottom,
-        visualSize,
-        targetSize,
-        's',
-      ),
+      createEdgeHandle(rectangle.right, centerY, visualSize, targetSize, 'e'),
+      createEdgeHandle(centerX, rectangle.bottom, visualSize, targetSize, 's'),
       createEdgeHandle(rectangle.x, centerY, visualSize, targetSize, 'w'),
-      createCornerHandle(
-        rectangle.x,
-        rectangle.y,
-        visualSize,
-        targetSize,
-        'nw',
-      ),
-      createCornerHandle(
-        rectangle.right,
-        rectangle.y,
-        visualSize,
-        targetSize,
-        'ne',
-      ),
-      createCornerHandle(
-        rectangle.right,
-        rectangle.bottom,
-        visualSize,
-        targetSize,
-        'se',
-      ),
-      createCornerHandle(
-        rectangle.x,
-        rectangle.bottom,
-        visualSize,
-        targetSize,
-        'sw',
-      ),
+      createCornerHandle(rectangle.x, rectangle.y, visualSize, targetSize, 'nw'),
+      createCornerHandle(rectangle.right, rectangle.y, visualSize, targetSize, 'ne'),
+      createCornerHandle(rectangle.right, rectangle.bottom, visualSize, targetSize, 'se'),
+      createCornerHandle(rectangle.x, rectangle.bottom, visualSize, targetSize, 'sw'),
     );
   }
 
@@ -689,10 +609,8 @@ export function mountGridEditor(
     }
 
     const bounds = elements.stage.getBoundingClientRect();
-    const scaleX =
-      currentImage.naturalImage.width / Math.max(bounds.width, 1);
-    const scaleY =
-      currentImage.naturalImage.height / Math.max(bounds.height, 1);
+    const scaleX = currentImage.naturalImage.width / Math.max(bounds.width, 1);
+    const scaleY = currentImage.naturalImage.height / Math.max(bounds.height, 1);
 
     return {
       x: clamp(
@@ -754,40 +672,22 @@ function updateSearchRectFromPointer(
   let bottom = rectangle.bottom;
 
   if (handle.includes('w')) {
-    left = clamp(
-      point.x,
-      0,
-      rectangle.right - MIN_SEARCH_RECT_SIZE,
-    );
+    left = clamp(point.x, 0, rectangle.right - MIN_SEARCH_RECT_SIZE);
   }
 
   if (handle.includes('e')) {
-    right = clamp(
-      point.x,
-      rectangle.x + MIN_SEARCH_RECT_SIZE,
-      naturalImage.width,
-    );
+    right = clamp(point.x, rectangle.x + MIN_SEARCH_RECT_SIZE, naturalImage.width);
   }
 
   if (handle.includes('n')) {
-    top = clamp(
-      point.y,
-      0,
-      rectangle.bottom - MIN_SEARCH_RECT_SIZE,
-    );
+    top = clamp(point.y, 0, rectangle.bottom - MIN_SEARCH_RECT_SIZE);
   }
 
   if (handle.includes('s')) {
-    bottom = clamp(
-      point.y,
-      rectangle.y + MIN_SEARCH_RECT_SIZE,
-      naturalImage.height,
-    );
+    bottom = clamp(point.y, rectangle.y + MIN_SEARCH_RECT_SIZE, naturalImage.height);
   }
 
-  return (
-    createNaturalRect(naturalImage, left, top, right, bottom) ?? rectangle
-  );
+  return createNaturalRect(naturalImage, left, top, right, bottom) ?? rectangle;
 }
 
 function resizeNaturalRectWithDelta(
@@ -818,10 +718,7 @@ function resizeNaturalRectWithDelta(
   );
 }
 
-function getMoveKeyDelta(
-  key: string,
-  amount: number,
-): NaturalPoint {
+function getMoveKeyDelta(key: string, amount: number): NaturalPoint {
   switch (key) {
     case 'ArrowLeft':
       return { x: -amount, y: 0 };
@@ -849,21 +746,11 @@ function createLine(
   line.setAttribute('x2', String(x2));
   line.setAttribute('y2', String(y2));
   line.setAttribute('vector-effect', 'non-scaling-stroke');
-  line.setAttribute(
-    'class',
-    outer
-      ? 'grid-boundary grid-boundary-outer'
-      : 'grid-boundary',
-  );
+  line.setAttribute('class', outer ? 'grid-boundary grid-boundary-outer' : 'grid-boundary');
   return line;
 }
 
-function createOutlineRect(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): SVGRectElement {
+function createOutlineRect(x: number, y: number, width: number, height: number): SVGRectElement {
   const rectangle = document.createElementNS(SVG_NAMESPACE, 'rect');
   rectangle.setAttribute('x', String(x));
   rectangle.setAttribute('y', String(y));
@@ -942,10 +829,7 @@ function createEdgeHandle(
   visual.setAttribute('y', String(y - visualHeight / 2));
   visual.setAttribute('width', String(visualWidth));
   visual.setAttribute('height', String(visualHeight));
-  visual.setAttribute(
-    'rx',
-    String(Math.min(visualWidth, visualHeight) / 2),
-  );
+  visual.setAttribute('rx', String(Math.min(visualWidth, visualHeight) / 2));
   visual.setAttribute('class', 'grid-edge-visual');
   visual.setAttribute('pointer-events', 'none');
   group.append(target, visual);
@@ -981,9 +865,26 @@ function formatPercent(scale: number): string {
   return `${String(Math.round(scale * 100))}%`;
 }
 
-function formatSelectionStatus(
-  selection: GridBoundarySelection,
-): string {
+function logDetectionRuntimeFailure(
+  reason: 'morphology-failed' | 'stale-work',
+  internalCause?: unknown,
+): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  const detail =
+    internalCause instanceof Error
+      ? `${internalCause.name}: ${internalCause.message}`
+      : internalCause === undefined
+        ? ''
+        : typeof internalCause === 'string'
+          ? internalCause
+          : '未知内部错误';
+  console.warn(`[grid-detection:${reason}]${detail ? ` ${detail}` : ''}`);
+}
+
+function formatSelectionStatus(selection: GridBoundarySelection): string {
   return `识别到 ${String(selection.columns)} 列 × ${String(
     selection.rows,
   )} 行，单元 ${String(selection.cellSize)} px`;
@@ -993,58 +894,18 @@ function getElements(root: HTMLElement): GridEditorElements {
   return {
     frame: getRequiredElement(root, '[data-editor-frame]', HTMLElement),
     stage: getRequiredElement(root, '[data-editor-stage]', HTMLElement),
-    image: getRequiredElement(
-      root,
-      '[data-editor-image]',
-      HTMLImageElement,
-    ),
-    overlay: getRequiredElement(
-      root,
-      '[data-editor-overlay]',
-      SVGSVGElement,
-    ),
+    image: getRequiredElement(root, '[data-editor-image]', HTMLImageElement),
+    overlay: getRequiredElement(root, '[data-editor-overlay]', SVGSVGElement),
     hint: getRequiredElement(root, '[data-editor-hint]', HTMLElement),
     live: getRequiredElement(root, '[data-editor-live]', HTMLElement),
-    originalTab: getRequiredElement(
-      root,
-      '[data-view-original]',
-      HTMLButtonElement,
-    ),
-    resultTab: getRequiredElement(
-      root,
-      '[data-view-result]',
-      HTMLButtonElement,
-    ),
-    returnButton: getRequiredElement(
-      root,
-      '[data-return-adjust]',
-      HTMLButtonElement,
-    ),
-    zoomFitButton: getRequiredElement(
-      root,
-      '[data-zoom-fit]',
-      HTMLButtonElement,
-    ),
-    zoomOutButton: getRequiredElement(
-      root,
-      '[data-zoom-out]',
-      HTMLButtonElement,
-    ),
-    zoomActualButton: getRequiredElement(
-      root,
-      '[data-zoom-actual]',
-      HTMLButtonElement,
-    ),
-    zoomInButton: getRequiredElement(
-      root,
-      '[data-zoom-in]',
-      HTMLButtonElement,
-    ),
-    zoomStatus: getRequiredElement(
-      root,
-      '[data-zoom-status]',
-      HTMLElement,
-    ),
+    originalTab: getRequiredElement(root, '[data-view-original]', HTMLButtonElement),
+    resultTab: getRequiredElement(root, '[data-view-result]', HTMLButtonElement),
+    returnButton: getRequiredElement(root, '[data-return-adjust]', HTMLButtonElement),
+    zoomFitButton: getRequiredElement(root, '[data-zoom-fit]', HTMLButtonElement),
+    zoomOutButton: getRequiredElement(root, '[data-zoom-out]', HTMLButtonElement),
+    zoomActualButton: getRequiredElement(root, '[data-zoom-actual]', HTMLButtonElement),
+    zoomInButton: getRequiredElement(root, '[data-zoom-in]', HTMLButtonElement),
+    zoomStatus: getRequiredElement(root, '[data-zoom-status]', HTMLElement),
   };
 }
 

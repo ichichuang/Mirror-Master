@@ -11,12 +11,17 @@ export interface GridDetectionInput {
 }
 
 export type GridDetectionFailureReason =
-  | 'opencv-unavailable'
+  | 'opencv-loading-failed'
+  | 'morphology-failed'
+  | 'insufficient-clusters'
+  | 'no-shared-spacing'
+  | 'insufficient-span'
+  | 'invalid-boundaries'
+  | 'stale-work'
   | 'canvas-unavailable'
   | 'decode-failed'
   | 'image-size-mismatch'
-  | 'invalid-search-rectangle'
-  | 'no-grid-boundaries';
+  | 'invalid-search-rectangle';
 
 export interface GridDetectionSuccess {
   readonly ok: true;
@@ -29,6 +34,4 @@ export interface GridDetectionFailure {
   readonly message: string;
 }
 
-export type GridDetectionOutcome =
-  | GridDetectionSuccess
-  | GridDetectionFailure;
+export type GridDetectionOutcome = GridDetectionSuccess | GridDetectionFailure;

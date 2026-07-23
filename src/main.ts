@@ -3,10 +3,7 @@ import './styles/base.css';
 import './styles/page.css';
 
 import { renderApp } from './app';
-import {
-  mountGridEditor,
-  type GridEditorController,
-} from './features/grid-editor/gridEditor';
+import { mountGridEditor, type GridEditorController } from './features/grid-editor/gridEditor';
 import { mirrorGridCells } from './features/grid-mirror/processor';
 import { isValidGridBoundarySelection } from './features/grid-selection/geometry';
 import { mountLocalImageInput } from './features/local-image-input/localImageInput';
@@ -20,11 +17,7 @@ if (!app) {
 app.innerHTML = renderApp();
 
 const redetectButton = getRequiredElement(app, '[data-redetect]', HTMLButtonElement);
-const resetSelectionButton = getRequiredElement(
-  app,
-  '[data-reset-selection]',
-  HTMLButtonElement,
-);
+const resetSelectionButton = getRequiredElement(app, '[data-reset-selection]', HTMLButtonElement);
 const generateButtons = [
   getRequiredElement(app, '[data-generate]', HTMLButtonElement),
   getRequiredElement(app, '[data-mobile-generate]', HTMLButtonElement),
@@ -41,9 +34,7 @@ let generating = false;
 let detecting = false;
 let resultCanvas: HTMLCanvasElement | null = null;
 let downloadObjectUrl: string | null = null;
-let editor: GridEditorController;
-
-editor = mountGridEditor(app, {
+const editor: GridEditorController = mountGridEditor(app, {
   onSelectionChange() {
     generationVersion += 1;
     generating = false;
@@ -106,13 +97,7 @@ async function generateMirror(): Promise<void> {
   const file = currentFile;
   const selection = editor.getSelection();
 
-  if (
-    !file ||
-    !selection ||
-    !isValidGridBoundarySelection(selection) ||
-    generating ||
-    detecting
-  ) {
+  if (!file || !selection || !isValidGridBoundarySelection(selection) || generating || detecting) {
     return;
   }
 
@@ -195,11 +180,7 @@ function prepareDownload(canvas: HTMLCanvasElement): void {
   updateActions();
 
   canvas.toBlob((blob) => {
-    if (
-      !blob ||
-      currentVersion !== downloadVersion ||
-      resultCanvas !== canvas
-    ) {
+    if (!blob || currentVersion !== downloadVersion || resultCanvas !== canvas) {
       return;
     }
 
