@@ -29,17 +29,24 @@ const generateButtons = [
   getRequiredElement(app, '[data-generate]', HTMLButtonElement),
   getRequiredElement(app, '[data-mobile-generate]', HTMLButtonElement),
 ];
+const downloadButtons = [
+  getRequiredElement(app, '[data-download]', HTMLButtonElement),
+  getRequiredElement(app, '[data-mobile-download]', HTMLButtonElement),
+];
 
 let currentFile: File | null = null;
 let generationVersion = 0;
+let downloadVersion = 0;
 let generating = false;
+let resultCanvas: HTMLCanvasElement | null = null;
+let downloadObjectUrl: string | null = null;
 let editor: GridEditorController;
 
 editor = mountGridEditor(app, {
   onSelectionChange() {
     generationVersion += 1;
     generating = false;
-    editor.clearResult();
+    clearGeneratedResult();
     updateActions();
   },
 });
@@ -49,6 +56,7 @@ mountLocalImageInput(app, {
     generationVersion += 1;
     currentFile = payload.file;
     generating = false;
+    clearGeneratedResult();
     editor.setImage({
       file: payload.file,
       fileName: payload.image.fileName,
@@ -61,14 +69,14 @@ mountLocalImageInput(app, {
 
 redetectButton.addEventListener('click', () => {
   generationVersion += 1;
-  editor.clearResult();
+  clearGeneratedResult();
   editor.redetect();
   updateActions();
 });
 
 resetSelectionButton.addEventListener('click', () => {
   generationVersion += 1;
-  editor.clearResult();
+  clearGeneratedResult();
   editor.resetSelection();
   updateActions();
 });
@@ -78,6 +86,15 @@ for (const button of generateButtons) {
     void generateMirror();
   });
 }
+
+for (const button of downloadButtons) {
+  button.addEventListener('click', downloadResult);
+}
+
+window.addEventListener('beforeunload', () => {
+  downloadVersion += 1;
+  revokeDownloadObjectUrl();
+});
 
 async function generateMirror(): Promise<void> {
   const file = currentFile;
@@ -90,6 +107,7 @@ async function generateMirror(): Promise<void> {
   generationVersion += 1;
   const currentVersion = generationVersion;
   generating = true;
+  clearGeneratedResult();
   editor.setMessage('正在本地生成镜像…');
   updateActions();
 
@@ -115,13 +133,18 @@ async function generateMirror(): Promise<void> {
     return;
   }
 
-  editor.showResult(outcome.result.outputCanvas);
-  editor.setMessage('镜像结果已生成。');
+  resultCanvas = outcome.result.outputCanvas;
+  editor.showResult(resultCanvas);
+  editor.setMessage(
+    `镜像结果已生成：${String(outcome.result.columns)} 列 × ${String(outcome.result.rows)} 行。`,
+  );
+  prepareDownload(resultCanvas);
   updateActions();
 }
 
 function updateActions(): void {
   const hasImage = currentFile !== null;
+  const hasResult = resultCanvas !== null;
   const selection = editor.getSelection();
   const canGenerate =
     hasImage && selection !== null && isValidIntegerGridSelection(selection) && !generating;
@@ -133,6 +156,68 @@ function updateActions(): void {
     button.disabled = !canGenerate;
     button.textContent = generating ? '生成中…' : '生成镜像';
   }
+
+  for (const button of downloadButtons) {
+    button.hidden = !hasResult;
+    button.disabled = !hasResult || downloadObjectUrl === null;
+  }
+}
+
+function clearGeneratedResult(): void {
+  downloadVersion += 1;
+  resultCanvas = null;
+  revokeDownloadObjectUrl();
+  editor.clearResult();
+}
+
+function prepareDownload(canvas: HTMLCanvasElement): void {
+  downloadVersion += 1;
+  const currentVersion = downloadVersion;
+  revokeDownloadObjectUrl();
+  updateActions();
+
+  canvas.toBlob((blob) => {
+    if (
+      !blob ||
+      currentVersion !== downloadVersion ||
+      resultCanvas !== canvas
+    ) {
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+
+    if (currentVersion !== downloadVersion || resultCanvas !== canvas) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
+
+    downloadObjectUrl = objectUrl;
+    updateActions();
+  }, 'image/png');
+}
+
+function downloadResult(): void {
+  if (!downloadObjectUrl || !resultCanvas) {
+    return;
+  }
+
+  const link = document.createElement('a');
+  const sourceName = currentFile?.name.replace(/\.[^.]+$/, '') || 'mirror-master';
+  link.href = downloadObjectUrl;
+  link.download = `${sourceName}-mirror.png`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+function revokeDownloadObjectUrl(): void {
+  if (!downloadObjectUrl) {
+    return;
+  }
+
+  URL.revokeObjectURL(downloadObjectUrl);
+  downloadObjectUrl = null;
 }
 
 function getRequiredElement<ElementType extends HTMLElement>(

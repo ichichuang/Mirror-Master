@@ -23,6 +23,15 @@ export function renderApp(): string {
           <button class="button button-primary desktop-generate" type="button" data-generate disabled>
             生成镜像
           </button>
+          <button
+            class="button button-secondary desktop-download"
+            type="button"
+            data-download
+            hidden
+            disabled
+          >
+            下载结果 PNG
+          </button>
         </div>
       </header>
 
@@ -38,9 +47,9 @@ export function renderApp(): string {
 
         <section class="upload-view" data-upload-view aria-labelledby="upload-title">
           <label class="drop-zone" for="image-file-input" data-drop-zone>
-            <span class="upload-mark" aria-hidden="true">34 × 27</span>
+            <span class="upload-mark" aria-hidden="true">N × M</span>
             <span class="drop-zone-title" id="upload-title">上传图片开始</span>
-            <span class="drop-zone-copy">选择或拖入 PNG、JPEG、WebP 图片</span>
+            <span class="drop-zone-copy">选择或拖入包含规则方格的 PNG、JPEG、WebP 图片</span>
           </label>
           <p
             id="file-status"
@@ -99,7 +108,7 @@ export function renderApp(): string {
               <svg
                 class="grid-overlay"
                 data-editor-overlay
-                aria-label="34 × 27 网格选区编辑区"
+                aria-label="主网格本体选区编辑区"
               ></svg>
             </div>
           </div>
@@ -132,6 +141,15 @@ export function renderApp(): string {
       <div class="mobile-action-bar" aria-label="镜像操作">
         <button class="button button-primary" type="button" data-mobile-generate disabled>
           生成镜像
+        </button>
+        <button
+          class="button button-secondary"
+          type="button"
+          data-mobile-download
+          hidden
+          disabled
+        >
+          下载结果 PNG
         </button>
       </div>
     </div>
