@@ -12,6 +12,7 @@ from app.generated_palettes import (
     PALETTE_SOURCE_VERSION,
 )
 from conftest import assert_structured_chinese_error
+from test_pattern_contracts import project_payload
 
 
 def encode_png(image: Image.Image) -> bytes:
@@ -41,6 +42,8 @@ def generation_settings(
         "beadDiameterMm": 5.0,
         "beadPitchMm": 5.0,
         "boardPresetId": "standardSquare",
+        "boardRows": 29,
+        "boardColumns": 29,
         "paletteId": "default",
         "availableColorIds": available_color_ids
         or ["default:A01", "default:A04", "default:A06", "default:B01"],
@@ -90,11 +93,37 @@ def test_capabilities_match_project_contract(client: TestClient) -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["contractVersion"] == "1.0"
     assert payload["schemaVersions"] == ["1.0"]
     assert payload["paletteSourceVersion"] == PALETTE_SOURCE_VERSION
     assert payload["grid"]["maximumRows"] == 300
+    assert payload["beads"] == {
+        "minimumDiameterMm": 1.0,
+        "maximumDiameterMm": 10.0,
+        "minimumPitchMm": 1.0,
+        "maximumPitchMm": 12.0,
+        "pitchMustNotBeSmallerThanDiameter": True,
+    }
+    assert payload["boards"]["custom"] == {
+        "minimumRows": 1,
+        "maximumRows": 300,
+        "minimumColumns": 1,
+        "maximumColumns": 300,
+    }
+    assert payload["pngTemplates"] == ["pure", "annotated"]
+    assert payload["pdf"] == {
+        "pageSize": "A4",
+        "summaryPage": True,
+        "onePagePerBoard": True,
+        "coordinates": True,
+        "legends": True,
+        "counts": True,
+        "physicalScale": "fit-with-declared-scale",
+        "maximumPages": 500,
+        "maximumRasterPixels": 1_100_000_000,
+    }
     assert payload["gridMirrorAxes"] == ["horizontal", "vertical"]
-    assert "projectJson" in payload["exports"]
+    assert payload["exports"] == ["png", "pdf", "csv", "projectJson"]
 
 
 def test_generation_is_deterministic_and_statistics_are_consistent(
@@ -243,7 +272,7 @@ def test_png_pdf_csv_exports_use_the_same_project(
             json={
                 "project": project,
                 "format": format_name,
-                "includeGrid": True,
+                "template": "annotated",
             },
         )
         for format_name in ("png", "pdf", "csv")
@@ -257,5 +286,41 @@ def test_png_pdf_csv_exports_use_the_same_project(
     assert responses["pdf"].content.startswith(b"%PDF")
     assert responses["csv"].status_code == 200
     assert responses["csv"].content.startswith(b"\xef\xbb\xbf")
+    assert {
+        response.headers["x-project-revision"]
+        for response in responses.values()
+    } == {str(project["revision"])}
     csv_text = responses["csv"].content.decode("utf-8-sig")
     assert f"拼豆总数,{payload['statistics']['nonEmptyBeadCount']}" in csv_text
+
+
+def test_pdf_export_rejects_layout_over_the_published_budget(
+    client: TestClient,
+) -> None:
+    project = project_payload()
+    project["grid"].update(
+        {
+            "rows": 23,
+            "columns": 23,
+            "boardPresetId": "custom",
+            "boardRows": 1,
+            "boardColumns": 1,
+        }
+    )
+    project["cells"] = [
+        [{"kind": "empty"} for _column in range(23)] for _row in range(23)
+    ]
+
+    response = client.post(
+        "/api/pattern/export",
+        json={
+            "project": project,
+            "format": "pdf",
+            "template": "annotated",
+        },
+    )
+
+    assert_structured_chinese_error(
+        response,
+        "PDF_EXPORT_LIMIT_EXCEEDED",
+    )

@@ -40,6 +40,8 @@ export interface BeadProject {
     readonly beadDiameterMm: number;
     readonly beadPitchMm: number;
     readonly boardPresetId: BoardPresetId;
+    readonly boardRows: number;
+    readonly boardColumns: number;
   };
   readonly palette: {
     readonly paletteId: 'default' | 'mard';
@@ -96,7 +98,7 @@ export interface PhysicalLayout {
   readonly boardCount: number;
 }
 
-const KNOWN_COLOR_IDS = new Set(PALETTE_COLORS.map((color) => color.id));
+const COLOR_BY_ID = new Map(PALETTE_COLORS.map((color) => [color.id, color]));
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 
 export function calculateStatistics(cells: readonly (readonly BeadCell[])[]): ProjectStatistics {
@@ -133,12 +135,11 @@ export function calculateStatistics(cells: readonly (readonly BeadCell[])[]): Pr
 }
 
 export function calculatePhysicalLayout(project: BeadProject): PhysicalLayout {
-  const preset = BOARD_PRESETS[project.grid.boardPresetId];
   const widthMm =
     (project.grid.columns - 1) * project.grid.beadPitchMm + project.grid.beadDiameterMm;
   const heightMm = (project.grid.rows - 1) * project.grid.beadPitchMm + project.grid.beadDiameterMm;
-  const boardColumns = Math.ceil(project.grid.columns / preset.columns);
-  const boardRows = Math.ceil(project.grid.rows / preset.rows);
+  const boardColumns = Math.ceil(project.grid.columns / project.grid.boardColumns);
+  const boardRows = Math.ceil(project.grid.rows / project.grid.boardRows);
 
   return Object.freeze({
     widthMm,
@@ -243,12 +244,14 @@ export function parseBeadProject(value: unknown): BeadProject {
     throw new Error('项目文件不是有效对象。');
   }
 
+  assertExactProjectShape(value);
   const project = value as unknown as BeadProject;
   assertValidProject(project);
-  return project;
+  return freezeProject(project);
 }
 
 export function assertValidProject(project: BeadProject): void {
+  assertExactProjectShape(project);
   if (
     (project as unknown as { readonly schemaVersion: unknown }).schemaVersion !==
     PROJECT_SCHEMA_VERSION
@@ -278,6 +281,23 @@ export function assertValidProject(project: BeadProject): void {
     throw new Error('项目拼板预设无效。');
   }
   if (
+    !Number.isInteger(project.grid.boardRows) ||
+    !Number.isInteger(project.grid.boardColumns) ||
+    project.grid.boardRows < 1 ||
+    project.grid.boardRows > 300 ||
+    project.grid.boardColumns < 1 ||
+    project.grid.boardColumns > 300
+  ) {
+    throw new Error('项目拼板行列必须是 1 到 300 的整数。');
+  }
+  const preset = BOARD_PRESETS[project.grid.boardPresetId];
+  if (
+    project.grid.boardPresetId !== 'custom' &&
+    (project.grid.boardRows !== preset.rows || project.grid.boardColumns !== preset.columns)
+  ) {
+    throw new Error('固定拼板尺寸与预设不一致。');
+  }
+  if (
     !Number.isFinite(project.grid.beadDiameterMm) ||
     !Number.isFinite(project.grid.beadPitchMm) ||
     project.grid.beadDiameterMm < 1 ||
@@ -290,11 +310,25 @@ export function assertValidProject(project: BeadProject): void {
   if (project.palette.paletteVersion !== PALETTE_SOURCE_VERSION) {
     throw new Error('项目色板版本与当前应用不一致。');
   }
+  const availableIds = project.palette.availableColorIds;
+  const uniqueAvailableIds = new Set(availableIds);
   if (
-    project.palette.availableColorIds.length === 0 ||
-    project.palette.availableColorIds.some((id) => !KNOWN_COLOR_IDS.has(id))
+    availableIds.length === 0 ||
+    uniqueAvailableIds.size !== availableIds.length ||
+    availableIds.some((id) => {
+      const color = COLOR_BY_ID.get(id);
+      return !color || color.paletteId !== project.palette.paletteId;
+    })
   ) {
-    throw new Error('项目包含无效或空的可用颜色。');
+    throw new Error('项目可用颜色必须唯一并属于所选色板。');
+  }
+  if (
+    project.palette.maximumColors !== null &&
+    (!Number.isInteger(project.palette.maximumColors) ||
+      project.palette.maximumColors < 1 ||
+      project.palette.maximumColors > availableIds.length)
+  ) {
+    throw new Error('项目最多颜色数必须在可用颜色范围内。');
   }
   if (
     project.cells.some((row) =>
@@ -309,7 +343,7 @@ export function assertValidProject(project: BeadProject): void {
         return (
           record.kind !== 'bead' ||
           typeof record.colorId !== 'string' ||
-          !KNOWN_COLOR_IDS.has(record.colorId)
+          !uniqueAvailableIds.has(record.colorId)
         );
       }),
     )
@@ -329,6 +363,190 @@ export function assertValidProject(project: BeadProject): void {
   if (sum !== statistics.nonEmptyBeadCount) {
     throw new Error('项目材料统计不一致。');
   }
+}
+
+function assertExactProjectShape(value: unknown): asserts value is BeadProject {
+  if (!isRecord(value)) {
+    throw new Error('项目文件不是有效对象。');
+  }
+  assertExactKeys(value, [
+    'schemaVersion',
+    'id',
+    'createdAt',
+    'updatedAt',
+    'mode',
+    'source',
+    'grid',
+    'palette',
+    'generation',
+    'cells',
+    'revision',
+  ]);
+  if (
+    typeof value.id !== 'string' ||
+    value.id.length < 8 ||
+    value.id.length > 80 ||
+    typeof value.createdAt !== 'string' ||
+    !Number.isFinite(Date.parse(value.createdAt)) ||
+    typeof value.updatedAt !== 'string' ||
+    !Number.isFinite(Date.parse(value.updatedAt))
+  ) {
+    throw new Error('项目标识或时间无效。');
+  }
+
+  const source = value.source;
+  if (!isRecord(source)) {
+    throw new Error('项目来源无效。');
+  }
+  assertExactKeys(source, [
+    'fileName',
+    'mimeType',
+    'naturalWidth',
+    'naturalHeight',
+    'sha256',
+    'crop',
+    'rotation',
+  ]);
+  if (
+    typeof source.fileName !== 'string' ||
+    source.fileName.length < 1 ||
+    source.fileName.length > 255 ||
+    !['image/png', 'image/jpeg', 'image/webp'].includes(String(source.mimeType)) ||
+    !Number.isInteger(source.naturalWidth) ||
+    Number(source.naturalWidth) < 1 ||
+    !Number.isInteger(source.naturalHeight) ||
+    Number(source.naturalHeight) < 1 ||
+    typeof source.sha256 !== 'string' ||
+    !SHA256_PATTERN.test(source.sha256) ||
+    ![0, 90, 180, 270].includes(Number(source.rotation))
+  ) {
+    throw new Error('项目来源字段无效。');
+  }
+  const crop = source.crop;
+  if (!isRecord(crop)) {
+    throw new Error('项目裁剪范围无效。');
+  }
+  assertExactKeys(crop, ['x', 'y', 'width', 'height']);
+  if (
+    !Number.isInteger(crop.x) ||
+    Number(crop.x) < 0 ||
+    !Number.isInteger(crop.y) ||
+    Number(crop.y) < 0 ||
+    !Number.isInteger(crop.width) ||
+    Number(crop.width) < 1 ||
+    !Number.isInteger(crop.height) ||
+    Number(crop.height) < 1
+  ) {
+    throw new Error('项目裁剪范围无效。');
+  }
+  const rotatedWidth =
+    source.rotation === 90 || source.rotation === 270
+      ? Number(source.naturalHeight)
+      : Number(source.naturalWidth);
+  const rotatedHeight =
+    source.rotation === 90 || source.rotation === 270
+      ? Number(source.naturalWidth)
+      : Number(source.naturalHeight);
+  if (
+    Number(crop.x) + Number(crop.width) > rotatedWidth ||
+    Number(crop.y) + Number(crop.height) > rotatedHeight
+  ) {
+    throw new Error('项目裁剪范围超出来源图片。');
+  }
+
+  const grid = value.grid;
+  if (!isRecord(grid)) {
+    throw new Error('项目网格设置无效。');
+  }
+  assertExactKeys(grid, [
+    'rows',
+    'columns',
+    'aspectLocked',
+    'beadDiameterMm',
+    'beadPitchMm',
+    'boardPresetId',
+    'boardRows',
+    'boardColumns',
+  ]);
+  if (typeof grid.aspectLocked !== 'boolean') {
+    throw new Error('项目宽高比设置无效。');
+  }
+
+  const palette = value.palette;
+  if (!isRecord(palette)) {
+    throw new Error('项目色板设置无效。');
+  }
+  assertExactKeys(palette, ['paletteId', 'paletteVersion', 'availableColorIds', 'maximumColors']);
+  if (
+    !['default', 'mard'].includes(String(palette.paletteId)) ||
+    !Array.isArray(palette.availableColorIds) ||
+    palette.availableColorIds.some((id) => typeof id !== 'string')
+  ) {
+    throw new Error('项目色板设置无效。');
+  }
+
+  const generation = value.generation;
+  if (!isRecord(generation)) {
+    throw new Error('项目生成设置无效。');
+  }
+  assertExactKeys(generation, ['sampling', 'colorDistance', 'dithering', 'alphaEmptyThreshold']);
+  if (
+    !['average', 'nearest'].includes(String(generation.sampling)) ||
+    generation.colorDistance !== 'ciede2000' ||
+    !['none', 'floydSteinberg'].includes(String(generation.dithering)) ||
+    typeof generation.alphaEmptyThreshold !== 'number' ||
+    !Number.isFinite(generation.alphaEmptyThreshold) ||
+    generation.alphaEmptyThreshold < 0 ||
+    generation.alphaEmptyThreshold > 1
+  ) {
+    throw new Error('项目生成设置无效。');
+  }
+
+  if (!Array.isArray(value.cells)) {
+    throw new Error('项目矩阵无效。');
+  }
+  for (const row of value.cells) {
+    if (!Array.isArray(row)) {
+      throw new Error('项目矩阵无效。');
+    }
+    for (const cell of row) {
+      if (!isRecord(cell)) {
+        throw new Error('项目矩阵无效。');
+      }
+      if (cell.kind === 'empty') {
+        assertExactKeys(cell, ['kind']);
+      } else if (cell.kind === 'bead') {
+        assertExactKeys(cell, ['kind', 'colorId']);
+      } else {
+        throw new Error('项目矩阵包含无效单元。');
+      }
+    }
+  }
+}
+
+function assertExactKeys(value: Record<string, unknown>, keys: readonly string[]): void {
+  const expected = new Set(keys);
+  const actual = Object.keys(value);
+  if (actual.length !== expected.size || actual.some((key) => !expected.has(key))) {
+    throw new Error('项目文件包含缺失或未知字段。');
+  }
+}
+
+function freezeProject(project: BeadProject): BeadProject {
+  return Object.freeze({
+    ...project,
+    source: Object.freeze({
+      ...project.source,
+      crop: Object.freeze({ ...project.source.crop }),
+    }),
+    grid: Object.freeze({ ...project.grid }),
+    palette: Object.freeze({
+      ...project.palette,
+      availableColorIds: Object.freeze([...project.palette.availableColorIds]),
+    }),
+    generation: Object.freeze({ ...project.generation }),
+    cells: cloneCells(project.cells),
+  });
 }
 
 export function cloneCells(

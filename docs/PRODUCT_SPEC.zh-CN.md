@@ -1,7 +1,7 @@
 # 豆图设计台产品规范（Mirror Master 仓库唯一权威）
 
 - 状态：重建中
-- 规范版本：`1.0.0-draft.2`
+- 规范版本：`1.0.0-draft.3`
 - 基线日期：2026-07-24
 - 语言：简体中文
 
@@ -22,6 +22,7 @@
 | -------------------------------------- | ---------------------------------------------------------------------- |
 | 重建前基线 HEAD / `origin/main`        | `d29ff36d3849aa54ec689a231694d7358c05d478`                             |
 | owner seed 提交后 HEAD / `origin/main` | `134491221451bf52a492fa2c4ccfcc96bdb579eb`                             |
+| 产品返工审查基线 HEAD / `origin/main`  | `4cc7f75f90d8c1f4aa6d7238e88e21d8b1896e17`                             |
 | owner seed                             | `拼豆颜色对照表.txt`                                                   |
 | 分支                                   | `main`                                                                 |
 | 重命名                                 | 禁止仓库、package、本地目录和域名重命名                                |
@@ -77,7 +78,6 @@
 - 原图与拼豆结果滑动对比、逐色制作、单色高亮和制作进度。
 - 小区域杂色检测、孤立色点清理、相近色合并和全局颜色替换。
 - 缺失颜色近似推荐、自定义色板导入和多品牌色号转换。
-- 分板打印、1:1 实际尺寸打印和高分辨率导出。
 - 本地草稿、离线使用、快捷键、触控笔和只读项目分享。
 
 ## 2. 产品开发与运维移交边界
@@ -379,6 +379,8 @@ interface BeadProject {
     beadDiameterMm: number;
     beadPitchMm: number;
     boardPresetId: string;
+    boardRows: number;
+    boardColumns: number;
   };
   palette: {
     paletteId: 'default' | 'mard';
@@ -404,6 +406,9 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - `cells.length === rows`。
 - 每行 `cells[row].length === columns`。
 - bead cell 的 `colorId` 必须存在于项目记录的 palette version。
+- `availableColorIds` 必须非空、无重复、全部属于 `paletteId`；`maximumColors` 为整数时不得大于可用颜色数。
+- 每个 bead cell 的 `colorId` 必须同时属于项目的 `availableColorIds` 与 `paletteId`。
+- `boardRows`、`boardColumns` 均为 1–300 的整数；固定预设必须与预设尺寸一致，自定义拼板使用用户明确输入的尺寸。
 - empty cell 不得计入用珠数量。
 - `sum(perColorCounts) === nonEmptyBeadCount` 必须在运行时、导出前和测试中成立。
 - `nonEmptyBeadCount + blankCount === rows * columns`。
@@ -472,6 +477,7 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 ### 8.3 透明度
 
 - `alphaEmptyThreshold` 范围 0–1，默认 `0.1`。
+- 完全透明像素的 alpha 为 `0` 时，无论阈值是否为 `0` 都不贡献颜色并保持 empty。
 - empty 在编辑器中显示棋盘格，不自动映射为白色。
 - JPEG 没有 alpha，所有裁剪内 cell 均为非空。
 
@@ -506,7 +512,13 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - Canvas 仅是矩阵的渲染与交互层，不保存独立真相。
 - 需要处理 devicePixelRatio，但命中测试使用 CSS 坐标转换到 row/column。
 - 放大时保持单元边界清晰；缩小时允许聚合预览但不得改变数据。
-- 提供适合窗口、100%、放大、缩小、平移。
+- 视图变换由 `scale`、`offsetX`、`offsetY` 组成；`fit` 计算完整矩阵可见的初始比例，`100%` 恢复一个明确的基准 cell 尺寸，二者不得混为同一操作。
+- 双指手势以两指中心和距离同时更新平移与缩放；单指在画笔、橡皮、吸管、填充、选择模式下只执行工具操作。
+- 鼠标提供滚轮或按钮缩放、空格键拖动画布和中键拖动画布；不得要求右键完成核心任务。
+- 平移边界至少允许把四条边及四个角移动到可编辑视口内，同时禁止图案完全丢失在视口外。
+- 缩放、窗口变化、方向变化、`pointercancel`、窗口失焦、页面隐藏和销毁时必须结束或回滚当前手势并释放 pointer capture。
+- 快速拖动画笔或橡皮时，使用整数网格线段插值补齐相邻 pointer sample 之间经过的所有 cell，且同一 cell 在一个 transaction 内只记录一次原值。
+- 数据修改按 cell diff 记录；渲染在 `requestAnimationFrame` 内合并，只重绘受影响 cell、选择覆盖层或视图变化导致的可见区域，不得因单 cell 修改遍历并复制完整矩阵。
 
 ### 9.2 工具
 
@@ -514,15 +526,26 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 橡皮：写入 empty。
 - 吸管：从 bead cell 选择 colorId。
 - 填充：对四邻域同值区域执行确定性 flood fill。
-- 选择：矩形选择、移动、复制、清空；越界部分裁剪。
+- 画笔、吸管、填充和选择复制写入的颜色必须属于项目 `availableColorIds`；非法颜色不得进入矩阵。
+- 选择：矩形选择、移动、复制、清空；越界部分裁剪；移动后原区域清空，复制保留原区域；重叠区域结果必须确定。
 - 每个完整手势是一个 undo transaction。
 
 ### 9.3 撤销与重做
 
-- 历史至少保留 100 个 transaction，内存不足时从最旧记录裁剪。
+- 历史以 `{row, column, before, after}` diff transaction 保存，不保存完整矩阵快照；同一 transaction 中同一 cell 合并为最早 `before` 与最终 `after`。
+- 历史目标保留 100 个 transaction，并同时设置明确的字节预算；超过预算时从最旧 transaction 裁剪，不能以复制 100 份 300 × 300 矩阵实现。
 - 新编辑发生后清空 redo 栈。
 - undo/redo 恢复矩阵、revision 和由其派生的统计。
-- 生成新矩阵是一个可撤销 transaction；更换源图片会开启新项目，不跨项目撤销。
+- 重新生成或更换源图片会建立新的项目历史基线，不跨生成结果或项目撤销；替换前必须保留旧矩阵并明确告知影响。
+
+### 9.5 颜色与检查器交互
+
+- 编辑器颜色集合只能来自项目 `availableColorIds`，不得重新显示用户在准备阶段排除的颜色。
+- 准备阶段和编辑阶段均提供按色号搜索、按 series 分组；编辑阶段提供“全部可用”“已使用”“最近使用”筛选。
+- 准备阶段提供选择全部与清空选择；清空后必须阻止生成并给出可操作提示，不得静默保留最后一色。
+- 最近使用颜色仅存在当前项目会话，不写入持久存储。
+- 切换工具、颜色、材料、设置或编辑矩阵时，不得用 `innerHTML` 重建整个 inspector；面板节点、焦点、输入状态和滚动位置必须保持。
+- 移动端 bottom sheet 拖动期间高度跟随 pointer，松手后按位置与速度吸附到收起、半屏或全屏；取消手势恢复最近稳定态。
 
 ### 9.4 视图与镜像
 
@@ -590,14 +613,21 @@ nonEmptyBeadCount + blankCount === totalCellCount
 ### 12.1 PNG
 
 - 从矩阵渲染，不截取页面 Canvas。
-- 支持纯图案与带网格/坐标/图例两个模板。
-- empty 保持透明或按用户选择背景色。
+- `pure` 模板只输出矩阵范围，不含网格、坐标、图例、边距或不透明 UI 背景；empty 像素保持 alpha `0`。
+- `annotated` 模板包含网格、行列坐标与材料图例；统计必须来自同一捕获 revision。
+- 模板使用显式枚举，不以含义模糊的单个 `includeGrid` 同时控制网格、坐标、图例和背景。
 - 元数据不包含原始文件名、图片哈希或上传内容。
 
 ### 12.2 PDF
 
-- 至少包含封面摘要、分板图、坐标、色号图例、总数、分色数量和实际尺寸。
-- 分板图不得裁断 cell；页码和板编号可追溯。
+- PDF 是制作级多页文档，而不是把整张 PNG 保存为单页 PDF。
+- 摘要页包含项目 revision、矩阵行列、拼豆总数、空格数、分色数量、物理宽高、拼豆直径/间距、拼板规格、拼板行列布局和总页数。
+- 每块拼板至少一页，板编号与布局位置可追溯，例如 `B2-3 / 第 2 板行、第 3 板列`；页脚包含当前页码与总页数。
+- 每块板页只包含完整 cell，不得跨页裁断；末板允许不满并明确原矩阵行列范围。
+- 每页包含局部行列坐标、实际打印比例说明、色号图例与该板分色数量；全局图例和总数放在摘要页。
+- 页面尺寸、边距、可打印区域、cell 物理尺寸与缩放比例必须显式计算；无法按 1:1 放入单页时使用可复核的统一缩放并标明比例，不得隐式拉伸。
+- 单次 PDF 最多 500 页（含摘要页），总渲染预算最多 1,100,000,000 raster pixels；两个上限必须由 capabilities 返回。超出任一上限时必须在规划拼板页之前以 `PDF_EXPORT_LIMIT_EXCEEDED` 和稳定中文说明拒绝，不得开始渲染或留下半成品。
+- 通过预算校验的 PDF 必须逐页渲染、写入并及时释放页面位图；不得把所有 A4 页面同时保存在内存中。300 × 300 矩阵配合内置 14 × 14 拼板仍须处于允许预算内。
 - 使用 Pillow/FastAPI 或浏览器原生能力；新增 PDF 依赖前必须记录必要性。
 
 ### 12.3 CSV
@@ -614,9 +644,18 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 ### 12.5 一致性
 
-- PNG、PDF、CSV、项目 JSON 必须引用同一 revision、rows、columns 和 colorId。
+- 发起一次导出时先深冻结项目快照，所有 PNG、PDF、CSV 和项目 JSON 必须引用同一 revision、rows、columns、board layout 和 colorId；导出期间的后续编辑不得混入结果。
 - 每种导出的材料总数必须满足统计不变量。
+- 在线后端 CSV 与离线前端 CSV 使用同一列顺序和术语；逐 cell 表固定为 `行、列、类型、颜色 ID、色板、系列、色号`。
 - 导出失败返回中文错误，不留下半成品下载。
+
+### 12.6 项目导入与继续编辑
+
+- 上传阶段提供明确的“打开项目 JSON”入口；图片输入仍只接受 PNG、JPEG、WebP。
+- 导入先检查文件大小和 JSON 语法，再严格验证 schema version、未知字段、字段类型、矩阵尺寸、拼板尺寸、palette version、可用颜色不变量、cell 颜色和统计不变量。
+- 导入成功后直接进入可编辑矩阵，建立新的差异历史基线，并显示来源图片未包含在项目文件中的说明。
+- 不兼容版本、未知颜色、跨色板颜色、重复可用颜色、越界尺寸或篡改矩阵必须分别返回稳定、可操作的中文错误。
+- 导出后再导入必须保持 project revision、矩阵、设置、拼板布局和材料统计逐项一致。
 
 ## 13. API 与运行状态
 
@@ -624,7 +663,9 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 `GET /api/capabilities`
 
-- 返回 schema versions、上传限制、尺寸限制、支持模式、采样、抖动、导出与 grid mirror 轴。
+- 返回 schema versions、上传限制、行列限制、拼豆直径/间距限制、自定义拼板限制、支持模式、采样、抖动、导出格式、PNG 模板、PDF 页面合同（含最大页数与总 raster pixel 预算）与 grid mirror 轴。
+- 前端启动时必须获取并校验该合同；成功时由能力响应设置 `accept`、输入 `min/max`、可见格式和校验提示。
+- 服务不可达或返回不兼容合同，前端使用与本规范一致、显式版本化的内置 fallback，并通过状态文本告知当前使用兼容限制；不得静默混用服务值和硬编码值。
 
 ### 13.2 调色板接口
 
@@ -728,7 +769,11 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 - 生成后直接进入可编辑矩阵，不创建虚假“完成页”。
 - 导出入口显示当前 revision 和统计摘要。
-- “更换图片”回到上传阶段并清理旧图；“重新生成”保留设置但创建可撤销的新矩阵。
+- 当前会话在内存中保留源 `File`、裁剪与全部生成设置，允许从编辑器返回准备阶段调整并再次生成。
+- 返回准备阶段不清空当前矩阵；重新生成前如存在生成后的编辑，明确提示将以新矩阵替换这些编辑，并允许取消。
+- “重新生成”保留源图片与设置，成功后建立新的差异历史基线并替换矩阵；请求失败或取消时保持旧矩阵。
+- 从项目 JSON 恢复且没有源图片时仍可继续编辑和导出；若要重新生成，必须重新选择图片并明确显示来源匹配责任。
+- “更换图片”回到上传阶段并清理旧图、旧矩阵、历史、请求和 Object URL。
 - 刷新后显示明确空状态，不暗示项目已云端保存。
 
 ## 17. 无障碍
@@ -737,6 +782,10 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 错误不能只用颜色表达。
 - 键盘可完成上传、参数设置、工具选择、单 cell 编辑、undo/redo、镜像和导出。
 - Canvas 提供当前行列、选中颜色和操作说明的可访问状态；提供行列跳转输入作为键盘替代。
+- 裁剪同时提供 X、Y、宽、高数值输入以及键盘移动/缩放；Pointer 控件不是唯一入口。
+- inspector tabs 必须具备 `tablist`、roving `tabindex`、`aria-controls`、对应 `tabpanel`，并支持左右/Home/End 键切换。
+- 异步生成、导入、导出、撤销/重做、手势取消和 sheet 状态通过稳定的 `role=status` / `aria-live` 区域宣告，不能依赖 toast 消失前被看见。
+- 所有主要控件和 sheet handle 的命中区域至少 44 × 44 CSS px；焦点环在 Canvas、裁剪、tabs、颜色和导出控件上始终可见。
 - `prefers-reduced-motion` 下禁用非必要 sheet 弹性和画布过渡。
 - 200% 文本缩放不遮挡主操作或造成横向页面滚动。
 
@@ -762,7 +811,13 @@ nonEmptyBeadCount + blankCount === totalCellCount
 ### 18.3 编辑与镜像
 
 - 画笔、橡皮、吸管、填充、选择在鼠标、触控和触控笔下无重复事件。
+- 双指缩放/平移后四条边与四个角均可进入可编辑视口；`fit`、`100%`、滚轮/按钮缩放、空格/中键平移和取消恢复均通过聚焦测试。
+- 快速跨越多个格子的画笔/橡皮 stroke 连续无漏格。
+- 单 cell 编辑不得复制完整矩阵；undo/redo 使用 bounded diff history，并验证 100 transaction 与字节预算裁剪。
+- 100 × 100 和 300 × 300 编辑基准必须记录设备、浏览器、矩阵、cell 变更数、每 transaction 延迟、帧时间和历史内存估算。
 - undo/redo 精确恢复矩阵与统计。
+- 选择移动、复制、清空在普通、重叠和越界情况下结果确定。
+- 用户排除颜色后，编辑器无法选择或写入该颜色；篡改项目中的跨色板或不可用颜色被前后端拒绝。
 - 水平镜像两次、垂直镜像两次均恢复原矩阵。
 - 正/反面切换不修改矩阵。
 - 智能图纸镜像保留标签、坐标、图例和网格外像素；同轴两次恢复原 RGBA。
@@ -770,6 +825,10 @@ nonEmptyBeadCount + blankCount === totalCellCount
 ### 18.4 导出与 API
 
 - PNG/PDF/CSV/项目 JSON 的 revision、尺寸、矩阵和材料统计一致。
+- pure PNG 无图例/坐标且 empty 透明；annotated PNG 含网格/坐标/图例。
+- PDF 至少包含摘要页与每板页，板号、页码、坐标、图例、实际尺寸/比例和完整 cell 可由测试读取验证。
+- 在线/离线 CSV 的 BOM、段落、列数、列顺序和逐 cell 内容逐字节一致。
+- 项目 JSON 导出→导入 round-trip 保持矩阵、revision、设置与统计；非法 schema 和颜色合同稳定拒绝。
 - API 错误均为稳定 code + 可操作中文 message。
 - 请求取消不会覆盖新项目状态。
 - 上传内容未写入持久存储。
@@ -778,6 +837,8 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 - 320–430 px 可完成上传、裁剪、生成、编辑、统计、镜像和导出。
 - bottom sheet 不遮挡选中 cell 与主操作，旋转屏幕后状态不丢失。
+- bottom sheet 拖动期间跟手并在取消/松手后稳定吸附；inspector 切换和编辑不丢滚动或焦点。
+- 裁剪可用键盘和数值输入完成；tabs 箭头键、roving focus、tabpanel 关系完整。
 - 更换图片清理旧结果和 Object URL。
 - 刷新显示真实空状态；服务失败后可重试并恢复流程。
 
@@ -810,7 +871,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 `capabilities`：
 
-- 前端不得硬编码后端上传、尺寸或格式上限。
+- 前端不得把后端上传、尺寸或格式上限散落硬编码在业务组件；唯一允许的内置值是显式版本化、与本规范一致的 capabilities fallback。
 - 后端返回稳定 schema 和 feature flags。
 
 `palettes`：
@@ -858,10 +919,12 @@ nonEmptyBeadCount + blankCount === totalCellCount
 必须添加且运行：
 
 - 前端：palette validation、schema、deterministic mapping、transparency、statistics、dimensions、undo/redo、horizontal/vertical double mirror、export consistency。
-- 后端：palette parity、project validation、generate determinism、API errors、existing-chart label/coordinate/legend preservation、double mirror RGBA identity、PNG/PDF/CSV consistency。
+- 前端补充：gesture state、pinch/pan bounds、pointer cancellation、stroke interpolation、diff history、palette restriction、项目 JSON round-trip、custom board、capabilities fallback、inspector focus/scroll、bottom sheet drag、keyboard crop 和 tabs semantics。
+- 后端：palette parity、project validation、generate determinism、alpha zero、API errors、existing-chart label/coordinate/legend preservation、double mirror RGBA identity、pure/annotated PNG、multi-page PDF coverage、CSV parity、custom board 和 immutable revision consistency。
 - 不添加 Playwright。
 - 运行 `pnpm test`、`pnpm typecheck`、`pnpm lint`、`pnpm format:check`、`pnpm build`。
 - 运行后端 pytest。
+- 运行可重复的 100 × 100 / 300 × 300 编辑性能基准并记录环境与结果。
 - 启动统一 FastAPI 服务并检查 `/api/health`、`/api/capabilities`、`/api/palettes`。
 - 使用应用内浏览器手动检查：上传、裁剪、生成、编辑、统计、镜像、导出、更换图片、刷新和错误恢复。
 

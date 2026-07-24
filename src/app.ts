@@ -29,6 +29,13 @@ export function renderApp(): string {
           accept="${ACCEPTED_IMAGE_ACCEPT}"
           data-file-input
         />
+        <input
+          class="visually-hidden"
+          id="project-file-input"
+          type="file"
+          accept="application/json,.json"
+          data-project-file-input
+        />
 
         ${renderUploadWorkspace()}
         ${renderPrepareWorkspace()}
@@ -71,15 +78,39 @@ function renderUploadWorkspace(): string {
         <i class="ph ph-upload-simple" aria-hidden="true"></i>
         <span>
           <strong>选择图片</strong>
-          <small>PNG、JPEG 或 WebP，最大 20 MB</small>
+          <small data-upload-constraints>PNG、JPEG 或 WebP，最大 20 MB</small>
         </span>
       </label>
+
+      <div class="upload-secondary-actions">
+        <span>或</span>
+        <label class="secondary-upload" for="project-file-input" data-open-project>
+          <i class="ph ph-brackets-curly" aria-hidden="true"></i>
+          <span>
+            <strong>打开项目 JSON</strong>
+            <small>继续编辑之前导出的图纸</small>
+          </span>
+        </label>
+      </div>
 
       <p class="privacy-note">
         <i class="ph ph-shield-check" aria-hidden="true"></i>
         图片只在内存中处理，不会保存，也不会发送给第三方图片服务。
       </p>
       <p class="file-status" data-file-status role="status"></p>
+      <p
+        class="project-file-status"
+        data-project-file-status
+        role="status"
+        aria-live="polite"
+      ></p>
+      <p
+        class="capabilities-status"
+        data-capabilities-status
+        role="status"
+        aria-live="polite"
+        hidden
+      ></p>
     </section>
   `;
 }
@@ -120,13 +151,80 @@ function renderPrepareWorkspace(): string {
           <div class="crop-frame" data-crop-frame>
             <canvas data-crop-canvas aria-label="待裁剪的图片"></canvas>
             <div class="crop-mask" aria-hidden="true"></div>
-            <div class="crop-selection" data-crop-selection aria-hidden="true">
-              <span class="crop-handle crop-handle-nw"></span>
-              <span class="crop-handle crop-handle-ne"></span>
-              <span class="crop-handle crop-handle-sw"></span>
-              <span class="crop-handle crop-handle-se"></span>
+            <div
+              class="crop-selection"
+              data-crop-selection
+              data-crop-keyboard-target
+              aria-describedby="crop-keyboard-help"
+              aria-label="裁剪范围。使用方向键移动，按住 Alt 加方向键调整大小。"
+              role="group"
+              tabindex="0"
+            >
+              <span class="crop-handle crop-handle-nw" aria-hidden="true"></span>
+              <span class="crop-handle crop-handle-ne" aria-hidden="true"></span>
+              <span class="crop-handle crop-handle-sw" aria-hidden="true"></span>
+              <span class="crop-handle crop-handle-se" aria-hidden="true"></span>
             </div>
           </div>
+
+          <fieldset class="crop-numeric-controls" data-crop-numeric-controls>
+            <legend>裁剪位置与大小（%）</legend>
+            <label>
+              <span>左侧 X</span>
+              <input
+                type="number"
+                min="0"
+                max="92"
+                step="0.1"
+                value="0"
+                inputmode="decimal"
+                aria-describedby="crop-keyboard-help"
+                data-crop-x
+              />
+            </label>
+            <label>
+              <span>顶部 Y</span>
+              <input
+                type="number"
+                min="0"
+                max="92"
+                step="0.1"
+                value="0"
+                inputmode="decimal"
+                aria-describedby="crop-keyboard-help"
+                data-crop-y
+              />
+            </label>
+            <label>
+              <span>宽度</span>
+              <input
+                type="number"
+                min="8"
+                max="100"
+                step="0.1"
+                value="100"
+                inputmode="decimal"
+                aria-describedby="crop-keyboard-help"
+                data-crop-width
+              />
+            </label>
+            <label>
+              <span>高度</span>
+              <input
+                type="number"
+                min="8"
+                max="100"
+                step="0.1"
+                value="100"
+                inputmode="decimal"
+                aria-describedby="crop-keyboard-help"
+                data-crop-height
+              />
+            </label>
+          </fieldset>
+          <p id="crop-keyboard-help" class="control-help">
+            聚焦裁剪框后，用方向键移动；按住 Shift 每次移动 5%；按住 Option / Alt 加方向键调整宽高。
+          </p>
 
           <div class="crop-actions" aria-label="图片方向">
             <button class="secondary-button" type="button" data-rotate-left>
@@ -180,6 +278,34 @@ function renderPrepareWorkspace(): string {
                 <option value="custom">自定义拼板</option>
               </select>
             </label>
+            <fieldset class="custom-board-fields" data-custom-board-fields>
+              <legend>自定义拼板格数</legend>
+              <label>
+                <span>每块列数</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="300"
+                  value="29"
+                  inputmode="numeric"
+                  aria-describedby="custom-board-help"
+                  data-custom-board-columns
+                />
+              </label>
+              <label>
+                <span>每块行数</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="300"
+                  value="29"
+                  inputmode="numeric"
+                  aria-describedby="custom-board-help"
+                  data-custom-board-rows
+                />
+              </label>
+              <small id="custom-board-help">按实际拼板孔位填写，材料估算会按行列分板。</small>
+            </fieldset>
           </div>
 
           <div class="settings-section">
@@ -217,7 +343,27 @@ function renderPrepareWorkspace(): string {
               <div class="available-color-filter-content">
                 <div class="available-color-filter-heading">
                   <p>取消没有的色号，生成时就不会使用它。</p>
-                  <button class="text-button" type="button" data-select-all-colors>全部选中</button>
+                  <div>
+                    <button class="text-button" type="button" data-select-all-colors>全部选中</button>
+                    <button class="text-button" type="button" data-clear-all-colors>清除选择</button>
+                  </div>
+                </div>
+                <div class="available-color-controls" role="search" aria-label="筛选可用颜色">
+                  <label>
+                    <span>搜索色号或名称</span>
+                    <input
+                      type="search"
+                      autocomplete="off"
+                      placeholder="例如 A14、海蓝"
+                      data-available-color-search
+                    />
+                  </label>
+                  <label>
+                    <span>系列</span>
+                    <select data-available-color-series>
+                      <option value="">全部系列</option>
+                    </select>
+                  </label>
                 </div>
                 <div
                   class="available-color-grid"
@@ -288,7 +434,7 @@ function renderPrepareWorkspace(): string {
                 <input
                   type="number"
                   min="1"
-                  max="20"
+                  max="12"
                   step="0.1"
                   value="5"
                   inputmode="decimal"
@@ -298,10 +444,20 @@ function renderPrepareWorkspace(): string {
             </div>
           </details>
 
-          <button class="primary-button prepare-primary" type="button" data-generate-pattern>
-            <span>生成图纸</span>
-            <i class="ph ph-arrow-right" aria-hidden="true"></i>
-          </button>
+          <div class="prepare-completion-actions">
+            <button class="secondary-button" type="button" data-return-editor hidden>
+              返回编辑
+            </button>
+            <button
+              class="primary-button prepare-primary"
+              type="button"
+              data-generate-pattern
+              data-regenerate-pattern
+            >
+              <span data-generate-label>生成图纸</span>
+              <i class="ph ph-arrow-right" aria-hidden="true"></i>
+            </button>
+          </div>
           <p class="inline-status" data-generate-status role="status"></p>
         </aside>
       </div>
@@ -338,30 +494,126 @@ function renderPatternWorkspace(): string {
             <button class="icon-button" type="button" data-zoom-out aria-label="缩小">
               <i class="ph ph-minus" aria-hidden="true"></i>
             </button>
-            <button class="text-button" type="button" data-zoom-fit>适合窗口</button>
+            <button class="text-button" type="button" data-zoom-fit data-canvas-zoom-fit>
+              适合窗口
+            </button>
+            <button
+              class="icon-button"
+              type="button"
+              data-canvas-zoom-actual
+              aria-label="以 100% 显示画布"
+            >
+              <i class="ph ph-number-circle-one" aria-hidden="true"></i>
+            </button>
             <button class="icon-button" type="button" data-zoom-in aria-label="放大">
               <i class="ph ph-plus" aria-hidden="true"></i>
             </button>
           </div>
+          <div
+            class="canvas-toolbar-group selection-actions"
+            role="group"
+            data-selection-actions
+            data-selection-active="false"
+            aria-label="选中区域操作"
+          >
+            <button
+              class="icon-button"
+              type="button"
+              data-selection-action="move"
+              aria-label="选区向右移动一格"
+              disabled
+            >
+              <i class="ph ph-arrows-out-simple" aria-hidden="true"></i>
+            </button>
+            <button
+              class="icon-button"
+              type="button"
+              data-selection-action="copy"
+              aria-label="选区向右复制一格"
+              disabled
+            >
+              <i class="ph ph-squares-four" aria-hidden="true"></i>
+            </button>
+            <button
+              class="icon-button"
+              type="button"
+              data-selection-action="clear"
+              data-clear-selection
+              aria-label="清空选中区域"
+              disabled
+            >
+              <i class="ph ph-trash" aria-hidden="true"></i>
+            </button>
+          </div>
         </div>
         <div class="pattern-canvas-frame">
+          <form
+            class="canvas-jump-form"
+            data-canvas-jump-form
+            aria-label="跳转到指定拼豆格"
+          >
+            <label>
+              <span>行</span>
+              <input
+                data-canvas-jump-row
+                min="1"
+                max="300"
+                step="1"
+                value="1"
+                type="number"
+                inputmode="numeric"
+                aria-label="目标行"
+              />
+            </label>
+            <label>
+              <span>列</span>
+              <input
+                data-canvas-jump-column
+                min="1"
+                max="300"
+                step="1"
+                value="1"
+                type="number"
+                inputmode="numeric"
+                aria-label="目标列"
+              />
+            </label>
+            <button class="text-button" type="submit" data-canvas-jump-submit>
+              跳转
+            </button>
+          </form>
           <canvas
             class="pattern-canvas"
             data-pattern-canvas
             tabindex="0"
-            aria-label="拼豆矩阵编辑画布。使用方向键移动，空格键应用当前工具。"
+            aria-label="拼豆矩阵编辑画布。使用方向键移动，空格键应用当前工具；也可使用画布上方的行列输入跳转。"
           ></canvas>
         </div>
       </div>
 
       <aside class="workspace-inspector" data-workspace-inspector>
         ${renderInspectorTabs('desktop')}
-        <div class="inspector-content" data-inspector-content></div>
+        ${renderPaletteControls('desktop')}
+        <div
+          id="inspector-desktop-tabpanel"
+          class="inspector-content"
+          role="tabpanel"
+          aria-labelledby="inspector-desktop-tab-tools"
+          tabindex="0"
+          data-inspector-content
+          data-tabpanel-surface="desktop"
+        ></div>
         <div class="inspector-primary">
-          <button class="primary-button" type="button" data-open-export>
-            <i class="ph ph-export" aria-hidden="true"></i>
-            完成并导出
-          </button>
+          <div class="completion-actions">
+            <button class="secondary-button" type="button" data-return-prepare>
+              <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
+              调整设置
+            </button>
+            <button class="primary-button" type="button" data-open-export>
+              <i class="ph ph-export" aria-hidden="true"></i>
+              完成并导出
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -370,20 +622,42 @@ function renderPatternWorkspace(): string {
           <span aria-hidden="true"></span>
         </button>
         ${renderInspectorTabs('mobile')}
-        <div class="sheet-content" data-sheet-content></div>
+        ${renderPaletteControls('mobile')}
+        <div
+          id="inspector-mobile-tabpanel"
+          class="sheet-content"
+          role="tabpanel"
+          aria-labelledby="inspector-mobile-tab-tools"
+          tabindex="0"
+          data-sheet-content
+          data-tabpanel-surface="mobile"
+        ></div>
         <div class="sheet-primary">
-          <button class="primary-button" type="button" data-mobile-export>
-            <i class="ph ph-export" aria-hidden="true"></i>
-            完成并导出
-          </button>
+          <div class="completion-actions">
+            <button class="secondary-button" type="button" data-return-prepare>
+              <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
+              调整设置
+            </button>
+            <button class="primary-button" type="button" data-mobile-export>
+              <i class="ph ph-export" aria-hidden="true"></i>
+              完成并导出
+            </button>
+          </div>
         </div>
       </section>
 
-      <div class="export-popover" data-export-popover hidden>
+      <div
+        class="export-popover"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-dialog-title"
+        data-export-popover
+        hidden
+      >
         <div class="export-heading">
           <div>
             <span class="eyebrow">导出当前图纸</span>
-            <h2>选择文件格式</h2>
+            <h2 id="export-dialog-title">选择文件格式</h2>
           </div>
           <button class="icon-button" type="button" data-close-export aria-label="关闭导出选项">
             <i class="ph ph-x" aria-hidden="true"></i>
@@ -393,6 +667,35 @@ function renderPatternWorkspace(): string {
           <input type="checkbox" checked data-export-grid />
           <span>包含网格、坐标和材料图例</span>
         </label>
+        <fieldset
+          class="export-template-options"
+          data-export-template-options
+          aria-describedby="export-template-help"
+        >
+          <legend>图纸样式</legend>
+          <label>
+            <input
+              type="radio"
+              name="export-template"
+              value="pure"
+              data-export-template="pure"
+            />
+            <span>纯图案<small>只保留拼豆矩阵</small></span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="export-template"
+              value="annotated"
+              data-export-template="annotated"
+              checked
+            />
+            <span>带标注<small>包含网格、坐标和材料图例</small></span>
+          </label>
+        </fieldset>
+        <p id="export-template-help" class="control-help">
+          PNG 和 PDF 会使用所选样式；CSV 与项目 JSON 始终保留完整数据。
+        </p>
         <div class="export-actions">
           ${renderExportButton('png', 'PNG 图纸', '适合查看与分享', 'ph-image-square')}
           ${renderExportButton('pdf', 'PDF 打印稿', '按页打印和分板', 'ph-file-pdf')}
@@ -420,12 +723,95 @@ function renderToolButton(tool: string, label: string, icon: string, active = fa
 }
 
 function renderInspectorTabs(surface: 'desktop' | 'mobile'): string {
+  const panelId = `inspector-${surface}-tabpanel`;
   return `
-    <div class="inspector-tabs" role="tablist" aria-label="图案信息" data-tab-surface="${surface}">
-      <button type="button" role="tab" aria-selected="true" data-panel-tab="tools">工具</button>
-      <button type="button" role="tab" aria-selected="false" data-panel-tab="palette">颜色</button>
-      <button type="button" role="tab" aria-selected="false" data-panel-tab="materials">材料</button>
-      <button type="button" role="tab" aria-selected="false" data-panel-tab="settings">设置</button>
+    <div
+      class="inspector-tabs"
+      id="inspector-${surface}-tabs"
+      role="tablist"
+      aria-label="图案信息"
+      aria-orientation="horizontal"
+      data-tab-surface="${surface}"
+    >
+      ${renderInspectorTab(surface, panelId, 'tools', '工具', true)}
+      ${renderInspectorTab(surface, panelId, 'palette', '颜色')}
+      ${renderInspectorTab(surface, panelId, 'materials', '材料')}
+      ${renderInspectorTab(surface, panelId, 'settings', '设置')}
+    </div>
+  `;
+}
+
+function renderInspectorTab(
+  surface: 'desktop' | 'mobile',
+  panelId: string,
+  panel: string,
+  label: string,
+  selected = false,
+): string {
+  return `
+    <button
+      id="inspector-${surface}-tab-${panel}"
+      type="button"
+      role="tab"
+      aria-controls="${panelId}"
+      aria-selected="${String(selected)}"
+      tabindex="${selected ? '0' : '-1'}"
+      data-panel-tab="${panel}"
+      data-panel-id="${panelId}"
+    >${label}</button>
+  `;
+}
+
+function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
+  const searchId = `color-search-${surface}`;
+  return `
+    <div
+      class="palette-controls"
+      role="search"
+      data-palette-controls="${surface}"
+      aria-label="颜色筛选"
+    >
+      <label class="palette-search" for="${searchId}">
+        <span>搜索色号或名称</span>
+        <span class="search-input">
+          <input
+            id="${searchId}"
+            type="search"
+            autocomplete="off"
+            placeholder="例如 A14、海蓝"
+            aria-describedby="color-filter-status-${surface}"
+            data-color-search
+          />
+        </span>
+      </label>
+      <fieldset class="palette-scope">
+        <legend>显示颜色</legend>
+        <label>
+          <input type="radio" name="color-scope-${surface}" value="all" data-color-filter="all" checked />
+          <span>全部</span>
+        </label>
+        <label>
+          <input type="radio" name="color-scope-${surface}" value="used" data-color-filter="used" />
+          <span>已使用</span>
+        </label>
+        <label>
+          <input type="radio" name="color-scope-${surface}" value="recent" data-color-filter="recent" />
+          <span>最近</span>
+        </label>
+      </fieldset>
+      <label class="palette-series">
+        <span>系列</span>
+        <select data-color-series-filter aria-describedby="color-filter-status-${surface}">
+          <option value="">全部系列</option>
+        </select>
+      </label>
+      <p
+        id="color-filter-status-${surface}"
+        class="color-filter-status"
+        role="status"
+        aria-live="polite"
+        data-color-filter-status
+      ></p>
     </div>
   `;
 }
@@ -459,15 +845,27 @@ function renderChartWorkspace(): string {
         </div>
       </div>
       <div class="editor-chrome">
-        <div class="view-tabs" role="tablist" aria-label="图纸视图">
-          <button class="view-tab" type="button" role="tab" aria-selected="true" data-view-original>
-            原图
-          </button>
+        <div class="view-tabs" role="tablist" aria-label="图纸视图" aria-orientation="horizontal">
           <button
+            id="chart-tab-original"
             class="view-tab"
             type="button"
             role="tab"
+            aria-controls="chart-view-tabpanel"
+            aria-selected="true"
+            tabindex="0"
+            data-view-original
+          >
+            原图
+          </button>
+          <button
+            id="chart-tab-result"
+            class="view-tab"
+            type="button"
+            role="tab"
+            aria-controls="chart-view-tabpanel"
             aria-selected="false"
+            tabindex="-1"
             data-view-result
             disabled
           >
@@ -491,7 +889,14 @@ function renderChartWorkspace(): string {
           <span class="zoom-status" data-zoom-status>适合</span>
         </div>
       </div>
-      <div class="editor-frame" data-editor-frame>
+      <div
+        id="chart-view-tabpanel"
+        class="editor-frame"
+        role="tabpanel"
+        aria-labelledby="chart-tab-original"
+        tabindex="0"
+        data-editor-frame
+      >
         <div class="editor-stage" data-editor-stage>
           <img class="editor-image" alt="" data-editor-image />
           <img class="result-image" alt="" data-editor-result hidden />

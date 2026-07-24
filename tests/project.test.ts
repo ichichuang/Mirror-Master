@@ -37,6 +37,8 @@ function createProject(): BeadProject {
       beadDiameterMm: 5,
       beadPitchMm: 5,
       boardPresetId: 'standardSquare',
+      boardRows: 29,
+      boardColumns: 29,
     },
     palette: {
       paletteId: 'default',
@@ -70,7 +72,7 @@ test('project schema validates matrix dimensions and known color IDs', () => {
   const project = createProject();
 
   assert.doesNotThrow(() => assertValidProject(project));
-  assert.equal(parseBeadProject(project), project);
+  assert.deepEqual(parseBeadProject(project), project);
   assert.throws(
     () =>
       parseBeadProject({

@@ -1,26 +1,55 @@
+import { DESIGN_TOKENS } from '../../design/generated/tokens';
+import type { MatrixCellChange } from '../../domain/history';
+import type { BeadCell, BeadProject } from '../../domain/project';
 import { PALETTE_COLORS } from '../../generated/palettes';
+import { EditorGestureState, resolvePointerIntent, type TrackedPointer } from './gestureState';
+import { MatrixDraft, type MatrixTransactionResult } from './matrixTransaction';
 import {
-  cloneCells,
-  fillCells,
-  replaceCell,
-  type BeadCell,
-  type BeadProject,
-} from '../../domain/project';
+  EditorPerformanceTracker,
+  RenderInvalidation,
+  type EditorPerformanceSnapshot,
+  type RenderCell,
+  type RenderPlan,
+} from './renderState';
+import {
+  clearSelectedCells,
+  copySelectedCells,
+  moveSelectedCells,
+  normalizeSelection,
+  selectionContains,
+  type CellSelection,
+  type SelectionOperationResult,
+} from './selection';
+import { rasterizeGridSegment } from './stroke';
+import {
+  actualViewport,
+  clampViewport,
+  fitViewport,
+  getVisibleCellRange,
+  panViewport,
+  pinchViewport,
+  screenToCell,
+  zoomViewportAt,
+  type GridDimensions,
+  type ViewportBounds,
+  type ViewportConfig,
+  type ViewportPoint,
+  type ViewportTransform,
+} from './viewport';
+
+export type { CellSelection } from './selection';
 
 export type EditorTool = 'paint' | 'erase' | 'eyedropper' | 'fill' | 'select';
 
 export interface CanvasEditorCallbacks {
-  readonly onCommit: (cells: readonly (readonly BeadCell[])[], message: string) => void;
+  readonly onCommit: (
+    cells: readonly (readonly BeadCell[])[],
+    message: string,
+    changes: readonly MatrixCellChange[],
+  ) => void;
   readonly onColorPick: (colorId: string) => void;
   readonly onStatus: (message: string) => void;
   readonly onSelectionChange?: (selection: CellSelection | null) => void;
-}
-
-export interface CellSelection {
-  readonly startRow: number;
-  readonly startColumn: number;
-  readonly endRow: number;
-  readonly endColumn: number;
 }
 
 export interface PatternCanvasController {
@@ -31,7 +60,14 @@ export interface PatternCanvasController {
   readonly zoomIn: () => void;
   readonly zoomOut: () => void;
   readonly fit: () => void;
+  readonly actualSize: () => void;
+  readonly panBy: (deltaX: number, deltaY: number) => void;
+  readonly jumpToCell: (row: number, column: number) => void;
   readonly clearSelection: () => void;
+  readonly copySelection: (deltaRow: number, deltaColumn: number) => void;
+  readonly moveSelection: (deltaRow: number, deltaColumn: number) => void;
+  readonly getPerformanceSnapshot: () => EditorPerformanceSnapshot;
+  readonly resetPerformanceMetrics: () => void;
   readonly destroy: () => void;
 }
 
@@ -40,15 +76,45 @@ interface CellPoint {
   readonly column: number;
 }
 
-interface ActiveGesture {
+interface ActiveToolGesture {
   readonly pointerId: number;
+  readonly kind: 'paint' | 'single' | 'select-new' | 'select-move';
   readonly start: CellPoint;
   last: CellPoint;
-  changed: boolean;
+  readonly draft: MatrixDraft | null;
+  readonly selectionBefore: CellSelection | null;
+  copySelection: boolean;
 }
+
+interface ActivePanGesture {
+  readonly pointerId: number;
+  lastPoint: ViewportPoint;
+}
+
+interface PinchBaseline {
+  readonly transform: ViewportTransform;
+  readonly centroid: ViewportPoint;
+  readonly distance: number;
+}
+
+type ViewportMode = 'fit' | 'actual' | 'manual';
 
 const COLOR_BY_ID = new Map(PALETTE_COLORS.map((color) => [color.id, color]));
 const EMPTY_CELL: BeadCell = Object.freeze({ kind: 'empty' });
+const VIEWPORT_CONFIG: ViewportConfig = Object.freeze({
+  padding: 20,
+  minScale: 0.25,
+  maxScale: 64,
+  actualCellSize: 16,
+});
+const MAX_DIRTY_CELLS_PER_FRAME = 512;
+const CHROME_COLORS = Object.freeze({
+  well: designToken('canvas.background'),
+  surface: designToken('color.background.panel'),
+  grid: designToken('grid.minorLine'),
+  primary: designToken('color.action.primary'),
+  text: designToken('color.text.primary'),
+});
 
 export function mountPatternCanvas(
   canvas: HTMLCanvasElement,
@@ -62,235 +128,696 @@ export function mountPatternCanvas(
   const context: CanvasRenderingContext2D = contextResult;
 
   let project = initialProject;
-  let workingCells = cloneCells(project.cells);
+  let cells = initialProject.cells;
   let tool: EditorTool = 'paint';
   let selectedColorId =
     project.palette.availableColorIds[0] ?? PALETTE_COLORS[0]?.id ?? 'default:A01';
   let reverseView = false;
-  let zoom = 1;
-  let gesture: ActiveGesture | null = null;
   let selection: CellSelection | null = null;
+  let keyboardPoint: CellPoint = Object.freeze({ row: 0, column: 0 });
+  let toolGesture: ActiveToolGesture | null = null;
+  let panGesture: ActivePanGesture | null = null;
+  let pinchBaseline: PinchBaseline | null = null;
+  let viewportMode: ViewportMode = 'fit';
+  let viewportTransform = fitViewport(getViewportBounds(), getGridDimensions(), VIEWPORT_CONFIG);
   let pendingRender = 0;
-  let keyboardPoint: CellPoint = { row: 0, column: 0 };
+  let destroyed = false;
+  let spacePressed = false;
+  let spaceUsedForPan = false;
 
-  const resizeObserver =
-    'ResizeObserver' in window
-      ? new ResizeObserver(() => {
-          scheduleRender();
-        })
-      : null;
+  const gestures = new EditorGestureState();
+  const invalidation = new RenderInvalidation();
+  const performanceTracker = new EditorPerformanceTracker();
+  const resizeObserver = 'ResizeObserver' in window ? new ResizeObserver(handleCanvasResize) : null;
+
   resizeObserver?.observe(canvas);
-
   canvas.addEventListener('pointerdown', handlePointerDown);
   canvas.addEventListener('pointermove', handlePointerMove);
   canvas.addEventListener('pointerup', finishPointer);
   canvas.addEventListener('pointercancel', cancelPointer);
+  canvas.addEventListener('lostpointercapture', handleLostPointerCapture);
   canvas.addEventListener('keydown', handleKeyDown);
+  canvas.addEventListener('keyup', handleKeyUp);
+  canvas.addEventListener('blur', handleWindowBlur);
+  canvas.addEventListener('wheel', handleWheel, { passive: false });
   canvas.addEventListener('contextmenu', preventContextMenu);
+  window.addEventListener('blur', handleWindowBlur);
+  window.addEventListener('orientationchange', handleCanvasResize);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  scheduleFullRender();
 
-  scheduleRender();
-
-  const controller: PatternCanvasController = Object.freeze({
+  return Object.freeze({
     setProject(nextProject: BeadProject) {
+      const sameCells = nextProject.cells === cells;
+      const previousGrid = getGridDimensions();
+      cancelAllGestures(false);
       project = nextProject;
-      workingCells = cloneCells(nextProject.cells);
-      selection = null;
-      gesture = null;
-      scheduleRender();
+      cells = nextProject.cells;
+      if (!project.palette.availableColorIds.includes(selectedColorId)) {
+        const nextColorId = project.palette.availableColorIds[0];
+        if (nextColorId) {
+          selectedColorId = nextColorId;
+          callbacks.onColorPick(nextColorId);
+        }
+      }
+      keyboardPoint = Object.freeze({
+        row: Math.min(keyboardPoint.row, nextProject.grid.rows - 1),
+        column: Math.min(keyboardPoint.column, nextProject.grid.columns - 1),
+      });
+      if (!sameCells) {
+        setSelection(null);
+      }
+      const gridChanged =
+        previousGrid.rows !== nextProject.grid.rows ||
+        previousGrid.columns !== nextProject.grid.columns;
+      if (gridChanged || (!sameCells && viewportMode === 'fit')) {
+        viewportMode = 'fit';
+        viewportTransform = fitViewport(getViewportBounds(), getGridDimensions(), VIEWPORT_CONFIG);
+      } else if (!sameCells) {
+        viewportTransform = clampViewport(
+          viewportTransform,
+          getViewportBounds(),
+          getGridDimensions(),
+          VIEWPORT_CONFIG,
+        );
+      }
+      if (!sameCells || gridChanged) {
+        scheduleFullRender();
+      }
     },
     setTool(nextTool: EditorTool) {
+      if (tool !== nextTool) {
+        cancelAllGestures(false);
+      }
       tool = nextTool;
       callbacks.onStatus(toolLabel(nextTool));
     },
     setColor(colorId: string) {
-      if (COLOR_BY_ID.has(colorId)) {
+      if (COLOR_BY_ID.has(colorId) && project.palette.availableColorIds.includes(colorId)) {
         selectedColorId = colorId;
         callbacks.onStatus(`已选择色号 ${formatColorCode(colorId)}。`);
       }
     },
     setReverseView(nextReverse: boolean) {
+      cancelAllGestures(false);
       reverseView = nextReverse;
-      scheduleRender();
+      scheduleFullRender();
       callbacks.onStatus(nextReverse ? '正在查看反面。' : '正在查看正面。');
     },
     zoomIn() {
-      zoom = Math.min(4, zoom * 1.2);
-      scheduleRender();
+      cancelAllGestures(false);
+      zoomAtCenter(viewportTransform.scale * 1.2);
     },
     zoomOut() {
-      zoom = Math.max(0.5, zoom / 1.2);
-      scheduleRender();
+      cancelAllGestures(false);
+      zoomAtCenter(viewportTransform.scale / 1.2);
     },
     fit() {
-      zoom = 1;
-      scheduleRender();
+      cancelAllGestures(false);
+      viewportMode = 'fit';
+      viewportTransform = fitViewport(getViewportBounds(), getGridDimensions(), VIEWPORT_CONFIG);
+      scheduleFullRender();
     },
-    clearSelection() {
-      if (!selection) {
-        callbacks.onStatus('请先选择要清空的区域。');
-        return;
-      }
-      const normalized = normalizeSelection(selection);
-      let nextCells = workingCells;
-      for (let row = normalized.startRow; row <= normalized.endRow; row += 1) {
-        for (let column = normalized.startColumn; column <= normalized.endColumn; column += 1) {
-          nextCells = replaceCell(nextCells, row, column, EMPTY_CELL);
-        }
-      }
-      selection = null;
-      commit(nextCells, '已清空选中区域。');
+    actualSize() {
+      cancelAllGestures(false);
+      viewportMode = 'actual';
+      viewportTransform = actualViewport(getViewportBounds(), getGridDimensions(), VIEWPORT_CONFIG);
+      scheduleFullRender();
     },
-    destroy() {
-      resizeObserver?.disconnect();
-      canvas.removeEventListener('pointerdown', handlePointerDown);
-      canvas.removeEventListener('pointermove', handlePointerMove);
-      canvas.removeEventListener('pointerup', finishPointer);
-      canvas.removeEventListener('pointercancel', cancelPointer);
-      canvas.removeEventListener('keydown', handleKeyDown);
-      canvas.removeEventListener('contextmenu', preventContextMenu);
-      if (pendingRender) {
-        window.cancelAnimationFrame(pendingRender);
-      }
+    panBy(deltaX: number, deltaY: number) {
+      cancelAllGestures(false);
+      viewportMode = 'manual';
+      viewportTransform = panViewport(
+        viewportTransform,
+        deltaX,
+        deltaY,
+        getViewportBounds(),
+        getGridDimensions(),
+        VIEWPORT_CONFIG,
+      );
+      scheduleFullRender();
     },
+    jumpToCell(row: number, column: number) {
+      cancelAllGestures(false);
+      const previousPoint = keyboardPoint;
+      keyboardPoint = Object.freeze({
+        row: Math.min(
+          project.grid.rows - 1,
+          Math.max(0, Math.round(Number.isFinite(row) ? row : 0)),
+        ),
+        column: Math.min(
+          project.grid.columns - 1,
+          Math.max(0, Math.round(Number.isFinite(column) ? column : 0)),
+        ),
+      });
+      const viewport = getViewportBounds();
+      const targetRect = cellRect(keyboardPoint.row, keyboardPoint.column);
+      const nextTransform = panViewport(
+        viewportTransform,
+        viewport.width / 2 - (targetRect.x + targetRect.size / 2),
+        viewport.height / 2 - (targetRect.y + targetRect.size / 2),
+        viewport,
+        getGridDimensions(),
+        VIEWPORT_CONFIG,
+      );
+      if (
+        nextTransform.offsetX !== viewportTransform.offsetX ||
+        nextTransform.offsetY !== viewportTransform.offsetY
+      ) {
+        viewportMode = 'manual';
+      }
+      viewportTransform = nextTransform;
+      invalidation.markCell(previousPoint.row, previousPoint.column);
+      invalidation.markCell(keyboardPoint.row, keyboardPoint.column);
+      scheduleFullRender();
+      canvas.focus({ preventScroll: true });
+      announceKeyboardPoint();
+    },
+    clearSelection,
+    copySelection(deltaRow: number, deltaColumn: number) {
+      translateSelection('copy', deltaRow, deltaColumn);
+    },
+    moveSelection(deltaRow: number, deltaColumn: number) {
+      translateSelection('move', deltaRow, deltaColumn);
+    },
+    getPerformanceSnapshot: () => performanceTracker.snapshot,
+    resetPerformanceMetrics() {
+      performanceTracker.reset();
+    },
+    destroy,
   });
 
-  return controller;
-
   function handlePointerDown(event: PointerEvent): void {
-    if (event.button !== 0 && event.pointerType === 'mouse') {
+    if (
+      destroyed ||
+      (event.pointerType === 'mouse' && event.button !== 0 && event.button !== 1) ||
+      (event.pointerType !== 'mouse' && event.button !== 0)
+    ) {
       return;
     }
-    const point = pointFromPointer(event);
-    if (!point) {
+
+    const pointer = pointerFromEvent(event);
+    const trackedPointers = gestures.pointerIds
+      .map((pointerId) => gestures.getPointer(pointerId))
+      .filter((trackedPointer): trackedPointer is TrackedPointer => trackedPointer !== null);
+    const canJoinTouchPinch =
+      pointer.pointerType === 'touch' &&
+      trackedPointers.length === 1 &&
+      trackedPointers[0]?.pointerType === 'touch';
+    if (gestures.getPointer(pointer.id) || (trackedPointers.length > 0 && !canJoinTouchPinch)) {
+      event.preventDefault();
       return;
     }
+    const previousMode = gestures.snapshot.mode;
+    const intent = resolvePointerIntent(event.pointerType, event.button, spacePressed);
+    const snapshot = gestures.begin(pointer, intent);
+    if (!capturePointer(event.pointerId)) {
+      event.preventDefault();
+      return;
+    }
+    canvas.focus({ preventScroll: true });
     event.preventDefault();
-    canvas.setPointerCapture(event.pointerId);
-    gesture = {
-      pointerId: event.pointerId,
-      start: point,
-      last: point,
-      changed: false,
-    };
-    keyboardPoint = point;
-    if (tool === 'select') {
-      selection = {
-        startRow: point.row,
-        startColumn: point.column,
-        endRow: point.row,
-        endColumn: point.column,
-      };
-      callbacks.onSelectionChange?.(selection);
-      scheduleRender();
+
+    if (snapshot.mode === 'pinch') {
+      if (previousMode !== 'pinch') {
+        rollbackToolGesture();
+        panGesture = null;
+        const pinch = snapshot.pinch;
+        if (pinch) {
+          pinchBaseline = Object.freeze({
+            transform: viewportTransform,
+            centroid: pinch.centroid,
+            distance: Math.max(1, pinch.distance),
+          });
+        }
+      }
+      viewportMode = 'manual';
       return;
     }
-    applyTool(point);
+
+    const viewportPoint = viewportPointFromEvent(event);
+    if (snapshot.mode === 'pan') {
+      panGesture = {
+        pointerId: event.pointerId,
+        lastPoint: viewportPoint,
+      };
+      if (spacePressed) {
+        spaceUsedForPan = true;
+      }
+      viewportMode = 'manual';
+      return;
+    }
+
+    const point = pointFromViewport(viewportPoint);
+    if (!point) {
+      gestures.end(event.pointerId);
+      releasePointer(event.pointerId);
+      return;
+    }
+    keyboardPoint = point;
+    startToolGesture(event, point);
   }
 
   function handlePointerMove(event: PointerEvent): void {
-    if (!gesture || gesture.pointerId !== event.pointerId) {
+    if (!gestures.getPointer(event.pointerId)) {
       return;
     }
-    const point = pointFromPointer(event);
-    if (!point || (point.row === gesture.last.row && point.column === gesture.last.column)) {
+    gestures.update(pointerFromEvent(event));
+    const mode = gestures.snapshot.mode;
+    if (mode === 'pinch') {
+      updatePinch();
+      event.preventDefault();
       return;
     }
+
+    const viewportPoint = viewportPointFromEvent(event);
+    if (mode === 'pan' && panGesture?.pointerId === event.pointerId) {
+      viewportTransform = panViewport(
+        viewportTransform,
+        viewportPoint.x - panGesture.lastPoint.x,
+        viewportPoint.y - panGesture.lastPoint.y,
+        getViewportBounds(),
+        getGridDimensions(),
+        VIEWPORT_CONFIG,
+      );
+      panGesture.lastPoint = viewportPoint;
+      scheduleFullRender();
+      event.preventDefault();
+      return;
+    }
+
+    if (mode !== 'tool' || toolGesture?.pointerId !== event.pointerId) {
+      return;
+    }
+    const point = pointFromViewport(viewportPoint);
+    if (!point) {
+      return;
+    }
+    updateToolGesture(point, event.altKey);
     event.preventDefault();
-    gesture.last = point;
-    keyboardPoint = point;
-    if (tool === 'select') {
-      selection = {
-        startRow: gesture.start.row,
-        startColumn: gesture.start.column,
-        endRow: point.row,
-        endColumn: point.column,
-      };
-      callbacks.onSelectionChange?.(selection);
-      scheduleRender();
-      return;
-    }
-    if (tool === 'paint' || tool === 'erase') {
-      applyTool(point);
-    }
   }
 
   function finishPointer(event: PointerEvent): void {
-    if (!gesture || gesture.pointerId !== event.pointerId) {
+    const mode = gestures.snapshot.mode;
+    if (!gestures.getPointer(event.pointerId)) {
       return;
     }
-    if (canvas.hasPointerCapture(event.pointerId)) {
-      canvas.releasePointerCapture(event.pointerId);
+
+    if (mode === 'pinch') {
+      const pointerIds = gestures.pointerIds;
+      gestures.end(event.pointerId);
+      releasePointers(pointerIds);
+      pinchBaseline = null;
+      panGesture = null;
+      event.preventDefault();
+      return;
     }
-    const completedGesture = gesture;
-    gesture = null;
-    if (completedGesture.changed) {
-      callbacks.onCommit(
-        cloneCells(workingCells),
+
+    if (mode === 'pan') {
+      gestures.end(event.pointerId);
+      panGesture = null;
+      releasePointer(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+
+    const completedGesture = toolGesture;
+    if (!completedGesture || completedGesture.pointerId !== event.pointerId) {
+      gestures.end(event.pointerId);
+      releasePointer(event.pointerId);
+      return;
+    }
+
+    const finalPoint = pointFromViewport(viewportPointFromEvent(event));
+    if (finalPoint) {
+      updateToolGesture(finalPoint, event.altKey);
+    }
+    toolGesture = null;
+    gestures.end(event.pointerId);
+    releasePointer(event.pointerId);
+    completeToolGesture(completedGesture, finalPoint);
+    event.preventDefault();
+  }
+
+  function cancelPointer(event: PointerEvent): void {
+    if (gestures.getPointer(event.pointerId)) {
+      cancelAllGestures(true);
+      event.preventDefault();
+    }
+  }
+
+  function handleLostPointerCapture(event: PointerEvent): void {
+    if (gestures.getPointer(event.pointerId)) {
+      cancelAllGestures(true);
+    }
+  }
+
+  function startToolGesture(event: PointerEvent, point: CellPoint): void {
+    const selectionBefore = selection;
+    if (tool === 'paint' || tool === 'erase') {
+      const draft = new MatrixDraft(cells);
+      toolGesture = {
+        pointerId: event.pointerId,
+        kind: 'paint',
+        start: point,
+        last: point,
+        draft,
+        selectionBefore,
+        copySelection: false,
+      };
+      applyPaintPoint(draft, point);
+      return;
+    }
+
+    if (tool === 'select') {
+      const movingSelection = selection && selectionContains(selection, point.row, point.column);
+      toolGesture = {
+        pointerId: event.pointerId,
+        kind: movingSelection ? 'select-move' : 'select-new',
+        start: point,
+        last: point,
+        draft: null,
+        selectionBefore,
+        copySelection: event.altKey,
+      };
+      if (!movingSelection) {
+        setSelection({
+          startRow: point.row,
+          startColumn: point.column,
+          endRow: point.row,
+          endColumn: point.column,
+        });
+      }
+      return;
+    }
+
+    toolGesture = {
+      pointerId: event.pointerId,
+      kind: 'single',
+      start: point,
+      last: point,
+      draft: null,
+      selectionBefore,
+      copySelection: false,
+    };
+  }
+
+  function updateToolGesture(point: CellPoint, copySelectionModifier: boolean): void {
+    const active = toolGesture;
+    if (!active) {
+      return;
+    }
+    keyboardPoint = point;
+    if (active.kind === 'paint' && active.draft) {
+      for (const interpolated of rasterizeGridSegment(active.last, point)) {
+        applyPaintPoint(active.draft, interpolated);
+      }
+    } else if (active.kind === 'select-new') {
+      setSelection({
+        startRow: active.start.row,
+        startColumn: active.start.column,
+        endRow: point.row,
+        endColumn: point.column,
+      });
+    } else if (active.kind === 'select-move') {
+      active.copySelection = copySelectionModifier;
+      const source = active.selectionBefore;
+      if (source) {
+        setSelection(
+          translateSelectionRect(
+            source,
+            point.row - active.start.row,
+            point.column - active.start.column,
+          ),
+        );
+      }
+    }
+    active.last = point;
+  }
+
+  function completeToolGesture(active: ActiveToolGesture, finalPoint: CellPoint | null): void {
+    if (active.kind === 'paint' && active.draft) {
+      const transactionStartedAt = now();
+      const result = active.draft.finish();
+      commitResult(
+        result,
         tool === 'erase' ? '已擦除拼豆。' : '已更新图案。',
+        transactionStartedAt,
+      );
+      return;
+    }
+    if (active.kind === 'single' && finalPoint) {
+      applySinglePointTool(finalPoint);
+      return;
+    }
+    if (active.kind === 'select-move' && active.selectionBefore) {
+      const transactionStartedAt = now();
+      const deltaRow = active.last.row - active.start.row;
+      const deltaColumn = active.last.column - active.start.column;
+      const result = active.copySelection
+        ? copySelectedCells(cells, active.selectionBefore, deltaRow, deltaColumn)
+        : moveSelectedCells(cells, active.selectionBefore, deltaRow, deltaColumn);
+      applySelectionResult(
+        result,
+        active.copySelection ? '已复制选中区域。' : '已移动选中区域。',
+        transactionStartedAt,
       );
     }
   }
 
-  function cancelPointer(event: PointerEvent): void {
-    if (!gesture || gesture.pointerId !== event.pointerId) {
-      return;
+  function applyPaintPoint(draft: MatrixDraft, point: CellPoint): void {
+    const nextCell =
+      tool === 'erase'
+        ? EMPTY_CELL
+        : Object.freeze({ kind: 'bead' as const, colorId: selectedColorId });
+    if (draft.setCell(point.row, point.column, nextCell)) {
+      invalidation.markCell(point.row, point.column);
+      scheduleRender();
     }
-    workingCells = cloneCells(project.cells);
-    gesture = null;
-    scheduleRender();
-    callbacks.onStatus('本次编辑已取消。');
   }
 
-  function applyTool(point: CellPoint): void {
-    const current = workingCells[point.row]?.[point.column];
+  function applySinglePointTool(point: CellPoint): void {
+    const current = cells[point.row]?.[point.column];
     if (!current) {
       return;
     }
     if (tool === 'eyedropper') {
-      if (current.kind === 'bead') {
+      if (current.kind === 'bead' && project.palette.availableColorIds.includes(current.colorId)) {
         selectedColorId = current.colorId;
         callbacks.onColorPick(current.colorId);
         callbacks.onStatus(`已吸取色号 ${formatColorCode(current.colorId)}。`);
       } else {
-        callbacks.onStatus('这个格子是空的，请选择有拼豆的格子。');
+        callbacks.onStatus('这个格子是空的，或颜色不在当前项目可用色中。');
       }
       return;
     }
-    const nextCell: BeadCell =
-      tool === 'erase' ? EMPTY_CELL : Object.freeze({ kind: 'bead', colorId: selectedColorId });
     if (tool === 'fill') {
-      const nextCells = fillCells(workingCells, point.row, point.column, nextCell);
-      if (nextCells !== workingCells) {
-        workingCells = nextCells;
-        commit(nextCells, '已填充相邻区域。');
+      const transactionStartedAt = now();
+      const result = fillAt(point);
+      commitResult(result, '已填充相邻区域。', transactionStartedAt);
+    }
+  }
+
+  function fillAt(start: CellPoint): MatrixTransactionResult {
+    const target = cells[start.row]?.[start.column];
+    const nextCell = Object.freeze({ kind: 'bead' as const, colorId: selectedColorId });
+    if (!target || cellsEqual(target, nextCell)) {
+      return Object.freeze({ cells, changes: Object.freeze([]) });
+    }
+
+    const draft = new MatrixDraft(cells);
+    const queue: CellPoint[] = [start];
+    const visited = new Set<string>();
+    let queueIndex = 0;
+    while (queueIndex < queue.length) {
+      const point = queue[queueIndex];
+      queueIndex += 1;
+      if (!point) {
+        continue;
       }
-      gesture = null;
+      const key = `${String(point.row)}:${String(point.column)}`;
+      if (visited.has(key)) {
+        continue;
+      }
+      visited.add(key);
+      const current = cells[point.row]?.[point.column];
+      if (!current || !cellsEqual(current, target)) {
+        continue;
+      }
+      draft.setCell(point.row, point.column, nextCell);
+      queue.push(
+        { row: point.row - 1, column: point.column },
+        { row: point.row + 1, column: point.column },
+        { row: point.row, column: point.column - 1 },
+        { row: point.row, column: point.column + 1 },
+      );
+    }
+    return draft.finish();
+  }
+
+  function clearSelection(): void {
+    cancelAllGestures(false);
+    if (!selection) {
+      callbacks.onStatus('请先选择要清空的区域。');
       return;
     }
-    if (tool !== 'paint' && tool !== 'erase') {
+    const transactionStartedAt = now();
+    applySelectionResult(
+      clearSelectedCells(cells, selection),
+      '已清空选中区域。',
+      transactionStartedAt,
+    );
+  }
+
+  function translateSelection(
+    operation: 'copy' | 'move',
+    deltaRow: number,
+    deltaColumn: number,
+  ): void {
+    cancelAllGestures(false);
+    if (!selection) {
+      callbacks.onStatus('请先选择要处理的区域。');
       return;
     }
-    if (
-      current.kind === nextCell.kind &&
-      (current.kind === 'empty' ||
-        (nextCell.kind === 'bead' && current.colorId === nextCell.colorId))
-    ) {
+    const transactionStartedAt = now();
+    const result =
+      operation === 'copy'
+        ? copySelectedCells(cells, selection, deltaRow, deltaColumn)
+        : moveSelectedCells(cells, selection, deltaRow, deltaColumn);
+    applySelectionResult(
+      result,
+      operation === 'copy' ? '已复制选中区域。' : '已移动选中区域。',
+      transactionStartedAt,
+    );
+  }
+
+  function applySelectionResult(
+    result: SelectionOperationResult,
+    message: string,
+    transactionStartedAt: number,
+  ): void {
+    setSelection(result.selection);
+    commitResult(result, message, transactionStartedAt);
+  }
+
+  function commitResult(
+    result: MatrixTransactionResult,
+    message: string,
+    transactionStartedAt: number,
+  ): void {
+    if (result.changes.length === 0) {
+      scheduleFullRender();
       return;
     }
-    workingCells = replaceCell(workingCells, point.row, point.column, nextCell);
-    if (gesture) {
-      gesture.changed = true;
+    cells = result.cells;
+    if (result.changes.length > MAX_DIRTY_CELLS_PER_FRAME) {
+      scheduleFullRender();
+    } else {
+      invalidation.markCells(result.changes);
+      scheduleRender();
     }
+    callbacks.onCommit(result.cells, message, result.changes);
+    performanceTracker.recordTransaction(now() - transactionStartedAt);
+  }
+
+  function rollbackToolGesture(): void {
+    const active = toolGesture;
+    if (!active) {
+      return;
+    }
+    if (active.draft) {
+      invalidation.markCells(active.draft.finish().changes);
+    }
+    toolGesture = null;
+    setSelection(active.selectionBefore);
     scheduleRender();
   }
 
-  function commit(nextCells: readonly (readonly BeadCell[])[], message: string): void {
-    workingCells = cloneCells(nextCells);
-    callbacks.onCommit(cloneCells(nextCells), message);
-    scheduleRender();
+  function cancelAllGestures(announce: boolean): void {
+    const pointerIds = gestures.pointerIds;
+    const hadGesture = gestures.snapshot.mode !== 'idle' || toolGesture !== null;
+    rollbackToolGesture();
+    gestures.cancelAll();
+    releasePointers(pointerIds);
+    panGesture = null;
+    pinchBaseline = null;
+    spacePressed = false;
+    spaceUsedForPan = false;
+    if (hadGesture && announce) {
+      callbacks.onStatus('本次编辑已取消。');
+    }
+  }
+
+  function updatePinch(): void {
+    const current = gestures.snapshot.pinch;
+    const baseline = pinchBaseline;
+    if (!current || !baseline) {
+      return;
+    }
+    viewportTransform = pinchViewport(
+      baseline.transform,
+      baseline.transform.scale * (current.distance / baseline.distance),
+      baseline.centroid,
+      current.centroid,
+      getViewportBounds(),
+      getGridDimensions(),
+      VIEWPORT_CONFIG,
+    );
+    scheduleFullRender();
+  }
+
+  function handleWheel(event: WheelEvent): void {
+    if (gestures.snapshot.mode !== 'idle') {
+      return;
+    }
+    event.preventDefault();
+    viewportMode = 'manual';
+    viewportTransform = zoomViewportAt(
+      viewportTransform,
+      viewportTransform.scale * Math.exp(-event.deltaY * 0.0015),
+      viewportPointFromEvent(event),
+      getViewportBounds(),
+      getGridDimensions(),
+      VIEWPORT_CONFIG,
+    );
+    scheduleFullRender();
+  }
+
+  function zoomAtCenter(scale: number): void {
+    const viewport = getViewportBounds();
+    viewportMode = 'manual';
+    viewportTransform = zoomViewportAt(
+      viewportTransform,
+      scale,
+      { x: viewport.width / 2, y: viewport.height / 2 },
+      viewport,
+      getGridDimensions(),
+      VIEWPORT_CONFIG,
+    );
+    scheduleFullRender();
   }
 
   function handleKeyDown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      if (gestures.snapshot.mode !== 'idle' || toolGesture) {
+        event.preventDefault();
+        cancelAllGestures(true);
+      }
+      return;
+    }
+    if (event.key === ' ') {
+      spacePressed = true;
+      if (!event.repeat) {
+        spaceUsedForPan = gestures.snapshot.mode !== 'idle' || toolGesture !== null;
+      }
+      event.preventDefault();
+      return;
+    }
+    if (gestures.snapshot.mode !== 'idle' || toolGesture) {
+      return;
+    }
+
+    const previousPoint = keyboardPoint;
     if (event.key === 'ArrowUp') {
       keyboardPoint = { ...keyboardPoint, row: Math.max(0, keyboardPoint.row - 1) };
     } else if (event.key === 'ArrowDown') {
@@ -301,43 +828,74 @@ export function mountPatternCanvas(
     } else if (event.key === 'ArrowLeft') {
       keyboardPoint = {
         ...keyboardPoint,
-        column: Math.max(0, keyboardPoint.column - 1),
+        column: reverseView
+          ? Math.min(project.grid.columns - 1, keyboardPoint.column + 1)
+          : Math.max(0, keyboardPoint.column - 1),
       };
     } else if (event.key === 'ArrowRight') {
       keyboardPoint = {
         ...keyboardPoint,
-        column: Math.min(project.grid.columns - 1, keyboardPoint.column + 1),
+        column: reverseView
+          ? Math.max(0, keyboardPoint.column - 1)
+          : Math.min(project.grid.columns - 1, keyboardPoint.column + 1),
       };
-    } else if (event.key === 'Enter' || event.key === ' ') {
+    } else if (event.key === 'Enter') {
       event.preventDefault();
-      gesture = {
-        pointerId: -1,
-        start: keyboardPoint,
-        last: keyboardPoint,
-        changed: false,
-      };
-      const keyboardGesture = gesture;
-      applyTool(keyboardPoint);
-      if (keyboardGesture.changed) {
-        callbacks.onCommit(cloneCells(workingCells), '已用键盘更新图案。');
-      }
-      gesture = null;
+      applyKeyboardTool();
+      return;
     } else if ((event.key === 'Delete' || event.key === 'Backspace') && selection) {
       event.preventDefault();
-      const normalized = normalizeSelection(selection);
-      let nextCells = workingCells;
-      for (let row = normalized.startRow; row <= normalized.endRow; row += 1) {
-        for (let column = normalized.startColumn; column <= normalized.endColumn; column += 1) {
-          nextCells = replaceCell(nextCells, row, column, EMPTY_CELL);
-        }
-      }
-      selection = null;
-      commit(nextCells, '已清空选中区域。');
+      clearSelection();
+      return;
     } else {
       return;
     }
+
     event.preventDefault();
+    invalidation.markCell(previousPoint.row, previousPoint.column);
+    invalidation.markCell(keyboardPoint.row, keyboardPoint.column);
     scheduleRender();
+    announceKeyboardPoint();
+  }
+
+  function handleKeyUp(event: KeyboardEvent): void {
+    if (event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    const shouldApplyTool = spacePressed && !spaceUsedForPan && gestures.snapshot.mode === 'idle';
+    spacePressed = false;
+    spaceUsedForPan = false;
+    if (shouldApplyTool) {
+      applyKeyboardTool();
+    }
+  }
+
+  function applyKeyboardTool(): void {
+    if (tool === 'select') {
+      setSelection({
+        startRow: keyboardPoint.row,
+        startColumn: keyboardPoint.column,
+        endRow: keyboardPoint.row,
+        endColumn: keyboardPoint.column,
+      });
+      return;
+    }
+    if (tool === 'eyedropper' || tool === 'fill') {
+      applySinglePointTool(keyboardPoint);
+      return;
+    }
+    const transactionStartedAt = now();
+    const draft = new MatrixDraft(cells);
+    const nextCell =
+      tool === 'erase'
+        ? EMPTY_CELL
+        : Object.freeze({ kind: 'bead' as const, colorId: selectedColorId });
+    draft.setCell(keyboardPoint.row, keyboardPoint.column, nextCell);
+    commitResult(draft.finish(), '已用键盘更新图案。', transactionStartedAt);
+  }
+
+  function announceKeyboardPoint(): void {
     callbacks.onStatus(
       `当前格子：第 ${String(keyboardPoint.row + 1)} 行，第 ${String(
         keyboardPoint.column + 1,
@@ -345,91 +903,206 @@ export function mountPatternCanvas(
     );
   }
 
-  function pointFromPointer(event: PointerEvent): CellPoint | null {
-    const metrics = getRenderMetrics();
-    const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-    const visibleColumn = Math.floor((x - metrics.left) / metrics.cellSize);
-    const row = Math.floor((y - metrics.top) / metrics.cellSize);
-    if (
-      row < 0 ||
-      row >= project.grid.rows ||
-      visibleColumn < 0 ||
-      visibleColumn >= project.grid.columns
-    ) {
-      return null;
-    }
-    return {
-      row,
-      column: reverseView ? project.grid.columns - 1 - visibleColumn : visibleColumn,
-    };
+  function setSelection(nextSelection: CellSelection | null): void {
+    selection = nextSelection ? normalizeSelection(nextSelection) : null;
+    callbacks.onSelectionChange?.(selection);
+    scheduleFullRender();
   }
 
-  function scheduleRender(): void {
-    if (pendingRender) {
+  function translateSelectionRect(
+    source: CellSelection,
+    deltaRow: number,
+    deltaColumn: number,
+  ): CellSelection | null {
+    const normalized = normalizeSelection(source);
+    const startRow = Math.max(0, normalized.startRow + deltaRow);
+    const startColumn = Math.max(0, normalized.startColumn + deltaColumn);
+    const endRow = Math.min(project.grid.rows - 1, normalized.endRow + deltaRow);
+    const endColumn = Math.min(project.grid.columns - 1, normalized.endColumn + deltaColumn);
+    return startRow <= endRow && startColumn <= endColumn
+      ? Object.freeze({ startRow, startColumn, endRow, endColumn })
+      : null;
+  }
+
+  function handleCanvasResize(): void {
+    if (destroyed) {
       return;
     }
-    pendingRender = window.requestAnimationFrame(() => {
-      pendingRender = 0;
-      render();
+    cancelAllGestures(false);
+    viewportTransform =
+      viewportMode === 'fit'
+        ? fitViewport(getViewportBounds(), getGridDimensions(), VIEWPORT_CONFIG)
+        : viewportMode === 'actual'
+          ? actualViewport(getViewportBounds(), getGridDimensions(), VIEWPORT_CONFIG)
+          : clampViewport(
+              viewportTransform,
+              getViewportBounds(),
+              getGridDimensions(),
+              VIEWPORT_CONFIG,
+            );
+    scheduleFullRender();
+  }
+
+  function handleWindowBlur(): void {
+    cancelAllGestures(true);
+  }
+
+  function handleVisibilityChange(): void {
+    if (document.hidden) {
+      cancelAllGestures(true);
+    }
+  }
+
+  function pointFromViewport(point: ViewportPoint): CellPoint | null {
+    return screenToCell(point, viewportTransform, getGridDimensions(), reverseView);
+  }
+
+  function viewportPointFromEvent(event: MouseEvent | PointerEvent | WheelEvent): ViewportPoint {
+    const bounds = canvas.getBoundingClientRect();
+    return Object.freeze({
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
     });
   }
 
+  function pointerFromEvent(event: PointerEvent): TrackedPointer {
+    const point = viewportPointFromEvent(event);
+    return Object.freeze({
+      id: event.pointerId,
+      x: point.x,
+      y: point.y,
+      pointerType: event.pointerType,
+      button: event.button,
+    });
+  }
+
+  function getGridDimensions(): GridDimensions {
+    return Object.freeze({ rows: project.grid.rows, columns: project.grid.columns });
+  }
+
+  function getViewportBounds(): ViewportBounds {
+    return Object.freeze({
+      width: Math.max(1, canvas.clientWidth),
+      height: Math.max(1, canvas.clientHeight),
+    });
+  }
+
+  function scheduleFullRender(): void {
+    invalidation.markFull();
+    scheduleRender();
+  }
+
+  function scheduleRender(): void {
+    if (pendingRender || destroyed) {
+      return;
+    }
+    pendingRender = window.requestAnimationFrame(render);
+  }
+
   function render(): void {
+    pendingRender = 0;
+    const startedAt = now();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-    const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
-    if (canvas.width !== width || canvas.height !== height) {
+    const viewport = getViewportBounds();
+    const width = Math.max(1, Math.floor(viewport.width * dpr));
+    const height = Math.max(1, Math.floor(viewport.height * dpr));
+    const resized = canvas.width !== width || canvas.height !== height;
+    if (resized) {
       canvas.width = width;
       canvas.height = height;
     }
-    const metrics = getRenderMetrics();
-    context.fillStyle = '#E7E3DA';
-    context.fillRect(0, 0, width, height);
-    context.fillStyle = '#FBFAF6';
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const plan = invalidation.consume();
+    const fullRender = resized || plan.full || plan.overlay;
+    const visitedCells = fullRender ? drawFull(viewport) : drawDirty(plan);
+    performanceTracker.recordFrame(fullRender ? 'full' : 'dirty', now() - startedAt, visitedCells);
+  }
+
+  function drawFull(viewport: ViewportBounds): number {
+    context.fillStyle = CHROME_COLORS.well;
+    context.fillRect(0, 0, viewport.width, viewport.height);
+    context.fillStyle = CHROME_COLORS.surface;
     context.fillRect(
-      metrics.left,
-      metrics.top,
-      metrics.cellSize * project.grid.columns,
-      metrics.cellSize * project.grid.rows,
+      viewportTransform.offsetX,
+      viewportTransform.offsetY,
+      viewportTransform.scale * project.grid.columns,
+      viewportTransform.scale * project.grid.rows,
     );
 
-    for (let row = 0; row < project.grid.rows; row += 1) {
-      for (let visibleColumn = 0; visibleColumn < project.grid.columns; visibleColumn += 1) {
-        const column = reverseView ? project.grid.columns - 1 - visibleColumn : visibleColumn;
-        const cell = workingCells[row]?.[column];
-        if (!cell) {
-          continue;
-        }
-        const left = metrics.left + visibleColumn * metrics.cellSize;
-        const top = metrics.top + row * metrics.cellSize;
-        if (metrics.cellSize >= 7) {
-          context.strokeStyle = '#D7D2C8';
-          context.lineWidth = Math.max(1, dpr * 0.6);
-          context.strokeRect(left, top, metrics.cellSize, metrics.cellSize);
-        }
-        if (cell.kind === 'bead') {
-          const color = COLOR_BY_ID.get(cell.colorId);
-          if (color) {
-            const radius = Math.max(1.4, metrics.cellSize * 0.39);
-            const centerX = left + metrics.cellSize / 2;
-            const centerY = top + metrics.cellSize / 2;
-            context.beginPath();
-            context.arc(centerX, centerY, radius, 0, Math.PI * 2);
-            context.fillStyle = color.displayHex;
-            context.fill();
-            if (metrics.cellSize >= 9) {
-              context.beginPath();
-              context.arc(centerX, centerY, Math.max(1, radius * 0.25), 0, Math.PI * 2);
-              context.fillStyle = '#FBFAF6';
-              context.fill();
-            }
-          }
+    const range = getVisibleCellRange(viewportTransform, viewport, getGridDimensions());
+    let visitedCells = 0;
+    if (range) {
+      for (let row = range.startRow; row <= range.endRow; row += 1) {
+        for (
+          let visibleColumn = range.startColumn;
+          visibleColumn <= range.endColumn;
+          visibleColumn += 1
+        ) {
+          drawCell(row, logicalColumn(visibleColumn));
+          visitedCells += 1;
         }
       }
     }
+    drawOverlays();
+    return visitedCells;
+  }
 
+  function drawDirty(plan: RenderPlan): number {
+    let visitedCells = 0;
+    for (const cell of plan.cells) {
+      if (!isCellVisible(cell)) {
+        continue;
+      }
+      const rect = cellRect(cell.row, cell.column);
+      context.save();
+      context.beginPath();
+      context.rect(rect.x, rect.y, rect.size, rect.size);
+      context.clip();
+      drawCell(cell.row, cell.column);
+      drawOverlays();
+      context.restore();
+      visitedCells += 1;
+    }
+    return visitedCells;
+  }
+
+  function drawCell(row: number, column: number): void {
+    const cell = toolGesture?.draft?.getCell(row, column) ?? cells[row]?.[column];
+    if (!cell) {
+      return;
+    }
+    const rect = cellRect(row, column);
+    context.fillStyle = CHROME_COLORS.surface;
+    context.fillRect(rect.x, rect.y, rect.size, rect.size);
+    if (rect.size >= 7) {
+      context.strokeStyle = CHROME_COLORS.grid;
+      context.lineWidth = 0.6;
+      context.strokeRect(rect.x, rect.y, rect.size, rect.size);
+    }
+    if (cell.kind !== 'bead') {
+      return;
+    }
+    const color = COLOR_BY_ID.get(cell.colorId);
+    if (!color) {
+      return;
+    }
+    const radius = Math.max(0.2, rect.size * 0.39);
+    const centerX = rect.x + rect.size / 2;
+    const centerY = rect.y + rect.size / 2;
+    context.beginPath();
+    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    context.fillStyle = color.displayHex;
+    context.fill();
+    if (rect.size >= 9) {
+      context.beginPath();
+      context.arc(centerX, centerY, Math.max(1, radius * 0.25), 0, Math.PI * 2);
+      context.fillStyle = CHROME_COLORS.surface;
+      context.fill();
+    }
+  }
+
+  function drawOverlays(): void {
     if (selection) {
       const normalized = normalizeSelection(selection);
       const leftColumn = reverseView
@@ -438,64 +1111,116 @@ export function mountPatternCanvas(
       const rightColumn = reverseView
         ? project.grid.columns - 1 - normalized.startColumn
         : normalized.endColumn;
-      context.fillStyle = 'rgb(13 121 104 / 14%)';
-      context.strokeStyle = '#0D7968';
-      context.lineWidth = Math.max(2, dpr);
-      context.fillRect(
-        metrics.left + leftColumn * metrics.cellSize,
-        metrics.top + normalized.startRow * metrics.cellSize,
-        (rightColumn - leftColumn + 1) * metrics.cellSize,
-        (normalized.endRow - normalized.startRow + 1) * metrics.cellSize,
-      );
-      context.strokeRect(
-        metrics.left + leftColumn * metrics.cellSize,
-        metrics.top + normalized.startRow * metrics.cellSize,
-        (rightColumn - leftColumn + 1) * metrics.cellSize,
-        (normalized.endRow - normalized.startRow + 1) * metrics.cellSize,
-      );
+      const x = viewportTransform.offsetX + leftColumn * viewportTransform.scale;
+      const y = viewportTransform.offsetY + normalized.startRow * viewportTransform.scale;
+      const width = (rightColumn - leftColumn + 1) * viewportTransform.scale;
+      const height = (normalized.endRow - normalized.startRow + 1) * viewportTransform.scale;
+      context.save();
+      context.globalAlpha = 0.14;
+      context.fillStyle = CHROME_COLORS.primary;
+      context.fillRect(x, y, width, height);
+      context.restore();
+      context.strokeStyle = CHROME_COLORS.primary;
+      context.lineWidth = 2;
+      context.strokeRect(x, y, width, height);
     }
 
-    const keyboardVisibleColumn = reverseView
-      ? project.grid.columns - 1 - keyboardPoint.column
-      : keyboardPoint.column;
-    context.strokeStyle = '#1D2523';
-    context.lineWidth = Math.max(1, dpr);
+    const rect = cellRect(keyboardPoint.row, keyboardPoint.column);
+    context.strokeStyle = CHROME_COLORS.text;
+    context.lineWidth = 1;
     context.strokeRect(
-      metrics.left + keyboardVisibleColumn * metrics.cellSize + 1,
-      metrics.top + keyboardPoint.row * metrics.cellSize + 1,
-      Math.max(0, metrics.cellSize - 2),
-      Math.max(0, metrics.cellSize - 2),
+      rect.x + 1,
+      rect.y + 1,
+      Math.max(0, rect.size - 2),
+      Math.max(0, rect.size - 2),
     );
   }
 
-  function getRenderMetrics(): {
-    readonly cellSize: number;
-    readonly left: number;
-    readonly top: number;
-  } {
-    const padding = 20 * Math.min(window.devicePixelRatio || 1, 2);
-    const availableWidth = Math.max(1, canvas.width - padding * 2);
-    const availableHeight = Math.max(1, canvas.height - padding * 2);
-    const fitted = Math.min(
-      availableWidth / project.grid.columns,
-      availableHeight / project.grid.rows,
+  function isCellVisible(cell: RenderCell): boolean {
+    const rect = cellRect(cell.row, cell.column);
+    const viewport = getViewportBounds();
+    return (
+      rect.x + rect.size >= 0 &&
+      rect.y + rect.size >= 0 &&
+      rect.x <= viewport.width &&
+      rect.y <= viewport.height
     );
-    const cellSize = fitted * zoom;
-    return {
-      cellSize,
-      left: (canvas.width - cellSize * project.grid.columns) / 2,
-      top: (canvas.height - cellSize * project.grid.rows) / 2,
-    };
+  }
+
+  function cellRect(
+    row: number,
+    column: number,
+  ): { readonly x: number; readonly y: number; readonly size: number } {
+    const visibleColumn = reverseView ? project.grid.columns - 1 - column : column;
+    return Object.freeze({
+      x: viewportTransform.offsetX + visibleColumn * viewportTransform.scale,
+      y: viewportTransform.offsetY + row * viewportTransform.scale,
+      size: viewportTransform.scale,
+    });
+  }
+
+  function logicalColumn(visibleColumn: number): number {
+    return reverseView ? project.grid.columns - 1 - visibleColumn : visibleColumn;
+  }
+
+  function capturePointer(pointerId: number): boolean {
+    try {
+      canvas.setPointerCapture(pointerId);
+      return true;
+    } catch {
+      cancelAllGestures(false);
+      return false;
+    }
+  }
+
+  function releasePointer(pointerId: number): void {
+    try {
+      if (canvas.hasPointerCapture(pointerId)) {
+        canvas.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // The browser may already have released capture during teardown.
+    }
+  }
+
+  function releasePointers(pointerIds: readonly number[]): void {
+    for (const pointerId of pointerIds) {
+      releasePointer(pointerId);
+    }
+  }
+
+  function destroy(): void {
+    if (destroyed) {
+      return;
+    }
+    cancelAllGestures(false);
+    destroyed = true;
+    resizeObserver?.disconnect();
+    canvas.removeEventListener('pointerdown', handlePointerDown);
+    canvas.removeEventListener('pointermove', handlePointerMove);
+    canvas.removeEventListener('pointerup', finishPointer);
+    canvas.removeEventListener('pointercancel', cancelPointer);
+    canvas.removeEventListener('lostpointercapture', handleLostPointerCapture);
+    canvas.removeEventListener('keydown', handleKeyDown);
+    canvas.removeEventListener('keyup', handleKeyUp);
+    canvas.removeEventListener('blur', handleWindowBlur);
+    canvas.removeEventListener('wheel', handleWheel);
+    canvas.removeEventListener('contextmenu', preventContextMenu);
+    window.removeEventListener('blur', handleWindowBlur);
+    window.removeEventListener('orientationchange', handleCanvasResize);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    if (pendingRender) {
+      window.cancelAnimationFrame(pendingRender);
+      pendingRender = 0;
+    }
   }
 }
 
-function normalizeSelection(selection: CellSelection): CellSelection {
-  return Object.freeze({
-    startRow: Math.min(selection.startRow, selection.endRow),
-    startColumn: Math.min(selection.startColumn, selection.endColumn),
-    endRow: Math.max(selection.startRow, selection.endRow),
-    endColumn: Math.max(selection.startColumn, selection.endColumn),
-  });
+function cellsEqual(left: BeadCell, right: BeadCell): boolean {
+  return (
+    left.kind === right.kind &&
+    (left.kind === 'empty' || (right.kind === 'bead' && left.colorId === right.colorId))
+  );
 }
 
 function toolLabel(tool: EditorTool): string {
@@ -516,4 +1241,16 @@ function formatColorCode(colorId: string): string {
 
 function preventContextMenu(event: Event): void {
   event.preventDefault();
+}
+
+function now(): number {
+  return performance.now();
+}
+
+function designToken(key: string): string {
+  const value = DESIGN_TOKENS[key];
+  if (!value) {
+    throw new Error(`缺少画布设计令牌：${key}`);
+  }
+  return value;
 }

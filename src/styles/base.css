@@ -16,7 +16,7 @@
   transform: translateY(-160%);
   border-radius: var(--radius-small);
   padding: var(--space-2) var(--space-3);
-  color: #fff;
+  color: var(--color-text-on-primary);
   background: var(--color-ink);
 }
 

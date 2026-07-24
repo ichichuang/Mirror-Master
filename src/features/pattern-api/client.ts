@@ -24,6 +24,8 @@ export interface PatternGenerationSettings {
   readonly beadDiameterMm: number;
   readonly beadPitchMm: number;
   readonly boardPresetId: 'smallSquare' | 'standardSquare' | 'custom';
+  readonly boardRows: number;
+  readonly boardColumns: number;
   readonly paletteId: 'default' | 'mard';
   readonly availableColorIds: readonly string[];
   readonly maximumColors: number | null;
@@ -87,7 +89,7 @@ export async function generatePattern(
 export async function exportPattern(
   project: BeadProject,
   format: 'png' | 'pdf' | 'csv',
-  includeGrid: boolean,
+  template: 'pure' | 'annotated',
   signal?: AbortSignal,
 ): Promise<Blob> {
   const response = await request(
@@ -95,11 +97,18 @@ export async function exportPattern(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project, format, includeGrid }),
+      body: JSON.stringify({ project, format, template }),
       ...(signal ? { signal } : {}),
     },
     signal,
   );
+  if (response.headers.get('X-Project-Revision') !== String(project.revision)) {
+    throw new PatternApiError(
+      502,
+      'EXPORT_REVISION_MISMATCH',
+      '导出响应与当前矩阵版本不一致，请重新导出。',
+    );
+  }
   return response.blob();
 }
 

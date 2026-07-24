@@ -6,9 +6,20 @@ import {
 } from './types';
 
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const DEFAULT_IMAGE_VALIDATION_LIMITS: ImageValidationLimits = Object.freeze({
+  mimeTypes: Object.freeze(Object.keys(ACCEPTED_IMAGE_TYPES) as AcceptedImageMimeType[]),
+  maximumBytes: 20 * 1024 * 1024,
+});
 
-export function validateSingleImageFile(files: readonly File[]): FileValidationResult {
+export interface ImageValidationLimits {
+  readonly mimeTypes: readonly AcceptedImageMimeType[];
+  readonly maximumBytes: number;
+}
+
+export function validateSingleImageFile(
+  files: readonly File[],
+  limits: ImageValidationLimits = DEFAULT_IMAGE_VALIDATION_LIMITS,
+): FileValidationResult {
   if (files.length === 0) {
     return {
       ok: false,
@@ -32,19 +43,22 @@ export function validateSingleImageFile(files: readonly File[]): FileValidationR
     };
   }
 
-  if (!isAcceptedImageType(file.type)) {
+  if (!isAcceptedImageType(file.type, limits.mimeTypes)) {
     const detectedType = file.type.trim() === '' ? '未知格式' : file.type;
+    const acceptedLabels = limits.mimeTypes.map((type) => ACCEPTED_IMAGE_TYPES[type]).join('、');
 
     return {
       ok: false,
-      message: `不支持 ${detectedType}。当前只支持 PNG、JPEG 或 WebP 图片。`,
+      message: `不支持 ${detectedType}。当前只支持 ${acceptedLabels} 图片。`,
     };
   }
 
-  if (file.size > MAX_UPLOAD_BYTES) {
+  if (file.size > limits.maximumBytes) {
     return {
       ok: false,
-      message: `图片大小为 ${formatFileSize(file.size)}，超过 20 MB 上限。请压缩图片后重试。`,
+      message: `图片大小为 ${formatFileSize(file.size)}，超过 ${formatFileSize(
+        limits.maximumBytes,
+      )} 上限。请压缩图片后重试。`,
     };
   }
 
@@ -87,8 +101,14 @@ export function formatFileSize(bytes: number): string {
   return `${value.toFixed(precision)} ${unit}`;
 }
 
-function isAcceptedImageType(type: string): type is AcceptedImageMimeType {
-  return Object.hasOwn(ACCEPTED_IMAGE_TYPES, type);
+function isAcceptedImageType(
+  type: string,
+  allowedMimeTypes: readonly AcceptedImageMimeType[],
+): type is AcceptedImageMimeType {
+  return (
+    Object.hasOwn(ACCEPTED_IMAGE_TYPES, type) &&
+    allowedMimeTypes.includes(type as AcceptedImageMimeType)
+  );
 }
 
 export function toDecodedImage(

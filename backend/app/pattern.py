@@ -118,6 +118,8 @@ async def create_pattern_project(
                     "beadDiameterMm": settings.bead_diameter_mm,
                     "beadPitchMm": settings.bead_pitch_mm,
                     "boardPresetId": settings.board_preset_id,
+                    "boardRows": settings.board_rows,
+                    "boardColumns": settings.board_columns,
                 },
                 "palette": {
                     "paletteId": settings.palette_id,
@@ -251,6 +253,11 @@ def _sample_image(
 ) -> tuple[np.ndarray, np.ndarray]:
     rgba = np.asarray(source.convert("RGBA"), dtype=np.float64)
     alpha = rgba[:, :, 3] / 255.0
+    effective_alpha = np.where(
+        (alpha > 0) & (alpha >= alpha_empty_threshold),
+        alpha,
+        0.0,
+    )
     linear = _srgb_to_linear(rgba[:, :, :3] / 255.0)
 
     if sampling == "nearest":
@@ -283,14 +290,16 @@ def _sample_image(
             ]
         )
         sampled_linear = linear[row_indices[:, None], column_indices[None, :]]
-        sampled_alpha = alpha[
+        sampled_alpha = effective_alpha[
             row_indices[:, None], column_indices[None, :]
         ]
     else:
-        sampled_alpha = _resize_float_channel(alpha, columns, rows)
+        sampled_alpha = _resize_float_channel(
+            effective_alpha, columns, rows
+        )
         sampled_channels = []
         for channel in range(3):
-            premultiplied = linear[:, :, channel] * alpha
+            premultiplied = linear[:, :, channel] * effective_alpha
             averaged = _resize_float_channel(
                 premultiplied, columns, rows
             )
@@ -304,7 +313,10 @@ def _sample_image(
             )
         sampled_linear = np.stack(sampled_channels, axis=2)
 
-    occupied = sampled_alpha.reshape(-1) >= alpha_empty_threshold
+    flattened_alpha = sampled_alpha.reshape(-1)
+    occupied = (flattened_alpha > 0) & (
+        flattened_alpha >= alpha_empty_threshold
+    )
     return sampled_linear.reshape(-1, 3), occupied
 
 

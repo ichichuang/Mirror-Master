@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "tsx --test tests/*.test.ts",
+    "benchmark:editor": "tsx scripts/benchmark-editor.mts",
     "generate:palettes": "node scripts/generate-palettes.mjs",
     "check:palettes": "node scripts/generate-palettes.mjs --check",
     "generate:icons": "node scripts/generate-icon-styles.mjs",

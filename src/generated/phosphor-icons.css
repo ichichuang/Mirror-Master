@@ -32,7 +32,6 @@
 .ph-brackets-curly::before { content: "\E860"; }
 .ph-caret-down::before { content: "\E136"; }
 .ph-check::before { content: "\E182"; }
-.ph-circle-notch::before { content: "\EB44"; }
 .ph-eraser::before { content: "\E21E"; }
 .ph-export::before { content: "\EAF0"; }
 .ph-eyedropper::before { content: "\E568"; }

@@ -3,11 +3,16 @@ import { PALETTE_COLORS } from '../generated/palettes';
 import {
   assertValidProject,
   calculateStatistics,
+  parseBeadProject,
   type BeadProject,
   type ProjectStatistics,
 } from './project';
 
 const COLOR_BY_ID = new Map(PALETTE_COLORS.map((color) => [color.id, color]));
+
+export function captureProjectRevision(project: unknown): BeadProject {
+  return parseBeadProject(structuredClone(project));
+}
 
 export function exportProjectJson(project: BeadProject): string {
   assertValidProject(project);

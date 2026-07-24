@@ -151,6 +151,8 @@ export function mountGridEditor(
       setView('result');
     }
   });
+  elements.originalTab.addEventListener('keydown', handleViewTabKeyDown);
+  elements.resultTab.addEventListener('keydown', handleViewTabKeyDown);
 
   elements.overlay.addEventListener('pointerdown', handlePointerDown);
   elements.overlay.addEventListener('pointermove', handlePointerMove);
@@ -476,6 +478,22 @@ export function mountGridEditor(
     announce(nextView === 'original' ? '已返回原图调整。' : '正在查看镜像结果。');
   }
 
+  function handleViewTabKeyDown(event: KeyboardEvent): void {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const showResult =
+      resultObjectUrl !== null && (event.key === 'ArrowRight' || event.key === 'End');
+    if (showResult) {
+      setView('result');
+      elements.resultTab.focus();
+    } else {
+      setView('original');
+      elements.originalTab.focus();
+    }
+  }
+
   function setManualZoom(scale: number): void {
     zoomMode = 'manual';
     zoomScale = clamp(scale, MIN_ZOOM, MAX_ZOOM);
@@ -526,6 +544,10 @@ export function mountGridEditor(
     elements.originalTab.tabIndex = showingResult ? -1 : 0;
     elements.resultTab.ariaSelected = showingResult ? 'true' : 'false';
     elements.resultTab.tabIndex = showingResult ? 0 : -1;
+    elements.frame.setAttribute(
+      'aria-labelledby',
+      showingResult ? elements.resultTab.id : elements.originalTab.id,
+    );
     elements.returnButton.hidden = !showingResult;
   }
 

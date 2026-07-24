@@ -4,11 +4,51 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
 
+from app import limits
 from app.generated_palettes import PALETTE_COLORS, PALETTE_SOURCE_VERSION
 
 PositiveStrictInt = Annotated[StrictInt, Field(gt=0)]
 Sha256Hex = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Confidence = Annotated[StrictFloat, Field(ge=0, le=1)]
+BoardRows = Annotated[
+    StrictInt, Field(ge=limits.MIN_BOARD_ROWS, le=limits.MAX_BOARD_ROWS)
+]
+BoardColumns = Annotated[
+    StrictInt,
+    Field(ge=limits.MIN_BOARD_COLUMNS, le=limits.MAX_BOARD_COLUMNS),
+]
+
+COLOR_BY_ID = {color["id"]: color for color in PALETTE_COLORS}
+
+
+def _validate_board_dimensions(
+    board_preset_id: str,
+    board_rows: int,
+    board_columns: int,
+) -> None:
+    fixed_dimensions = limits.FIXED_BOARD_PRESETS.get(board_preset_id)
+    if fixed_dimensions is None:
+        return
+    expected_rows, expected_columns = fixed_dimensions
+    if board_rows != expected_rows or board_columns != expected_columns:
+        raise ValueError("board dimensions must match selected preset")
+
+
+def _validate_palette_selection(
+    palette_id: str,
+    available_color_ids: list[str],
+    maximum_colors: int | None,
+) -> None:
+    if len(set(available_color_ids)) != len(available_color_ids):
+        raise ValueError("available colors must be unique")
+    if any(
+        color_id not in COLOR_BY_ID
+        or COLOR_BY_ID[color_id]["paletteId"] != palette_id
+        for color_id in available_color_ids
+    ):
+        raise ValueError("available colors must belong to selected palette")
+    if maximum_colors is not None and maximum_colors > len(available_color_ids):
+        raise ValueError("maximum colors exceeds available colors")
 
 
 class GridGeometry(BaseModel):
@@ -93,6 +133,8 @@ class PatternGenerationSettings(BaseModel):
     board_preset_id: Literal[
         "smallSquare", "standardSquare", "custom"
     ] = Field(alias="boardPresetId")
+    board_rows: BoardRows = Field(alias="boardRows")
+    board_columns: BoardColumns = Field(alias="boardColumns")
     palette_id: Literal["default", "mard"] = Field(alias="paletteId")
     available_color_ids: list[str] = Field(
         alias="availableColorIds", min_length=1, max_length=260
@@ -110,21 +152,16 @@ class PatternGenerationSettings(BaseModel):
     def validate_generation_settings(self) -> "PatternGenerationSettings":
         if self.bead_pitch_mm < self.bead_diameter_mm:
             raise ValueError("bead pitch must not be smaller than diameter")
-        known_by_id = {color["id"]: color for color in PALETTE_COLORS}
-        unique_ids = list(dict.fromkeys(self.available_color_ids))
-        if len(unique_ids) != len(self.available_color_ids):
-            raise ValueError("available colors must be unique")
-        if any(
-            color_id not in known_by_id
-            or known_by_id[color_id]["paletteId"] != self.palette_id
-            for color_id in self.available_color_ids
-        ):
-            raise ValueError("available colors must belong to selected palette")
-        if (
-            self.maximum_colors is not None
-            and self.maximum_colors > len(self.available_color_ids)
-        ):
-            raise ValueError("maximum colors exceeds available colors")
+        _validate_board_dimensions(
+            self.board_preset_id,
+            self.board_rows,
+            self.board_columns,
+        )
+        _validate_palette_selection(
+            self.palette_id,
+            self.available_color_ids,
+            self.maximum_colors,
+        )
         return self
 
 
@@ -177,11 +214,18 @@ class ProjectGrid(BaseModel):
     board_preset_id: Literal[
         "smallSquare", "standardSquare", "custom"
     ] = Field(alias="boardPresetId")
+    board_rows: BoardRows = Field(alias="boardRows")
+    board_columns: BoardColumns = Field(alias="boardColumns")
 
     @model_validator(mode="after")
     def validate_bead_dimensions(self) -> "ProjectGrid":
         if self.bead_pitch_mm < self.bead_diameter_mm:
             raise ValueError("bead pitch must not be smaller than diameter")
+        _validate_board_dimensions(
+            self.board_preset_id,
+            self.board_rows,
+            self.board_columns,
+        )
         return self
 
 
@@ -198,6 +242,15 @@ class ProjectPalette(BaseModel):
     maximum_colors: Annotated[StrictInt, Field(ge=1, le=260)] | None = (
         Field(alias="maximumColors")
     )
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "ProjectPalette":
+        _validate_palette_selection(
+            self.palette_id,
+            self.available_color_ids,
+            self.maximum_colors,
+        )
+        return self
 
 
 class ProjectGeneration(BaseModel):
@@ -232,17 +285,16 @@ class BeadProject(BaseModel):
             len(row) != self.grid.columns for row in self.cells
         ):
             raise ValueError("matrix dimensions do not match project grid")
-        known_ids = {color["id"] for color in PALETTE_COLORS}
         available_ids = set(self.palette.available_color_ids)
-        if not available_ids or not available_ids <= known_ids:
-            raise ValueError("project palette contains unknown colors")
         for row in self.cells:
             for cell in row:
                 if (
                     isinstance(cell, FilledBeadCell)
-                    and cell.color_id not in known_ids
+                    and cell.color_id not in available_ids
                 ):
-                    raise ValueError("matrix contains unknown color")
+                    raise ValueError(
+                        "matrix colors must belong to available colors"
+                    )
         return self
 
 
@@ -279,4 +331,4 @@ class PatternExportRequest(BaseModel):
 
     project: BeadProject
     format: Literal["png", "pdf", "csv"]
-    include_grid: bool = Field(alias="includeGrid")
+    template: Literal["pure", "annotated"]

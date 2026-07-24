@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app import limits
 from .generated_brand import PRODUCT_NAME
 from app.errors import ApiError
 from app.generated_palettes import (
@@ -67,24 +68,52 @@ async def health() -> dict[str, str]:
 @app.get("/api/capabilities")
 async def capabilities() -> dict[str, object]:
     return {
-        "schemaVersions": ["1.0"],
+        "contractVersion": limits.CAPABILITIES_CONTRACT_VERSION,
+        "schemaVersions": list(limits.PROJECT_SCHEMA_VERSIONS),
         "paletteSourceVersion": PALETTE_SOURCE_VERSION,
         "upload": {
-            "mimeTypes": ["image/png", "image/jpeg", "image/webp"],
-            "maximumBytes": 20 * 1024 * 1024,
-            "maximumDecodedPixels": 25_000_000,
+            "mimeTypes": list(limits.SUPPORTED_IMAGE_MIME_TYPES),
+            "maximumBytes": limits.MAX_UPLOAD_BYTES,
+            "maximumDecodedPixels": limits.MAX_DECODED_PIXELS,
         },
         "grid": {
-            "minimumRows": 1,
-            "maximumRows": 300,
-            "minimumColumns": 1,
-            "maximumColumns": 300,
+            "minimumRows": limits.MIN_PATTERN_ROWS,
+            "maximumRows": limits.MAX_PATTERN_ROWS,
+            "minimumColumns": limits.MIN_PATTERN_COLUMNS,
+            "maximumColumns": limits.MAX_PATTERN_COLUMNS,
         },
-        "modes": ["photo", "pixelArt", "existingChart"],
-        "sampling": ["average", "nearest"],
-        "dithering": ["none", "floydSteinberg"],
-        "exports": ["png", "pdf", "csv", "projectJson"],
-        "gridMirrorAxes": ["horizontal", "vertical"],
+        "beads": {
+            "minimumDiameterMm": limits.MIN_BEAD_DIAMETER_MM,
+            "maximumDiameterMm": limits.MAX_BEAD_DIAMETER_MM,
+            "minimumPitchMm": limits.MIN_BEAD_PITCH_MM,
+            "maximumPitchMm": limits.MAX_BEAD_PITCH_MM,
+            "pitchMustNotBeSmallerThanDiameter": True,
+        },
+        "boards": {
+            "fixedPresets": {
+                preset_id: {
+                    "rows": rows,
+                    "columns": columns,
+                }
+                for preset_id, (
+                    rows,
+                    columns,
+                ) in limits.FIXED_BOARD_PRESETS.items()
+            },
+            "custom": {
+                "minimumRows": limits.MIN_BOARD_ROWS,
+                "maximumRows": limits.MAX_BOARD_ROWS,
+                "minimumColumns": limits.MIN_BOARD_COLUMNS,
+                "maximumColumns": limits.MAX_BOARD_COLUMNS,
+            },
+        },
+        "modes": list(limits.PATTERN_MODES),
+        "sampling": list(limits.SAMPLING_MODES),
+        "dithering": list(limits.DITHERING_MODES),
+        "exports": list(limits.EXPORT_FORMATS),
+        "pngTemplates": list(limits.PNG_TEMPLATES),
+        "pdf": limits.PDF_PRODUCTION_CONTRACT,
+        "gridMirrorAxes": list(limits.GRID_MIRROR_AXES),
     }
 
 
@@ -116,6 +145,7 @@ async def export_pattern(
         media_type=media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{file_name}"',
+            "X-Project-Revision": str(request.project.revision),
         },
     )
 
