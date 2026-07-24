@@ -3,22 +3,30 @@
 .vercel
 .DS_Store
 
-.env
-.env.*
+.env*
 *.key
 *.pem
 secrets
 
 node_modules
+.venv
 backend/.venv
 backend/.pytest_cache
 **/__pycache__
 
 backend/tests
+backend/requirements-dev.txt
+backend/README.zh-CN.md
 tests
 **/fixtures
 screenshots
 **/screenshots
+docs
+README.md
+
+scripts
+Dockerfile
+compose.yaml
 
 dist
 dist-ssr

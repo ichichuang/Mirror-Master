@@ -1,3 +1,6 @@
+import importlib.util
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 
@@ -22,3 +25,16 @@ def test_no_unrequested_api_routes_exist(client: TestClient) -> None:
         "/api/grid/detect",
         "/api/grid/mirror",
     }
+
+
+def test_vercel_entrypoint_reexports_existing_app() -> None:
+    entrypoint = Path(__file__).resolve().parents[2] / "api" / "index.py"
+    spec = importlib.util.spec_from_file_location(
+        "mirror_master_vercel_entrypoint", entrypoint
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+
+    spec.loader.exec_module(module)
+
+    assert module.app is app

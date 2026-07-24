@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 .vercel/
+.venv/
+__pycache__/
+*.py[cod]
 
 # Production output
 dist/
