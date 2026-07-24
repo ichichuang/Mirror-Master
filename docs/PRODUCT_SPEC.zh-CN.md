@@ -1,7 +1,7 @@
 # 豆图设计台产品规范（Mirror Master 仓库唯一权威）
 
 - 状态：重建中
-- 规范版本：`1.0.0-draft.1`
+- 规范版本：`1.0.0-draft.2`
 - 基线日期：2026-07-24
 - 语言：简体中文
 
@@ -10,22 +10,22 @@
 本文件是“豆图设计台”（Mirror Master 仓库）的产品目标、领域模型、用户体验、算法合同、接口边界、验收标准和实施顺序的**唯一规范性权威**。
 
 - `README.md` 只提供项目入口和本地启动摘要。
-- `backend/README.zh-CN.md` 只描述后端实现与运维入口。
-- `docs/DEPLOYMENT.zh-CN.md` 只描述本地、Docker、VPS 和历史部署操作。
+- `backend/README.zh-CN.md` 只描述后端实现与本地运行入口。
+- `docs/DEPLOYMENT.zh-CN.md` 只描述本地运行和平台中立的运维移交合同。
 - 代码、测试、示例、设计稿或部署文档与本文件冲突时，以本文件为准，并在同一变更中修正冲突项。
 - 不得新增 `SPEC`、`PRD`、`产品需求`、`产品规范` 等竞争性权威文档；补充材料必须链接本文件并明确为非规范性说明。
 - 规范字段、算法和验收标准的变化必须先修改本文件，再修改代码。
 
 ### 0.1 重建基线
 
-| 项目                                   | 值                                              |
-| -------------------------------------- | ----------------------------------------------- |
-| 重建前基线 HEAD / `origin/main`        | `d29ff36d3849aa54ec689a231694d7358c05d478`      |
-| owner seed 提交后 HEAD / `origin/main` | `134491221451bf52a492fa2c4ccfcc96bdb579eb`      |
-| owner seed                             | `拼豆颜色对照表.txt`                            |
-| 分支                                   | `main`                                          |
-| 重命名                                 | 禁止仓库、package、本地目录和域名重命名         |
-| 部署                                   | 重建期间禁止 Vercel、VPS、Docker 或其他生产部署 |
+| 项目                                   | 值                                                                     |
+| -------------------------------------- | ---------------------------------------------------------------------- |
+| 重建前基线 HEAD / `origin/main`        | `d29ff36d3849aa54ec689a231694d7358c05d478`                             |
+| owner seed 提交后 HEAD / `origin/main` | `134491221451bf52a492fa2c4ccfcc96bdb579eb`                             |
+| owner seed                             | `拼豆颜色对照表.txt`                                                   |
+| 分支                                   | `main`                                                                 |
+| 重命名                                 | 禁止仓库、package、本地目录和域名重命名                                |
+| 基础设施                               | 不属于产品开发范围；owner 本地验收后由运维决定生产环境、发布与运行方式 |
 
 ## 1. 产品定义
 
@@ -80,16 +80,19 @@
 - 分板打印、1:1 实际尺寸打印和高分辨率导出。
 - 本地草稿、离线使用、快捷键、触控笔和只读项目分享。
 
-## 2. 重建期部署状态
+## 2. 产品开发与运维移交边界
 
-Vercel 状态为：**暂停（PAUSED）**。
+部署完全不属于当前产品开发范围。开发只负责交付下列可验证、可移交的产品成果：
 
-- `vercel.json` 必须包含 `"git": { "deploymentEnabled": false }`。
-- 该配置不得改变 Vite 本地开发、FastAPI、本地统一服务、Docker 或 VPS 运行方式。
-- 不得触发部署。
-- Vercel 项目、域名、部署历史不得删除。
-- owner 需在 Vercel Dashboard 的项目 `Settings → Git` 中执行 `Disconnect`，只断开 Git 仓库。
-- 未完成重建验收和 owner 明确批准前，不得重新连接 Git 或恢复自动部署。
+- 完整可用的 Vite 前端和 FastAPI 后端。
+- 可通过 `./scripts/start-local.sh` 启动的本地统一运行时，以及所需的 Node、Python 和环境变量合同。
+- 覆盖产品矩阵权威、生成、编辑、智能镜像、统计和导出的自动化测试与浏览器验收结果。
+- 可重复生成的前端 `dist`、后端运行依赖和其他构建产物。
+- 平台中立的运维移交合同，包括健康检查、上传与像素限制、无持久化声明、反向代理、HTTPS、启动、停止、升级、回滚、日志、监控和验收要求。
+
+owner 完成本地运行时验收后，生产基础设施、域名、证书、服务器、容器编排、监控、发布和回滚方案由运维独立决定。`Dockerfile` 与 `compose.yaml` 作为平台中立的移交材料保留，不表示产品开发阶段执行生产部署。
+
+产品开发完成条件不得依赖任何托管商的项目状态、预览或生产 URL、构建日志、域名、函数打包或请求限制。仓库不得包含绑定特定托管商的配置、环境分支、限制、错误提示、脚本或操作任务；产品开发期间不得执行部署。
 
 ## 3. 设计原则
 
@@ -417,7 +420,7 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 空文件、MIME 不匹配、无法解码、尺寸超限必须返回稳定中文错误码与提示。
 - 图片只发送到用户控制的 FastAPI 服务并在内存中处理；不得使用第三方图片服务。
 - 应用不得持久化上传图片、文件名、图片字节、哈希或生成中间图。
-- 响应使用 `Cache-Control: no-store`；生产代理和平台日志属于部署方责任边界。
+- 响应使用 `Cache-Control: no-store`；生产反向代理、访问日志、监控和数据保留策略属于运维责任边界。
 
 ### 7.2 裁剪与旋转
 
@@ -788,7 +791,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 | 保留 retain  | `backend/app/mirror.py`                | 保留从原始 cell 读取并重排的实现原则，扩展垂直轴与双镜像恒等。                       |
 | 保留 retain  | `src/features/grid-selection/*`        | 保留自然图坐标与半开矩形几何，纳入已有图纸模式。                                     |
 | 保留 retain  | `src/features/local-image-input/*`     | 保留本地预览、验证和 Object URL 生命周期，修正为三模式入口。                         |
-| 修复 repair  | `backend/app/service.py`               | 拆出上传解码、生成、导出服务；移除 Vercel 专属业务分支。                             |
+| 修复 repair  | `backend/app/service.py`               | 拆出上传解码、生成、导出服务；移除托管平台专属业务分支。                             |
 | 修复 repair  | `backend/app/models.py`                | 增加 capabilities、palette、project、generation、statistics、export 严格模型。       |
 | 修复 repair  | `backend/app/main.py`                  | 增加新接口、统一错误与取消安全；保留静态前端挂载和 health。                          |
 | 修复 repair  | `src/features/grid-api/client.ts`      | 改为通用 API client，接受 `AbortSignal`，保留 grid 合同解析。                        |
@@ -830,14 +833,14 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 ### 19.3 迁移顺序
 
-1. 暂停 Vercel Git 部署并记录 dashboard 断连动作。
+1. 固化产品开发与运维移交边界，并删除托管平台专属配置和操作任务。
 2. 建立本规范、README 入口和文档权威边界。
 3. 固化 palette source、生成脚本和 39/221 测试。
 4. 建立 project schema、矩阵不变量、统计、尺寸和算法 golden tests。
 5. 新增后端 capabilities、palettes、generate、export，不先删除 grid API。
 6. 建立移动端任务状态机、crop workspace、Canvas editor、inspector 和 exports。
 7. 把旧网格 UI 收敛到 existingChart 模式。
-8. 移除 Pixelanim-only 文案和 Vercel runtime 假设。
+8. 移除 Pixelanim-only 文案和托管平台专属运行时假设。
 9. 完成前端检查、后端测试、构建、健康检查和手动浏览器验收。
 
 ### 19.4 回滚边界
@@ -845,9 +848,9 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 在新 generate/export 验收前，不删除 `grid/detect`、`grid/mirror` 或其测试。
 - palette seed 永久保留为 owner 证据；生成资产可由 source 重建。
 - 每一步必须保持 `pnpm build` 与已有后端 grid tests 可运行。
-- 新 UI 未达到核心流程验收时，可恢复旧 `src/app.ts`、`src/main.ts` 与样式，但不得回退本规范、palette source 或 Vercel pause。
+- 新 UI 未达到核心流程验收时，可恢复旧 `src/app.ts`、`src/main.ts` 与样式，但不得回退本规范、palette source 或平台中立的运维边界。
 - 不执行破坏性数据库迁移；本产品不引入数据库或持久上传存储。
-- 不更改 package、仓库目录、域名、Git remote 或部署项目。
+- 不更改 package、仓库目录、产品名称或 Git remote；生产基础设施不进入产品开发变更。
 - 发现 palette 数量不匹配、文档权威冲突、需要删除用户数据、需要重命名或需要新持久化服务时立即停止并请求 owner 决策。
 
 ## 20. 验证矩阵
@@ -862,11 +865,12 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 启动统一 FastAPI 服务并检查 `/api/health`、`/api/capabilities`、`/api/palettes`。
 - 使用应用内浏览器手动检查：上传、裁剪、生成、编辑、统计、镜像、导出、更换图片、刷新和错误恢复。
 
-## 21. owner 最终检查清单
+## 21. owner 本地验收与运维移交清单
 
-- 在 Vercel Dashboard 断开 Git repository，保留项目、域名与历史。
 - 确认三套移动端视觉方向中的选定方案。
 - 复核 MARD 显示色仅为屏幕近似的声明。
 - 用真实照片、真实像素画和真实已有图纸各验收一次。
 - 核对常用拼豆直径、pitch 和拼板预设是否符合实际库存。
-- 明确批准后，才可决定是否提交、推送或恢复任何部署。
+- 复核本地统一服务、自动化测试、构建产物、健康检查和浏览器验收结果。
+- owner 审查本次清理与本地运行结果后，才可决定是否提交或推送。
+- owner 完成本地验收后，把平台中立的运行合同和验收清单移交运维；最终基础设施与发布方案只由运维决定。

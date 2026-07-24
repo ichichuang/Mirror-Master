@@ -2,7 +2,6 @@ backend/.pytest_cache/
 backend/.venv/
 backend/**/__pycache__/
 backend/tests/fixtures/
-.vercel/
 data/palettes.generated.json
 docs/PALETTES.generated.md
 src/generated/palettes.ts

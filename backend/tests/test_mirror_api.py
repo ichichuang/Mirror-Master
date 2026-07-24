@@ -361,28 +361,6 @@ def test_upload_byte_limit_is_enforced(
     )
 
 
-@pytest.mark.parametrize(
-    ("environment_name", "environment_value"),
-    [("VERCEL", "1"), ("VERCEL_ENV", "preview")],
-)
-def test_platform_environment_does_not_change_local_runtime_contract(
-    client: TestClient,
-    generated_rgba_image: Image.Image,
-    png_bytes,
-    monkeypatch: pytest.MonkeyPatch,
-    environment_name: str,
-    environment_value: str,
-) -> None:
-    image_bytes = png_bytes(generated_rgba_image)
-    contract = generated_contract(image_bytes)
-    monkeypatch.setenv(environment_name, environment_value)
-
-    response = post_mirror(client, image_bytes, contract)
-
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "image/png"
-
-
 def test_decoded_pixel_limit_is_enforced(
     client: TestClient,
     generated_rgba_image: Image.Image,

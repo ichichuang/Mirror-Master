@@ -5,7 +5,8 @@ PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 VENV_DIR="$PROJECT_ROOT/backend/.venv"
 
 if [ ! -x "$VENV_DIR/bin/python" ]; then
-  if command -v python3.12 >/dev/null 2>&1; then
+  if command -v python3.12 >/dev/null 2>&1 \
+    && python3.12 --version >/dev/null 2>&1; then
     python3.12 -m venv "$VENV_DIR"
   elif command -v mise >/dev/null 2>&1; then
     mise exec python@3.12.10 -- python -m venv "$VENV_DIR"

@@ -4,11 +4,15 @@
 
 结构化项目 `cells` 矩阵是产品业务权威。Python 服务负责图片解码、确定性图案生成、项目校验、统计与导出；现有网格识别、边界验证和单元镜像保留为已有图纸智能镜像模块。
 
-> Vercel 在重建期间暂停且不得部署。生产运维背景参见 [完整中文部署指南](../docs/DEPLOYMENT.zh-CN.md)。
+部署不属于产品开发范围。本地运行、容器材料和平台中立运维移交边界参见[完整中文合同](../docs/DEPLOYMENT.zh-CN.md)。
 
-生产服务同时提供：
+统一服务提供：
 
 - `GET /api/health`
+- `GET /api/capabilities`
+- `GET /api/palettes`
+- `POST /api/pattern/generate`
+- `POST /api/pattern/export`
 - `POST /api/grid/detect`
 - `POST /api/grid/mirror`
 - 根路径下的已构建 `dist` 前端
@@ -29,13 +33,13 @@
 http://127.0.0.1:8000/api/health
 ```
 
-Docker 部署：
+容器材料验收：
 
 ```bash
 docker compose up -d --build
 ```
 
-容器内 Uvicorn 监听 `0.0.0.0:8000`，不启用 reload，也不输出访问日志。
+容器内 Uvicorn 监听 `0.0.0.0:8000`，不启用 reload，也不输出访问日志。最终网络和发布方式由运维在 owner 本地验收后决定。
 
 ## `POST /api/grid/detect`
 
