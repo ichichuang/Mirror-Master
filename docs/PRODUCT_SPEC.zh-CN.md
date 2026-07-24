@@ -1,4 +1,4 @@
-# Mirror Master 产品规范（唯一权威）
+# 豆图设计台产品规范（Mirror Master 仓库唯一权威）
 
 - 状态：重建中
 - 规范版本：`1.0.0-draft.1`
@@ -7,7 +7,7 @@
 
 ## 0. 文档权威与变更规则
 
-本文件是 Mirror Master 产品目标、领域模型、用户体验、算法合同、接口边界、验收标准和实施顺序的**唯一规范性权威**。
+本文件是“豆图设计台”（Mirror Master 仓库）的产品目标、领域模型、用户体验、算法合同、接口边界、验收标准和实施顺序的**唯一规范性权威**。
 
 - `README.md` 只提供项目入口和本地启动摘要。
 - `backend/README.zh-CN.md` 只描述后端实现与运维入口。
@@ -29,7 +29,9 @@
 
 ## 1. 产品定义
 
-Mirror Master 是面向拼豆顾客的完整拼豆图纸生成器。产品把照片、像素画或已有图纸转换为可编辑、可核算材料、可镜像、可导出的拼豆工程。
+“豆图设计台”是面向普通拼豆顾客的完整拼豆图纸设计工具。产品把照片、像素画或已有图纸转换为可编辑、可核算材料、可镜像、可导出的拼豆工程，并在后续提供从空白画布直接创作的入口。
+
+当前顾客可见名称为**豆图设计台**，英文工作标识为 `Bean Pattern Studio`，简称“豆图”，描述为“简单、准确的拼豆图纸设计工具”。这是开发阶段暂定名称，不是最终商标结论。名称单一来源为 `src/brand/brand.config.json`，由 `scripts/generate-brand-config.mjs` 生成前端 `brand.config.ts` 和后端 `generated_brand.py`；组件、标题、导出内容和运行时文案不得写死产品名称。仓库名、package 名、本地目录和远程设置保持不变。
 
 产品的唯一业务真相是**结构化拼豆颜色矩阵**，不是预览图片、Canvas 像素、上传原图或导出的 PNG。任何视图、统计、材料清单和导出必须从同一个项目模型及其 `cells` 矩阵派生。
 
@@ -54,6 +56,29 @@ Mirror Master 是面向拼豆顾客的完整拼豆图纸生成器。产品把照
 6. 导出 PNG、PDF、CSV 和项目 JSON。
 
 桌面端提供更高密度的编辑和检查能力，但不得成为完成核心流程的必要条件。
+
+### 1.3 当前产品边界
+
+当前产品只建设顾客创作能力，不建设或预留商家经营系统。以下范围明确禁止进入当前模型、页面、API 和占位模块：
+
+- 商城、商品目录、购物车、收藏和会员套餐。
+- 支付、充值、优惠券、发票、订单、退款、售后和物流。
+- 门店预约、桌号、计时、收银、经营报表、员工和角色权限。
+- 材料库存、入库、出库、盘点、余量、安全库存、补货和采购。
+- CRM、顾客标签、营销触达、商家入驻、佣金和结算。
+
+“这次只使用这些颜色”只是当前图纸的临时颜色过滤条件，不记录拥有量、消耗量、剩余量或库存预警。
+
+### 1.4 顾客能力路线
+
+本轮 Stage 3 交付照片、像素画、已有图纸三种输入，结构化矩阵、尺寸与材料计算、编辑、镜像和导出。下列能力已纳入产品路线，但必须按文档优先、独立验收的后续阶段实施，不得以假按钮或 mock 结果提前出现：
+
+- 从空白画布开始设计。
+- 原图与拼豆结果滑动对比、逐色制作、单色高亮和制作进度。
+- 小区域杂色检测、孤立色点清理、相近色合并和全局颜色替换。
+- 缺失颜色近似推荐、自定义色板导入和多品牌色号转换。
+- 分板打印、1:1 实际尺寸打印和高分辨率导出。
+- 本地草稿、离线使用、快捷键、触控笔和只读项目分享。
 
 ## 2. 重建期部署状态
 
@@ -93,6 +118,156 @@ Vercel 状态为：**暂停（PAUSED）**。
 - 更换图片、重新生成或载入项目时，如会覆盖未保存编辑，必须先明确告知影响。
 - 网络请求使用 `AbortController`；新请求取消旧请求；取消不是错误 toast。
 - 编辑历史存在于当前项目会话；刷新后不自动恢复上传图片或未显式下载的项目。
+
+### 3.4 已选视觉方向：专业材料工作台
+
+2026-07-24 已选定 Product Design 视觉方案 2，并按 owner 反馈锁定为下述实现合同。此方向取代方案原稿中的深色主工作区：产品必须是克制、专业、移动端优先的拼豆创作工作室，不能像儿童玩具，也不能退化为只能在桌面使用的密集专家工具。
+
+**视觉 thesis**：暖白工作台上的专业手作工具，安静、准确，让真实拼豆图案和材料数据成为唯一视觉焦点。
+
+**内容计划**：
+
+1. 上传：一个占主导的“选择图片”操作，以及照片、像素画、已有图纸三个清楚分开的入口。
+2. 准备：以图片和裁剪区域为主，逐步展开行列、拼板、色板和生成选项。
+3. 编辑：Canvas 占据主要视口，工具、颜色、材料和设置围绕 Canvas 服务。
+4. 完成：从当前矩阵直接查看材料、检查正反面并导出，不增加营销式完成页。
+
+**交互 thesis**：
+
+- 阶段切换用短距离淡入/位移帮助用户理解“上传 → 准备 → 编辑”，不制造表演感。
+- 移动端唯一 bottom sheet 在收起、半屏、全屏三态之间平稳吸附，始终保留 Canvas 上下文。
+- 工具按下、cell 修改和撤销/重做使用短促的 pressed/selection 反馈，确认操作已发生。
+
+#### 3.4.1 颜色 tokens
+
+常规产品 UI 只能使用中性色与青绿色交互色。MARD/默认色板颜色只可出现在图案 Canvas、palette swatch、当前颜色反馈、图例和材料统计中。
+
+| 语义 Token                  | 值        | 用途                     |
+| --------------------------- | --------- | ------------------------ |
+| `color.background.page`     | `#F7F8F5` | 暖白应用背景             |
+| `color.background.panel`    | `#FFFFFF` | 工具栏、sheet、inspector |
+| `color.background.subtle`   | `#EEF2EF` | 次级区域                 |
+| `canvas.background`         | `#E7E3DA` | Canvas 外围工作区        |
+| `color.text.primary`        | `#1F2933` | 主文字与主要图标         |
+| `color.text.secondary`      | `#5F6B66` | 次要说明                 |
+| `color.border.default`      | `#DCE2DE` | 分隔与输入边界           |
+| `color.action.primary`      | `#0F766E` | 主操作与 active 状态     |
+| `color.action.primaryHover` | `#115E59` | pressed/hover 主操作     |
+| `color.action.primarySoft`  | `#D9EEEA` | active 背景与选择反馈    |
+| `color.focus.ring`          | `#14B8A6` | 2 px 可见焦点环          |
+| `color.status.error`        | `#B42318` | 仅用于错误和破坏性警告   |
+| `color.status.warning`      | `#9A5B13` | 仅用于需复核状态         |
+
+禁止把 `color.status.error`、`color.status.warning` 或 palette 颜色当作装饰性强调色。界面不得使用彩虹渐变、品牌渐变、玻璃拟态、强光晕或彩色页面纹理。
+
+#### 3.4.1.1 可替换主题架构
+
+当前主题名为“薄荷工作台”，运行时 ID 为 `mint-studio`。主题必须使用三层 Token，且由一个确定性生成脚本产出 CSS/TypeScript 资产：
+
+1. 基础层：`src/design/tokens/core.tokens.json`，只记录原始颜色、间距、圆角、阴影、字体与动效值。
+2. 语义层：`src/design/tokens/semantic.tokens.json` 与 `themes/mint-studio.tokens.json`，把当前主题映射为 action、background、text、border、status、focus。
+3. 组件层：`src/design/tokens/component.tokens.json`，只引用语义 Token，定义 button、sheet、toolbar、canvas、inspector、swatch、grid。
+
+`scripts/generate-design-tokens.mjs` 是生成入口，产出 `src/design/generated/tokens.css` 与 `tokens.ts`；`pnpm check:tokens` 必须阻止生成资产漂移。运行时根元素必须标记 `data-theme="mint-studio"`。后续换主题只允许新增/替换主题映射和品牌配置，不得改写业务组件。
+
+产品主题颜色与拼豆材料颜色必须彻底分离。用户切换 MARD、默认或未来品牌色板时，不得改变页面主题；MARD/默认色只进入 Canvas、swatch、选中色反馈、图例和材料统计。
+
+#### 3.4.2 字体、尺寸与表面
+
+- 字体只使用系统无衬线：`system-ui`、`-apple-system`、`BlinkMacSystemFont`、`Segoe UI`、`PingFang SC`、`Microsoft YaHei`。
+- 顾客可见正文 14–16 px；输入值 16 px 以上以避免移动端自动缩放；页面/阶段标题 20–24 px；不使用营销式超大标题。
+- 常规圆角 10 px，强调输入/主按钮 12 px，bottom sheet 顶角 18 px；不得把所有元素做成胶囊。
+- 常规边界为 1 px；阴影仅用于 sheet 与浮动菜单，最大为 `0 12px 32px rgb(29 37 35 / 10%)`。
+- 空间基准 4 px，常用间距为 8、12、16、24、32 px。
+- 所有可点击/触控控件的命中区域不得小于 44 × 44 CSS px。
+- hover、focus-visible、pressed、disabled 和 selected 状态必须视觉可分；状态不能只依赖颜色。
+
+#### 3.4.3 顾客语言
+
+- 顾客界面使用“颜色接近方式”“格子取色方式”“最多使用颜色”“拼板”等任务语言，不直接显示 Lab、CIEDE2000、alpha、schema、revision、contract 等实现名词。
+- 必须显示色板品牌与色号，因为它们用于购买和配料；首次出现用“色板 / 色号”解释，例如“色号 MARD A14”。
+- “已有图纸智能镜像”可简称“镜像已有图纸”，辅助说明为“只翻转拼豆格，保留坐标和图例”。
+- 每个设置的默认值应能直接完成任务；高级解释放在同一 sheet 的展开说明中，不创建阻塞式教学弹窗。
+- 按钮使用具体动作：“选择图片”“生成图纸”“应用颜色”“完成并导出”，避免“提交”“处理”“执行”等内部语言。
+
+#### 3.4.4 响应式布局
+
+`320–767 px`：
+
+- 使用全屏单任务工作区，顶部栏 52–56 px，固定主操作计入 `env(safe-area-inset-bottom)`。
+- 上传页不放空洞 hero；一个主上传按钮占视觉中心，三个模式使用并列或分行的单选入口明确区分。
+- 准备阶段先显示裁剪，行列与拼板为默认设置，色板与算法设置按需展开；不得一次展示所有专家参数。
+- 编辑阶段 Canvas 使用 sheet 之外的最大可用空间；不得让控制条、toast 或 sheet 持续遮挡当前编辑区域。
+- 只允许一个非模态 bottom sheet，并承载设置、颜色、材料和工具；任何时刻不得叠加第二个 sheet、drawer 或 modal。
+- sheet 三态为：收起（仅显示 drag handle、当前工具/颜色与主操作）、半屏（约 44–52 svh）、全屏（顶部栏以下可用高度）。
+- 主操作固定在 sheet 或视口底部安全区内；展开软键盘后仍可见或明确随内容滚动到可见位置。
+
+`768–1023 px`：
+
+- Canvas 仍为主表面；工具可成为窄侧栏，inspector 使用同一个可收起面板，不出现双面板叠加。
+
+`≥1024 px`：
+
+- 左侧为 56–64 px 紧凑工具 rail。
+- 中央 Canvas 占剩余宽度且不得小于主内容的 55%。
+- 右侧 304–344 px inspector 常驻，按设置、颜色、材料组织；不再使用覆盖 Canvas 的 bottom sheet。
+- 顶部栏与主操作保持紧凑；不得把移动内容机械放大成大量空白，也不得把所有设置同时展开成密集控制墙。
+
+#### 3.4.5 组件层级
+
+```text
+AppShell
+├─ AppHeader
+├─ UploadWorkspace
+│  ├─ ModeSelector
+│  ├─ PrimaryUploadAction
+│  └─ PrivacyNote
+├─ PrepareWorkspace
+│  ├─ CropCanvas
+│  ├─ EssentialSettings
+│  └─ AdvancedSettingsDisclosure
+└─ EditorWorkspace
+   ├─ ToolRail (desktop/tablet)
+   ├─ PatternCanvas
+   ├─ ViewAndHistoryControls
+   ├─ WorkspaceInspector (desktop)
+   └─ WorkspaceSheet (mobile, single instance)
+      ├─ SheetHandle
+      ├─ SettingsPanel
+      ├─ PalettePanel
+      ├─ MaterialsPanel
+      ├─ ToolsPanel
+      └─ SafeAreaPrimaryAction
+```
+
+- 同一时刻只有一个主工作区可见。
+- 组件以任务和数据边界拆分，不为视觉卡片机械拆组件。
+- Canvas 是编辑阶段唯一 dominant surface；inspector、sheet、工具栏均为次级。
+- 主操作在每个阶段只有一个，次级动作不得与其同权竞争。
+
+#### 3.4.6 动效规则
+
+- 阶段进入：160–220 ms，`opacity` + 不超过 8 px 的 `translateY`。
+- sheet 吸附：180–240 ms，标准 ease-out；拖拽期间跟手，不使用弹跳或 overshoot。
+- pressed/selected：80–140 ms，使用背景、边界或不超过 0.98 的 scale；不得造成布局抖动。
+- Canvas 缩放和平移只响应直接手势，不做自动漂移、景深或装饰性视差。
+- loading 使用文字和低干扰进度反馈，不使用彩色旋转玩具或持续闪烁。
+- `prefers-reduced-motion: reduce` 时，取消位移、scale、平滑滚动和 sheet 动画，仅保留即时状态变化。
+
+#### 3.4.7 硬性拒绝标准
+
+出现任一项即视为视觉验收失败：
+
+- 玩具化插画、卡通吉祥物、儿童贴纸感图标或游戏式奖励。
+- 彩虹/装饰性渐变、玻璃拟态、强 glow、彩色阴影或 bead-pattern 页面背景。
+- dashboard 卡片马赛克、cards inside cards、每个设置都独立成卡片。
+- 上传页使用超大空白营销 hero、口号或与任务无关的装饰图。
+- 控件、toast、sheet 或工具条持续遮挡主要 Canvas。
+- 同时出现多个 sheet、sheet 上再开 drawer，或移动端用阻塞式设置 modal。
+- 小于 44 px 的触控目标、只依赖 hover 的操作、不可见焦点或没有 pressed 状态。
+- 在常规 UI chrome 中使用 palette 颜色，导致材料颜色与操作状态混淆。
+- 桌面端堆满所有高级参数，或移动端只是缩小的桌面三栏界面。
+- 顾客界面直接暴露算法、API、schema、contract、hash 或 revision 等术语。
 
 ## 4. 输入模式
 
@@ -165,8 +340,8 @@ Vercel 状态为：**暂停（PAUSED）**。
 
 ### 5.3 单一来源与生成物
 
-- 结构化 palette source 是唯一机器可读来源。
-- 前端 TypeScript 资产、后端 Python 资产和人类可读清单必须由同一生成脚本产生。
+- owner seed `拼豆颜色对照表.txt` 是唯一可编辑颜色来源；不得在 TypeScript、Python、JSON 或文档中手工复制或修正颜色值。
+- 结构化 JSON、前端 TypeScript 资产、后端 Python 资产和人类可读清单必须由同一生成脚本同时产生。
 - 生成必须可重复、排序稳定并带 source version。
 - CI/本地检查必须验证 39、221、260、ID 唯一、code 系列一致、HEX 格式和生成物无漂移。
 
@@ -607,26 +782,26 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 ### 19.1 模块分类
 
-| 分类         | 当前模块                                        | 决策                                                                                 |
-| ------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| 保留 retain  | `backend/app/detection.py`                      | 保留网格证据提取和自动/手动检测，补充合同测试与轴能力。                              |
-| 保留 retain  | `backend/app/mirror.py`                         | 保留从原始 cell 读取并重排的实现原则，扩展垂直轴与双镜像恒等。                       |
-| 保留 retain  | `src/features/grid-selection/*`                 | 保留自然图坐标与半开矩形几何，纳入已有图纸模式。                                     |
-| 保留 retain  | `src/features/local-image-input/*`              | 保留本地预览、验证和 Object URL 生命周期，修正为三模式入口。                         |
-| 修复 repair  | `backend/app/service.py`                        | 拆出上传解码、生成、导出服务；移除 Vercel 专属业务分支。                             |
-| 修复 repair  | `backend/app/models.py`                         | 增加 capabilities、palette、project、generation、statistics、export 严格模型。       |
-| 修复 repair  | `backend/app/main.py`                           | 增加新接口、统一错误与取消安全；保留静态前端挂载和 health。                          |
-| 修复 repair  | `src/features/grid-api/client.ts`               | 改为通用 API client，接受 `AbortSignal`，保留 grid 合同解析。                        |
-| 替换 replace | `src/app.ts`、`src/main.ts`                     | 替换 Pixelanim 单流程，建立 upload → crop/settings → generate → edit/export 状态机。 |
-| 替换 replace | `src/styles/page.css`、`tokens.css`             | 替换旧镜像工具视觉，建立移动端优先 tokens、safe area、sheet 和桌面 inspector。       |
-| 替换 replace | README 中产品定义                               | 改为完整拼豆生成器，并只指向本文件作为产品权威。                                     |
-| 新增 new     | `data/palettes.source.json`、生成脚本与生成资产 | 建立单一机器来源和 39/221 验证。                                                     |
-| 新增 new     | `src/domain/project/*`                          | 项目 schema、矩阵不变量、统计、物理尺寸和拼板。                                      |
-| 新增 new     | `src/domain/palette/*`                          | palette 查询、可用色过滤、Lab/CIEDE2000 与匹配。                                     |
-| 新增 new     | `src/features/pattern-generation/*`             | crop 映射、采样、透明度、最大颜色和抖动。                                            |
-| 新增 new     | `src/features/pattern-editor/*`                 | Canvas、工具、命中测试、Pointer Events、历史和视图变换。                             |
-| 新增 new     | `src/features/pattern-export/*`                 | PNG/CSV/JSON client 导出与 PDF API。                                                 |
-| 新增 new     | backend pattern/palette/export 模块             | 后端权威生成、校验、统计与 Pillow 导出。                                             |
+| 分类         | 当前模块                               | 决策                                                                                 |
+| ------------ | -------------------------------------- | ------------------------------------------------------------------------------------ |
+| 保留 retain  | `backend/app/detection.py`             | 保留网格证据提取和自动/手动检测，补充合同测试与轴能力。                              |
+| 保留 retain  | `backend/app/mirror.py`                | 保留从原始 cell 读取并重排的实现原则，扩展垂直轴与双镜像恒等。                       |
+| 保留 retain  | `src/features/grid-selection/*`        | 保留自然图坐标与半开矩形几何，纳入已有图纸模式。                                     |
+| 保留 retain  | `src/features/local-image-input/*`     | 保留本地预览、验证和 Object URL 生命周期，修正为三模式入口。                         |
+| 修复 repair  | `backend/app/service.py`               | 拆出上传解码、生成、导出服务；移除 Vercel 专属业务分支。                             |
+| 修复 repair  | `backend/app/models.py`                | 增加 capabilities、palette、project、generation、statistics、export 严格模型。       |
+| 修复 repair  | `backend/app/main.py`                  | 增加新接口、统一错误与取消安全；保留静态前端挂载和 health。                          |
+| 修复 repair  | `src/features/grid-api/client.ts`      | 改为通用 API client，接受 `AbortSignal`，保留 grid 合同解析。                        |
+| 替换 replace | `src/app.ts`、`src/main.ts`            | 替换 Pixelanim 单流程，建立 upload → crop/settings → generate → edit/export 状态机。 |
+| 替换 replace | `src/styles/page.css`、`tokens.css`    | 替换旧镜像工具视觉，建立移动端优先 tokens、safe area、sheet 和桌面 inspector。       |
+| 替换 replace | README 中产品定义                      | 改为完整拼豆生成器，并只指向本文件作为产品权威。                                     |
+| 新增 new     | owner seed、palette 生成脚本与生成资产 | 从唯一 owner seed 同时生成 JSON、TypeScript、Python 和人类清单，并执行 39/221 验证。 |
+| 新增 new     | `src/domain/project/*`                 | 项目 schema、矩阵不变量、统计、物理尺寸和拼板。                                      |
+| 新增 new     | `src/domain/palette/*`                 | palette 查询、可用色过滤、Lab/CIEDE2000 与匹配。                                     |
+| 新增 new     | `src/features/pattern-generation/*`    | crop 映射、采样、透明度、最大颜色和抖动。                                            |
+| 新增 new     | `src/features/pattern-editor/*`        | Canvas、工具、命中测试、Pointer Events、历史和视图变换。                             |
+| 新增 new     | `src/features/pattern-export/*`        | PNG/CSV/JSON client 导出与 PDF API。                                                 |
+| 新增 new     | backend pattern/palette/export 模块    | 后端权威生成、校验、统计与 Pillow 导出。                                             |
 
 ### 19.2 合同边界
 

@@ -94,6 +94,39 @@ def test_mirror_twice_restores_every_rgba_pixel(
     )
 
 
+def test_vertical_mirror_preserves_outside_labels_and_is_an_involution(
+    client: TestClient,
+    generated_rgba_image: Image.Image,
+    png_bytes,
+) -> None:
+    original_bytes = png_bytes(generated_rgba_image)
+    contract = generated_contract(original_bytes)
+    contract["axis"] = "vertical"
+
+    first_response = post_mirror(client, original_bytes, contract)
+
+    assert first_response.status_code == 200
+    original = np.asarray(generated_rgba_image)
+    first = np.asarray(decode_normalized_rgba(first_response.content))
+    outside_mask = np.ones(original.shape[:2], dtype=bool)
+    outside_mask[1:5, 2:6] = False
+    assert np.array_equal(first[outside_mask], original[outside_mask])
+    assert np.array_equal(first[1:3, 2:6], original[3:5, 2:6])
+    assert np.array_equal(first[3:5, 2:6], original[1:3, 2:6])
+
+    second_contract = copy.deepcopy(contract)
+    second_contract["imageSha256"] = hashlib.sha256(
+        first_response.content
+    ).hexdigest()
+    second_response = post_mirror(
+        client, first_response.content, second_contract
+    )
+
+    assert second_response.status_code == 200
+    restored = np.asarray(decode_normalized_rgba(second_response.content))
+    assert np.array_equal(restored, original)
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_code"),
     [
@@ -328,40 +361,26 @@ def test_upload_byte_limit_is_enforced(
     )
 
 
-def test_vercel_multipart_request_limit_is_enforced(
+@pytest.mark.parametrize(
+    ("environment_name", "environment_value"),
+    [("VERCEL", "1"), ("VERCEL_ENV", "preview")],
+)
+def test_platform_environment_does_not_change_local_runtime_contract(
     client: TestClient,
     generated_rgba_image: Image.Image,
     png_bytes,
     monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    environment_value: str,
 ) -> None:
     image_bytes = png_bytes(generated_rgba_image)
     contract = generated_contract(image_bytes)
-    monkeypatch.setenv("VERCEL", "1")
-    monkeypatch.setattr(limits, "VERCEL_MAX_MULTIPART_REQUEST_BYTES", 1)
+    monkeypatch.setenv(environment_name, environment_value)
 
     response = post_mirror(client, image_bytes, contract)
 
-    assert_structured_chinese_error(
-        response, "VERCEL_MULTIPART_REQUEST_TOO_LARGE", expected_status=413
-    )
-
-
-def test_vercel_png_response_limit_is_enforced(
-    client: TestClient,
-    generated_rgba_image: Image.Image,
-    png_bytes,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    image_bytes = png_bytes(generated_rgba_image)
-    contract = generated_contract(image_bytes)
-    monkeypatch.setenv("VERCEL_ENV", "preview")
-    monkeypatch.setattr(limits, "VERCEL_MAX_PNG_RESPONSE_BYTES", 1)
-
-    response = post_mirror(client, image_bytes, contract)
-
-    assert_structured_chinese_error(
-        response, "VERCEL_PNG_RESPONSE_TOO_LARGE", expected_status=413
-    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
 
 
 def test_decoded_pixel_limit_is_enforced(

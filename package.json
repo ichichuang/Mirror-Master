@@ -8,12 +8,20 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "node --test",
+    "test": "tsx --test tests/*.test.ts",
+    "generate:palettes": "node scripts/generate-palettes.mjs",
+    "check:palettes": "node scripts/generate-palettes.mjs --check",
+    "generate:icons": "node scripts/generate-icon-styles.mjs",
+    "check:icons": "node scripts/generate-icon-styles.mjs --check",
+    "generate:tokens": "node scripts/generate-design-tokens.mjs",
+    "check:tokens": "node scripts/generate-design-tokens.mjs --check",
+    "generate:brand": "node scripts/generate-brand-config.mjs",
+    "check:brand": "node scripts/generate-brand-config.mjs --check",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "check": "pnpm run test && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build"
+    "check": "pnpm run check:palettes && pnpm run check:icons && pnpm run check:tokens && pnpm run check:brand && pnpm run test && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -21,8 +29,12 @@
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.7.0",
     "prettier": "^3.9.6",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.65.0",
     "vite": "^8.1.5"
+  },
+  "dependencies": {
+    "@phosphor-icons/web": "^2.1.2"
   }
 }

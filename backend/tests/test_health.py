@@ -21,7 +21,11 @@ def test_no_unrequested_api_routes_exist(client: TestClient) -> None:
     }
 
     assert paths == {
+        "/api/capabilities",
         "/api/health",
+        "/api/palettes",
+        "/api/pattern/generate",
+        "/api/pattern/export",
         "/api/grid/detect",
         "/api/grid/mirror",
     }

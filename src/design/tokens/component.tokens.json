@@ -1,0 +1,28 @@
+{
+  "button": {
+    "primary": {
+      "background": { "$type": "color", "$value": "{color.action.primary}" },
+      "backgroundHover": { "$type": "color", "$value": "{color.action.primaryHover}" },
+      "foreground": { "$type": "color", "$value": "{color.text.onPrimary}" }
+    }
+  },
+  "sheet": {
+    "background": { "$type": "color", "$value": "{color.background.panel}" }
+  },
+  "toolbar": {
+    "background": { "$type": "color", "$value": "{color.background.panel}" }
+  },
+  "canvas": {
+    "background": { "$type": "color", "$value": "{color.background.canvas}" }
+  },
+  "inspector": {
+    "background": { "$type": "color", "$value": "{color.background.panel}" }
+  },
+  "swatch": {
+    "selectedBorder": { "$type": "color", "$value": "{color.action.primary}" }
+  },
+  "grid": {
+    "majorLine": { "$type": "color", "$value": "{color.border.strong}" },
+    "minorLine": { "$type": "color", "$value": "{color.border.default}" }
+  }
+}

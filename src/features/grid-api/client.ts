@@ -1,3 +1,5 @@
+import { brandConfig } from '../../brand/brand.config';
+
 export interface DetectionRectangle {
   readonly left: number;
   readonly top: number;
@@ -34,6 +36,7 @@ export async function detectGrid(
   file: File,
   mode: 'auto' | 'manual',
   rectangle?: DetectionRectangle,
+  signal?: AbortSignal,
 ): Promise<GridDetectionContract> {
   const form = new FormData();
   form.set('file', file);
@@ -46,12 +49,18 @@ export async function detectGrid(
   const response = await request('/api/grid/detect', {
     method: 'POST',
     body: form,
+    ...(signal ? { signal } : {}),
   });
   const payload: unknown = await response.json();
   return parseGridContract(payload);
 }
 
-export async function mirrorGrid(file: File, contract: GridDetectionContract): Promise<Blob> {
+export async function mirrorGrid(
+  file: File,
+  contract: GridDetectionContract,
+  axis: 'horizontal' | 'vertical' = 'horizontal',
+  signal?: AbortSignal,
+): Promise<Blob> {
   const form = new FormData();
   form.set('file', file);
   form.set(
@@ -59,12 +68,14 @@ export async function mirrorGrid(file: File, contract: GridDetectionContract): P
     JSON.stringify({
       ...contract,
       confirmed: true,
+      axis,
     }),
   );
 
   const response = await request('/api/grid/mirror', {
     method: 'POST',
     body: form,
+    ...(signal ? { signal } : {}),
   });
   const contentType = response.headers.get('content-type') ?? '';
 
@@ -80,11 +91,14 @@ async function request(path: string, init: RequestInit): Promise<Response> {
 
   try {
     response = await fetch(path, init);
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
     throw new MirrorMasterApiError(
       0,
       'SERVICE_UNREACHABLE',
-      '无法连接 Mirror Master 服务，请确认服务正在运行。',
+      `无法连接${brandConfig.productName}服务，请确认服务正在运行。`,
     );
   }
 

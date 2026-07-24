@@ -3,3 +3,11 @@ backend/.venv/
 backend/**/__pycache__/
 backend/tests/fixtures/
 .vercel/
+data/palettes.generated.json
+docs/PALETTES.generated.md
+src/generated/palettes.ts
+src/generated/phosphor-icons.css
+src/design/generated/tokens.css
+src/design/generated/tokens.ts
+src/brand/brand.config.ts
+backend/app/generated_brand.py

@@ -79,7 +79,7 @@ def parse_contract(contract_text: str) -> GridContract:
         ) from error
 
 
-async def _read_upload(upload: UploadFile) -> bytes:
+async def read_upload(upload: UploadFile) -> bytes:
     if upload.content_type not in ALLOWED_IMAGE_FORMATS:
         raise ApiError(
             415,
@@ -88,21 +88,9 @@ async def _read_upload(upload: UploadFile) -> bytes:
         )
 
     content = bytearray()
-    max_upload_bytes = (
-        limits.VERCEL_MAX_MULTIPART_REQUEST_BYTES
-        if limits.is_vercel_runtime()
-        else limits.MAX_UPLOAD_BYTES
-    )
     while chunk := await upload.read(limits.UPLOAD_READ_CHUNK_BYTES):
         content.extend(chunk)
-        if len(content) > max_upload_bytes:
-            if limits.is_vercel_runtime():
-                raise ApiError(
-                    413,
-                    "VERCEL_MULTIPART_REQUEST_TOO_LARGE",
-                    "Vercel 部署的 multipart 请求最多为 4 MiB；"
-                    "更大的图片请使用现有 VPS/Docker 部署。",
-                )
+        if len(content) > limits.MAX_UPLOAD_BYTES:
             raise ApiError(
                 413,
                 "IMAGE_UPLOAD_TOO_LARGE",
@@ -118,7 +106,7 @@ async def _read_upload(upload: UploadFile) -> bytes:
     return bytes(content)
 
 
-def _decode_normalized_rgba(
+def decode_normalized_rgba(
     image_bytes: bytes, declared_mime: str
 ) -> Image.Image:
     try:
@@ -149,7 +137,7 @@ def _decode_normalized_rgba(
         ) from error
 
 
-def _encode_png(image: Image.Image) -> bytes:
+def encode_png(image: Image.Image) -> bytes:
     output = io.BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
@@ -206,9 +194,9 @@ async def create_detection_contract(
                 "GRID_RECTANGLE_REQUIRED",
                 "手动模式缺少完整的半开坐标选区。",
             )
-        image_bytes = await _read_upload(upload)
+        image_bytes = await read_upload(upload)
         image_sha256 = hashlib.sha256(image_bytes).hexdigest()
-        source = _decode_normalized_rgba(
+        source = decode_normalized_rgba(
             image_bytes, upload.content_type or ""
         )
         return detect_grid(source, image_sha256, mode, rectangle)
@@ -221,7 +209,7 @@ async def create_mirror_png(
 ) -> bytes:
     try:
         contract = parse_contract(contract_text)
-        image_bytes = await _read_upload(upload)
+        image_bytes = await read_upload(upload)
         actual_hash = hashlib.sha256(image_bytes).hexdigest()
         if not hmac.compare_digest(actual_hash, contract.image_sha256):
             raise ApiError(
@@ -230,21 +218,10 @@ async def create_mirror_png(
                 "网格合同与当前上传图片不匹配，可能已经过期。",
             )
 
-        source = _decode_normalized_rgba(
+        source = decode_normalized_rgba(
             image_bytes, upload.content_type or ""
         )
         validate_grid_contract(contract, source.size)
-        png_bytes = _encode_png(mirror_cells(source, contract))
-        if (
-            limits.is_vercel_runtime()
-            and len(png_bytes) > limits.VERCEL_MAX_PNG_RESPONSE_BYTES
-        ):
-            raise ApiError(
-                413,
-                "VERCEL_PNG_RESPONSE_TOO_LARGE",
-                "Vercel 部署生成的 PNG 最多为 4 MiB；"
-                "更大的图片请使用现有 VPS/Docker 部署。",
-            )
-        return png_bytes
+        return encode_png(mirror_cells(source, contract))
     finally:
         await upload.close()

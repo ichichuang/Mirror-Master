@@ -1,0 +1,34 @@
+{
+  "theme": {
+    "id": { "$type": "string", "$value": "mint-studio" },
+    "color": {
+      "action": {
+        "primary": { "$type": "color", "$value": "{color.teal.700}" },
+        "primaryHover": { "$type": "color", "$value": "{color.teal.800}" },
+        "primarySoft": { "$type": "color", "$value": "{color.teal.100}" }
+      },
+      "background": {
+        "page": { "$type": "color", "$value": "{color.neutral.50}" },
+        "panel": { "$type": "color", "$value": "{color.neutral.0}" },
+        "subtle": { "$type": "color", "$value": "{color.neutral.100}" },
+        "canvas": { "$type": "color", "$value": "{color.canvas.well}" }
+      },
+      "text": {
+        "primary": { "$type": "color", "$value": "{color.neutral.800}" },
+        "secondary": { "$type": "color", "$value": "{color.neutral.600}" },
+        "onPrimary": { "$type": "color", "$value": "{color.neutral.0}" }
+      },
+      "border": {
+        "default": { "$type": "color", "$value": "{color.neutral.200}" },
+        "strong": { "$type": "color", "$value": "{color.neutral.400}" }
+      },
+      "status": {
+        "error": { "$type": "color", "$value": "{color.red.700}" },
+        "warning": { "$type": "color", "$value": "{color.amber.700}" }
+      },
+      "focus": {
+        "ring": { "$type": "color", "$value": "{color.teal.500}" }
+      }
+    }
+  }
+}

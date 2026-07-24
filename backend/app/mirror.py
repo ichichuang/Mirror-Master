@@ -112,9 +112,19 @@ def mirror_cells(source: Image.Image, contract: GridContract) -> Image.Image:
         for source_column in range(contract.columns):
             left = contract.x_boundaries[source_column]
             right = contract.x_boundaries[source_column + 1]
-            target_column = contract.columns - 1 - source_column
+            target_column = (
+                contract.columns - 1 - source_column
+                if contract.axis == "horizontal"
+                else source_column
+            )
+            target_row = (
+                contract.rows - 1 - row
+                if contract.axis == "vertical"
+                else row
+            )
             target_left = contract.x_boundaries[target_column]
+            target_top = contract.y_boundaries[target_row]
             source_cell = source.crop((left, top, right, bottom))
-            result.paste(source_cell, (target_left, top))
+            result.paste(source_cell, (target_left, target_top))
 
     return result

@@ -3,17 +3,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app import limits
+from .generated_brand import PRODUCT_NAME
 from app.errors import ApiError
+from app.generated_palettes import (
+    PALETTE_COLORS,
+    PALETTES,
+    PALETTE_SOURCE_VERSION,
+)
+from app.models import PatternExportRequest
+from app.pattern import create_pattern_project
+from app.pattern_export import create_pattern_export
 from app.service import create_detection_contract, create_mirror_png
 
 app = FastAPI(
-    title="Mirror Master Backend",
+    title=f"{PRODUCT_NAME} Backend",
     debug=False,
     docs_url=None,
     redoc_url=None,
@@ -27,55 +35,6 @@ async def add_privacy_headers(request: Request, call_next):
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
-
-
-@app.middleware("http")
-async def enforce_vercel_multipart_limit(request: Request, call_next):
-    if (
-        limits.is_vercel_runtime()
-        and request.headers.get("content-type", "").lower().startswith(
-            "multipart/form-data"
-        )
-    ):
-        content_length = request.headers.get("content-length")
-        try:
-            request_size = int(content_length) if content_length else None
-        except ValueError:
-            request_size = None
-
-        if request_size is None:
-            error = ApiError(
-                413,
-                "VERCEL_MULTIPART_CONTENT_LENGTH_REQUIRED",
-                "Vercel 部署要求 multipart 请求提供有效的 Content-Length，"
-                "以便在平台 4.5 MB 限制前拒绝请求。",
-            )
-            return JSONResponse(
-                status_code=error.status_code,
-                content=error.as_response(),
-                headers={
-                    "Cache-Control": "no-store",
-                    "X-Content-Type-Options": "nosniff",
-                },
-            )
-
-        if request_size > limits.VERCEL_MAX_MULTIPART_REQUEST_BYTES:
-            error = ApiError(
-                413,
-                "VERCEL_MULTIPART_REQUEST_TOO_LARGE",
-                "Vercel 部署的 multipart 请求最多为 4 MiB；"
-                "更大的图片请使用现有 VPS/Docker 部署。",
-            )
-            return JSONResponse(
-                status_code=error.status_code,
-                content=error.as_response(),
-                headers={
-                    "Cache-Control": "no-store",
-                    "X-Content-Type-Options": "nosniff",
-                },
-            )
-
-    return await call_next(request)
 
 
 @app.exception_handler(ApiError)
@@ -103,6 +62,62 @@ async def handle_request_validation_error(
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/capabilities")
+async def capabilities() -> dict[str, object]:
+    return {
+        "schemaVersions": ["1.0"],
+        "paletteSourceVersion": PALETTE_SOURCE_VERSION,
+        "upload": {
+            "mimeTypes": ["image/png", "image/jpeg", "image/webp"],
+            "maximumBytes": 20 * 1024 * 1024,
+            "maximumDecodedPixels": 25_000_000,
+        },
+        "grid": {
+            "minimumRows": 1,
+            "maximumRows": 300,
+            "minimumColumns": 1,
+            "maximumColumns": 300,
+        },
+        "modes": ["photo", "pixelArt", "existingChart"],
+        "sampling": ["average", "nearest"],
+        "dithering": ["none", "floydSteinberg"],
+        "exports": ["png", "pdf", "csv", "projectJson"],
+        "gridMirrorAxes": ["horizontal", "vertical"],
+    }
+
+
+@app.get("/api/palettes")
+async def palettes() -> dict[str, object]:
+    return {
+        "sourceVersion": PALETTE_SOURCE_VERSION,
+        "palettes": PALETTES,
+        "colors": PALETTE_COLORS,
+    }
+
+
+@app.post("/api/pattern/generate")
+async def generate_pattern(
+    file: Annotated[UploadFile, File()],
+    settings: Annotated[str, Form()],
+) -> JSONResponse:
+    result = await create_pattern_project(file, settings)
+    return JSONResponse(result.model_dump(by_alias=True))
+
+
+@app.post("/api/pattern/export")
+async def export_pattern(
+    request: Annotated[PatternExportRequest, Body()],
+) -> Response:
+    content, media_type, file_name = create_pattern_export(request)
+    return Response(
+        content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{file_name}"',
+        },
+    )
 
 
 @app.post("/api/grid/mirror")

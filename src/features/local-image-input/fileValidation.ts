@@ -6,6 +6,7 @@ import {
 } from './types';
 
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 export function validateSingleImageFile(files: readonly File[]): FileValidationResult {
   if (files.length === 0) {
@@ -37,6 +38,20 @@ export function validateSingleImageFile(files: readonly File[]): FileValidationR
     return {
       ok: false,
       message: `不支持 ${detectedType}。当前只支持 PNG、JPEG 或 WebP 图片。`,
+    };
+  }
+
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return {
+      ok: false,
+      message: `图片大小为 ${formatFileSize(file.size)}，超过 20 MB 上限。请压缩图片后重试。`,
+    };
+  }
+
+  if (file.size === 0) {
+    return {
+      ok: false,
+      message: '这张图片是空文件，请重新选择。',
     };
   }
 

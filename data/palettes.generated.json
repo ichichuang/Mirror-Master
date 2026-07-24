@@ -1,0 +1,2621 @@
+{
+  "source": "owner-seed",
+  "sourceFile": "拼豆颜色对照表.txt",
+  "sourceVersion": "2026-07-24",
+  "palettes": [
+    {
+      "id": "default",
+      "label": "默认色板",
+      "version": "2026-07-24",
+      "colors": [
+        {
+          "id": "default:A01",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "A",
+          "code": "A01",
+          "displayHex": "#FFFFFF",
+          "name": "白色"
+        },
+        {
+          "id": "default:A02",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "A",
+          "code": "A02",
+          "displayHex": "#FFFDD0",
+          "name": "奶油"
+        },
+        {
+          "id": "default:A03",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "A",
+          "code": "A03",
+          "displayHex": "#C0C0C0",
+          "name": "浅灰"
+        },
+        {
+          "id": "default:A04",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "A",
+          "code": "A04",
+          "displayHex": "#808080",
+          "name": "灰色"
+        },
+        {
+          "id": "default:A05",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "A",
+          "code": "A05",
+          "displayHex": "#505050",
+          "name": "深灰"
+        },
+        {
+          "id": "default:A06",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "A",
+          "code": "A06",
+          "displayHex": "#1A1A1A",
+          "name": "黑色"
+        },
+        {
+          "id": "default:B01",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "B",
+          "code": "B01",
+          "displayHex": "#E31B23",
+          "name": "红色"
+        },
+        {
+          "id": "default:B02",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "B",
+          "code": "B02",
+          "displayHex": "#DC143C",
+          "name": "深红"
+        },
+        {
+          "id": "default:B03",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "B",
+          "code": "B03",
+          "displayHex": "#FF7F50",
+          "name": "珊瑚"
+        },
+        {
+          "id": "default:B04",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "B",
+          "code": "B04",
+          "displayHex": "#FA8072",
+          "name": "鲑鱼"
+        },
+        {
+          "id": "default:B05",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "B",
+          "code": "B05",
+          "displayHex": "#FF69B4",
+          "name": "亮粉"
+        },
+        {
+          "id": "default:B06",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "B",
+          "code": "B06",
+          "displayHex": "#FFB6C1",
+          "name": "粉色"
+        },
+        {
+          "id": "default:C01",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "C",
+          "code": "C01",
+          "displayHex": "#F97316",
+          "name": "橙色"
+        },
+        {
+          "id": "default:C02",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "C",
+          "code": "C02",
+          "displayHex": "#FFB347",
+          "name": "浅橙"
+        },
+        {
+          "id": "default:C03",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "C",
+          "code": "C03",
+          "displayHex": "#FDDF00",
+          "name": "黄色"
+        },
+        {
+          "id": "default:C04",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "C",
+          "code": "C04",
+          "displayHex": "#FFD700",
+          "name": "金色"
+        },
+        {
+          "id": "default:C05",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "C",
+          "code": "C05",
+          "displayHex": "#FFFACD",
+          "name": "淡黄"
+        },
+        {
+          "id": "default:C06",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "C",
+          "code": "C06",
+          "displayHex": "#FFBF00",
+          "name": "琥珀"
+        },
+        {
+          "id": "default:D01",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "D",
+          "code": "D01",
+          "displayHex": "#22AB3A",
+          "name": "绿色"
+        },
+        {
+          "id": "default:D02",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "D",
+          "code": "D02",
+          "displayHex": "#90EE90",
+          "name": "浅绿"
+        },
+        {
+          "id": "default:D03",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "D",
+          "code": "D03",
+          "displayHex": "#006400",
+          "name": "深绿"
+        },
+        {
+          "id": "default:D04",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "D",
+          "code": "D04",
+          "displayHex": "#228B22",
+          "name": "森林"
+        },
+        {
+          "id": "default:D05",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "D",
+          "code": "D05",
+          "displayHex": "#BFFF00",
+          "name": "青柠"
+        },
+        {
+          "id": "default:D06",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "D",
+          "code": "D06",
+          "displayHex": "#6B8E23",
+          "name": "橄榄"
+        },
+        {
+          "id": "default:D07",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "D",
+          "code": "D07",
+          "displayHex": "#008080",
+          "name": "青色"
+        },
+        {
+          "id": "default:E01",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "E",
+          "code": "E01",
+          "displayHex": "#1E90FF",
+          "name": "蓝色"
+        },
+        {
+          "id": "default:E02",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "E",
+          "code": "E02",
+          "displayHex": "#87CEEB",
+          "name": "浅蓝"
+        },
+        {
+          "id": "default:E03",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "E",
+          "code": "E03",
+          "displayHex": "#0000CD",
+          "name": "深蓝"
+        },
+        {
+          "id": "default:E04",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "E",
+          "code": "E04",
+          "displayHex": "#000080",
+          "name": "藏青"
+        },
+        {
+          "id": "default:E05",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "E",
+          "code": "E05",
+          "displayHex": "#7EC8E3",
+          "name": "天蓝"
+        },
+        {
+          "id": "default:E06",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "E",
+          "code": "E06",
+          "displayHex": "#40E0D0",
+          "name": "绿松"
+        },
+        {
+          "id": "default:E07",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "E",
+          "code": "E07",
+          "displayHex": "#CCCCFF",
+          "name": "长春花"
+        },
+        {
+          "id": "default:F01",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "F",
+          "code": "F01",
+          "displayHex": "#8B4FFF",
+          "name": "紫色"
+        },
+        {
+          "id": "default:F02",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "F",
+          "code": "F02",
+          "displayHex": "#DDA0DD",
+          "name": "浅紫"
+        },
+        {
+          "id": "default:F03",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "F",
+          "code": "F03",
+          "displayHex": "#6A0DAD",
+          "name": "深紫"
+        },
+        {
+          "id": "default:F04",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "F",
+          "code": "F04",
+          "displayHex": "#E6E6FA",
+          "name": "薰衣草"
+        },
+        {
+          "id": "default:F05",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "F",
+          "code": "F05",
+          "displayHex": "#8B4513",
+          "name": "棕色"
+        },
+        {
+          "id": "default:F06",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "F",
+          "code": "F06",
+          "displayHex": "#D2B48C",
+          "name": "棕褐"
+        },
+        {
+          "id": "default:F07",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "default",
+          "series": "F",
+          "code": "F07",
+          "displayHex": "#F5F5DC",
+          "name": "米色"
+        }
+      ]
+    },
+    {
+      "id": "mard",
+      "label": "MARD",
+      "version": "2026-07-24",
+      "colors": [
+        {
+          "id": "mard:A1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A1",
+          "displayHex": "#FAF4C8",
+          "name": null
+        },
+        {
+          "id": "mard:A2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A2",
+          "displayHex": "#FFFFD5",
+          "name": null
+        },
+        {
+          "id": "mard:A3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A3",
+          "displayHex": "#FEFF8B",
+          "name": null
+        },
+        {
+          "id": "mard:A4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A4",
+          "displayHex": "#FBED56",
+          "name": null
+        },
+        {
+          "id": "mard:A5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A5",
+          "displayHex": "#F4D738",
+          "name": null
+        },
+        {
+          "id": "mard:A6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A6",
+          "displayHex": "#FEAC4C",
+          "name": null
+        },
+        {
+          "id": "mard:A7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A7",
+          "displayHex": "#FE8B4C",
+          "name": null
+        },
+        {
+          "id": "mard:A8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A8",
+          "displayHex": "#FFDA45",
+          "name": null
+        },
+        {
+          "id": "mard:A9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A9",
+          "displayHex": "#FF995B",
+          "name": null
+        },
+        {
+          "id": "mard:A10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A10",
+          "displayHex": "#F77C31",
+          "name": null
+        },
+        {
+          "id": "mard:A11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A11",
+          "displayHex": "#FFDD99",
+          "name": null
+        },
+        {
+          "id": "mard:A12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A12",
+          "displayHex": "#FE9F72",
+          "name": null
+        },
+        {
+          "id": "mard:A13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A13",
+          "displayHex": "#FFC365",
+          "name": null
+        },
+        {
+          "id": "mard:A14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A14",
+          "displayHex": "#FD543D",
+          "name": null
+        },
+        {
+          "id": "mard:A15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A15",
+          "displayHex": "#FFF365",
+          "name": null
+        },
+        {
+          "id": "mard:A16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A16",
+          "displayHex": "#FFFF9F",
+          "name": null
+        },
+        {
+          "id": "mard:A17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A17",
+          "displayHex": "#FFE36E",
+          "name": null
+        },
+        {
+          "id": "mard:A18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A18",
+          "displayHex": "#FEBE7D",
+          "name": null
+        },
+        {
+          "id": "mard:A19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A19",
+          "displayHex": "#FD7C72",
+          "name": null
+        },
+        {
+          "id": "mard:A20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A20",
+          "displayHex": "#FFD568",
+          "name": null
+        },
+        {
+          "id": "mard:A21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A21",
+          "displayHex": "#FFE395",
+          "name": null
+        },
+        {
+          "id": "mard:A22",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A22",
+          "displayHex": "#F4F57D",
+          "name": null
+        },
+        {
+          "id": "mard:A23",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A23",
+          "displayHex": "#E6C9B7",
+          "name": null
+        },
+        {
+          "id": "mard:A24",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A24",
+          "displayHex": "#F7F8A2",
+          "name": null
+        },
+        {
+          "id": "mard:A25",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A25",
+          "displayHex": "#FFD67D",
+          "name": null
+        },
+        {
+          "id": "mard:A26",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "A",
+          "code": "A26",
+          "displayHex": "#FFC830",
+          "name": null
+        },
+        {
+          "id": "mard:B1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B1",
+          "displayHex": "#E6EE31",
+          "name": null
+        },
+        {
+          "id": "mard:B2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B2",
+          "displayHex": "#63F347",
+          "name": null
+        },
+        {
+          "id": "mard:B3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B3",
+          "displayHex": "#9EF780",
+          "name": null
+        },
+        {
+          "id": "mard:B4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B4",
+          "displayHex": "#5DE035",
+          "name": null
+        },
+        {
+          "id": "mard:B5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B5",
+          "displayHex": "#35E352",
+          "name": null
+        },
+        {
+          "id": "mard:B6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B6",
+          "displayHex": "#65E2A6",
+          "name": null
+        },
+        {
+          "id": "mard:B7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B7",
+          "displayHex": "#3DAF80",
+          "name": null
+        },
+        {
+          "id": "mard:B8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B8",
+          "displayHex": "#1C9C4F",
+          "name": null
+        },
+        {
+          "id": "mard:B9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B9",
+          "displayHex": "#27523A",
+          "name": null
+        },
+        {
+          "id": "mard:B10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B10",
+          "displayHex": "#95D3C2",
+          "name": null
+        },
+        {
+          "id": "mard:B11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B11",
+          "displayHex": "#5D722A",
+          "name": null
+        },
+        {
+          "id": "mard:B12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B12",
+          "displayHex": "#166F41",
+          "name": null
+        },
+        {
+          "id": "mard:B13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B13",
+          "displayHex": "#CAEB7B",
+          "name": null
+        },
+        {
+          "id": "mard:B14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B14",
+          "displayHex": "#ADE946",
+          "name": null
+        },
+        {
+          "id": "mard:B15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B15",
+          "displayHex": "#2E5132",
+          "name": null
+        },
+        {
+          "id": "mard:B16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B16",
+          "displayHex": "#C5ED9C",
+          "name": null
+        },
+        {
+          "id": "mard:B17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B17",
+          "displayHex": "#9BB13A",
+          "name": null
+        },
+        {
+          "id": "mard:B18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B18",
+          "displayHex": "#E6EE49",
+          "name": null
+        },
+        {
+          "id": "mard:B19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B19",
+          "displayHex": "#24B88C",
+          "name": null
+        },
+        {
+          "id": "mard:B20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B20",
+          "displayHex": "#C2F0CC",
+          "name": null
+        },
+        {
+          "id": "mard:B21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B21",
+          "displayHex": "#156A6B",
+          "name": null
+        },
+        {
+          "id": "mard:B22",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B22",
+          "displayHex": "#0B3C43",
+          "name": null
+        },
+        {
+          "id": "mard:B23",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B23",
+          "displayHex": "#303A21",
+          "name": null
+        },
+        {
+          "id": "mard:B24",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B24",
+          "displayHex": "#EEFCA5",
+          "name": null
+        },
+        {
+          "id": "mard:B25",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B25",
+          "displayHex": "#4E846D",
+          "name": null
+        },
+        {
+          "id": "mard:B26",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B26",
+          "displayHex": "#8D7A35",
+          "name": null
+        },
+        {
+          "id": "mard:B27",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B27",
+          "displayHex": "#CCE1AF",
+          "name": null
+        },
+        {
+          "id": "mard:B28",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B28",
+          "displayHex": "#9EE5B9",
+          "name": null
+        },
+        {
+          "id": "mard:B29",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B29",
+          "displayHex": "#C5E254",
+          "name": null
+        },
+        {
+          "id": "mard:B30",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B30",
+          "displayHex": "#E2FCB1",
+          "name": null
+        },
+        {
+          "id": "mard:B31",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B31",
+          "displayHex": "#B0E792",
+          "name": null
+        },
+        {
+          "id": "mard:B32",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "B",
+          "code": "B32",
+          "displayHex": "#9CAB5A",
+          "name": null
+        },
+        {
+          "id": "mard:C1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C1",
+          "displayHex": "#E8FFE7",
+          "name": null
+        },
+        {
+          "id": "mard:C2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C2",
+          "displayHex": "#A9F9FC",
+          "name": null
+        },
+        {
+          "id": "mard:C3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C3",
+          "displayHex": "#A0E2FB",
+          "name": null
+        },
+        {
+          "id": "mard:C4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C4",
+          "displayHex": "#41CCFF",
+          "name": null
+        },
+        {
+          "id": "mard:C5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C5",
+          "displayHex": "#01ACEB",
+          "name": null
+        },
+        {
+          "id": "mard:C6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C6",
+          "displayHex": "#50AAF0",
+          "name": null
+        },
+        {
+          "id": "mard:C7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C7",
+          "displayHex": "#3677D2",
+          "name": null
+        },
+        {
+          "id": "mard:C8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C8",
+          "displayHex": "#0F54C0",
+          "name": null
+        },
+        {
+          "id": "mard:C9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C9",
+          "displayHex": "#324BCA",
+          "name": null
+        },
+        {
+          "id": "mard:C10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C10",
+          "displayHex": "#3EBCE2",
+          "name": null
+        },
+        {
+          "id": "mard:C11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C11",
+          "displayHex": "#28DDDE",
+          "name": null
+        },
+        {
+          "id": "mard:C12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C12",
+          "displayHex": "#1C334D",
+          "name": null
+        },
+        {
+          "id": "mard:C13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C13",
+          "displayHex": "#CDE8FF",
+          "name": null
+        },
+        {
+          "id": "mard:C14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C14",
+          "displayHex": "#D5FDFF",
+          "name": null
+        },
+        {
+          "id": "mard:C15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C15",
+          "displayHex": "#22C4C6",
+          "name": null
+        },
+        {
+          "id": "mard:C16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C16",
+          "displayHex": "#1557A8",
+          "name": null
+        },
+        {
+          "id": "mard:C17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C17",
+          "displayHex": "#04D1F6",
+          "name": null
+        },
+        {
+          "id": "mard:C18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C18",
+          "displayHex": "#1D3344",
+          "name": null
+        },
+        {
+          "id": "mard:C19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C19",
+          "displayHex": "#1887A2",
+          "name": null
+        },
+        {
+          "id": "mard:C20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C20",
+          "displayHex": "#176DAF",
+          "name": null
+        },
+        {
+          "id": "mard:C21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C21",
+          "displayHex": "#BEDDFF",
+          "name": null
+        },
+        {
+          "id": "mard:C22",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C22",
+          "displayHex": "#67B4BE",
+          "name": null
+        },
+        {
+          "id": "mard:C23",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C23",
+          "displayHex": "#C8E2FF",
+          "name": null
+        },
+        {
+          "id": "mard:C24",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C24",
+          "displayHex": "#7CC4FF",
+          "name": null
+        },
+        {
+          "id": "mard:C25",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C25",
+          "displayHex": "#A9E5E5",
+          "name": null
+        },
+        {
+          "id": "mard:C26",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C26",
+          "displayHex": "#3CAED8",
+          "name": null
+        },
+        {
+          "id": "mard:C27",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C27",
+          "displayHex": "#D3DFFA",
+          "name": null
+        },
+        {
+          "id": "mard:C28",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C28",
+          "displayHex": "#BBCFED",
+          "name": null
+        },
+        {
+          "id": "mard:C29",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "C",
+          "code": "C29",
+          "displayHex": "#34488E",
+          "name": null
+        },
+        {
+          "id": "mard:D1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D1",
+          "displayHex": "#AEB4F2",
+          "name": null
+        },
+        {
+          "id": "mard:D2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D2",
+          "displayHex": "#858EDD",
+          "name": null
+        },
+        {
+          "id": "mard:D3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D3",
+          "displayHex": "#2F54AF",
+          "name": null
+        },
+        {
+          "id": "mard:D4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D4",
+          "displayHex": "#182A84",
+          "name": null
+        },
+        {
+          "id": "mard:D5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D5",
+          "displayHex": "#B843C5",
+          "name": null
+        },
+        {
+          "id": "mard:D6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D6",
+          "displayHex": "#AC7BDE",
+          "name": null
+        },
+        {
+          "id": "mard:D7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D7",
+          "displayHex": "#8854B3",
+          "name": null
+        },
+        {
+          "id": "mard:D8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D8",
+          "displayHex": "#E2D3FF",
+          "name": null
+        },
+        {
+          "id": "mard:D9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D9",
+          "displayHex": "#D5B9F8",
+          "name": null
+        },
+        {
+          "id": "mard:D10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D10",
+          "displayHex": "#361851",
+          "name": null
+        },
+        {
+          "id": "mard:D11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D11",
+          "displayHex": "#B9BAE1",
+          "name": null
+        },
+        {
+          "id": "mard:D12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D12",
+          "displayHex": "#DE9AD4",
+          "name": null
+        },
+        {
+          "id": "mard:D13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D13",
+          "displayHex": "#B90095",
+          "name": null
+        },
+        {
+          "id": "mard:D14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D14",
+          "displayHex": "#8B279B",
+          "name": null
+        },
+        {
+          "id": "mard:D15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D15",
+          "displayHex": "#2F1F90",
+          "name": null
+        },
+        {
+          "id": "mard:D16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D16",
+          "displayHex": "#E3E1EE",
+          "name": null
+        },
+        {
+          "id": "mard:D17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D17",
+          "displayHex": "#C4D4F6",
+          "name": null
+        },
+        {
+          "id": "mard:D18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D18",
+          "displayHex": "#A45EC7",
+          "name": null
+        },
+        {
+          "id": "mard:D19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D19",
+          "displayHex": "#D8C3D7",
+          "name": null
+        },
+        {
+          "id": "mard:D20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D20",
+          "displayHex": "#9C32B2",
+          "name": null
+        },
+        {
+          "id": "mard:D21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D21",
+          "displayHex": "#9A009B",
+          "name": null
+        },
+        {
+          "id": "mard:D22",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D22",
+          "displayHex": "#333A95",
+          "name": null
+        },
+        {
+          "id": "mard:D23",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D23",
+          "displayHex": "#EBDAFC",
+          "name": null
+        },
+        {
+          "id": "mard:D24",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D24",
+          "displayHex": "#7786E5",
+          "name": null
+        },
+        {
+          "id": "mard:D25",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D25",
+          "displayHex": "#494FC7",
+          "name": null
+        },
+        {
+          "id": "mard:D26",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "D",
+          "code": "D26",
+          "displayHex": "#DFC2F8",
+          "name": null
+        },
+        {
+          "id": "mard:E1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E1",
+          "displayHex": "#FDD3CC",
+          "name": null
+        },
+        {
+          "id": "mard:E2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E2",
+          "displayHex": "#FEC0DF",
+          "name": null
+        },
+        {
+          "id": "mard:E3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E3",
+          "displayHex": "#FFB7E7",
+          "name": null
+        },
+        {
+          "id": "mard:E4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E4",
+          "displayHex": "#E8649E",
+          "name": null
+        },
+        {
+          "id": "mard:E5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E5",
+          "displayHex": "#F551A2",
+          "name": null
+        },
+        {
+          "id": "mard:E6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E6",
+          "displayHex": "#F13D74",
+          "name": null
+        },
+        {
+          "id": "mard:E7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E7",
+          "displayHex": "#C63478",
+          "name": null
+        },
+        {
+          "id": "mard:E8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E8",
+          "displayHex": "#FFDBE9",
+          "name": null
+        },
+        {
+          "id": "mard:E9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E9",
+          "displayHex": "#E970CC",
+          "name": null
+        },
+        {
+          "id": "mard:E10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E10",
+          "displayHex": "#D33793",
+          "name": null
+        },
+        {
+          "id": "mard:E11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E11",
+          "displayHex": "#FCDDD2",
+          "name": null
+        },
+        {
+          "id": "mard:E12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E12",
+          "displayHex": "#F78FC3",
+          "name": null
+        },
+        {
+          "id": "mard:E13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E13",
+          "displayHex": "#B5006D",
+          "name": null
+        },
+        {
+          "id": "mard:E14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E14",
+          "displayHex": "#FFD1BA",
+          "name": null
+        },
+        {
+          "id": "mard:E15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E15",
+          "displayHex": "#F8C7C9",
+          "name": null
+        },
+        {
+          "id": "mard:E16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E16",
+          "displayHex": "#FFF3EB",
+          "name": null
+        },
+        {
+          "id": "mard:E17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E17",
+          "displayHex": "#FFE2EA",
+          "name": null
+        },
+        {
+          "id": "mard:E18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E18",
+          "displayHex": "#FFC7DB",
+          "name": null
+        },
+        {
+          "id": "mard:E19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E19",
+          "displayHex": "#FEBAD5",
+          "name": null
+        },
+        {
+          "id": "mard:E20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E20",
+          "displayHex": "#D8C7D1",
+          "name": null
+        },
+        {
+          "id": "mard:E21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E21",
+          "displayHex": "#BD9DA1",
+          "name": null
+        },
+        {
+          "id": "mard:E22",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E22",
+          "displayHex": "#B785A1",
+          "name": null
+        },
+        {
+          "id": "mard:E23",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E23",
+          "displayHex": "#937A8D",
+          "name": null
+        },
+        {
+          "id": "mard:E24",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "E",
+          "code": "E24",
+          "displayHex": "#E1BCE8",
+          "name": null
+        },
+        {
+          "id": "mard:F1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F1",
+          "displayHex": "#FD957B",
+          "name": null
+        },
+        {
+          "id": "mard:F2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F2",
+          "displayHex": "#FC3D46",
+          "name": null
+        },
+        {
+          "id": "mard:F3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F3",
+          "displayHex": "#F74941",
+          "name": null
+        },
+        {
+          "id": "mard:F4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F4",
+          "displayHex": "#FC283C",
+          "name": null
+        },
+        {
+          "id": "mard:F5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F5",
+          "displayHex": "#E7002F",
+          "name": null
+        },
+        {
+          "id": "mard:F6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F6",
+          "displayHex": "#943630",
+          "name": null
+        },
+        {
+          "id": "mard:F7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F7",
+          "displayHex": "#971937",
+          "name": null
+        },
+        {
+          "id": "mard:F8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F8",
+          "displayHex": "#BC0028",
+          "name": null
+        },
+        {
+          "id": "mard:F9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F9",
+          "displayHex": "#E2677A",
+          "name": null
+        },
+        {
+          "id": "mard:F10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F10",
+          "displayHex": "#8A4526",
+          "name": null
+        },
+        {
+          "id": "mard:F11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F11",
+          "displayHex": "#5A2121",
+          "name": null
+        },
+        {
+          "id": "mard:F12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F12",
+          "displayHex": "#FD4E6A",
+          "name": null
+        },
+        {
+          "id": "mard:F13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F13",
+          "displayHex": "#F35744",
+          "name": null
+        },
+        {
+          "id": "mard:F14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F14",
+          "displayHex": "#FFA9AD",
+          "name": null
+        },
+        {
+          "id": "mard:F15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F15",
+          "displayHex": "#D30022",
+          "name": null
+        },
+        {
+          "id": "mard:F16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F16",
+          "displayHex": "#FEC2A6",
+          "name": null
+        },
+        {
+          "id": "mard:F17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F17",
+          "displayHex": "#E69C79",
+          "name": null
+        },
+        {
+          "id": "mard:F18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F18",
+          "displayHex": "#D37C46",
+          "name": null
+        },
+        {
+          "id": "mard:F19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F19",
+          "displayHex": "#C1444A",
+          "name": null
+        },
+        {
+          "id": "mard:F20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F20",
+          "displayHex": "#CD9391",
+          "name": null
+        },
+        {
+          "id": "mard:F21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F21",
+          "displayHex": "#F7B4C6",
+          "name": null
+        },
+        {
+          "id": "mard:F22",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F22",
+          "displayHex": "#FDC0D0",
+          "name": null
+        },
+        {
+          "id": "mard:F23",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F23",
+          "displayHex": "#F67E66",
+          "name": null
+        },
+        {
+          "id": "mard:F24",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F24",
+          "displayHex": "#E698AA",
+          "name": null
+        },
+        {
+          "id": "mard:F25",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "F",
+          "code": "F25",
+          "displayHex": "#E54B4F",
+          "name": null
+        },
+        {
+          "id": "mard:G1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G1",
+          "displayHex": "#FFE2CE",
+          "name": null
+        },
+        {
+          "id": "mard:G2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G2",
+          "displayHex": "#FFC4AA",
+          "name": null
+        },
+        {
+          "id": "mard:G3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G3",
+          "displayHex": "#F4C3A5",
+          "name": null
+        },
+        {
+          "id": "mard:G4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G4",
+          "displayHex": "#E1B383",
+          "name": null
+        },
+        {
+          "id": "mard:G5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G5",
+          "displayHex": "#EDB045",
+          "name": null
+        },
+        {
+          "id": "mard:G6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G6",
+          "displayHex": "#E99C17",
+          "name": null
+        },
+        {
+          "id": "mard:G7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G7",
+          "displayHex": "#9D5B3E",
+          "name": null
+        },
+        {
+          "id": "mard:G8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G8",
+          "displayHex": "#753832",
+          "name": null
+        },
+        {
+          "id": "mard:G9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G9",
+          "displayHex": "#E6B483",
+          "name": null
+        },
+        {
+          "id": "mard:G10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G10",
+          "displayHex": "#D98C39",
+          "name": null
+        },
+        {
+          "id": "mard:G11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G11",
+          "displayHex": "#E0C593",
+          "name": null
+        },
+        {
+          "id": "mard:G12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G12",
+          "displayHex": "#FFC890",
+          "name": null
+        },
+        {
+          "id": "mard:G13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G13",
+          "displayHex": "#B7714A",
+          "name": null
+        },
+        {
+          "id": "mard:G14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G14",
+          "displayHex": "#8D614C",
+          "name": null
+        },
+        {
+          "id": "mard:G15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G15",
+          "displayHex": "#FCF9E0",
+          "name": null
+        },
+        {
+          "id": "mard:G16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G16",
+          "displayHex": "#F2D9BA",
+          "name": null
+        },
+        {
+          "id": "mard:G17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G17",
+          "displayHex": "#78524B",
+          "name": null
+        },
+        {
+          "id": "mard:G18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G18",
+          "displayHex": "#FFE4CC",
+          "name": null
+        },
+        {
+          "id": "mard:G19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G19",
+          "displayHex": "#E07935",
+          "name": null
+        },
+        {
+          "id": "mard:G20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G20",
+          "displayHex": "#A94023",
+          "name": null
+        },
+        {
+          "id": "mard:G21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "G",
+          "code": "G21",
+          "displayHex": "#B88558",
+          "name": null
+        },
+        {
+          "id": "mard:H1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H1",
+          "displayHex": "#FDFBFF",
+          "name": null
+        },
+        {
+          "id": "mard:H2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H2",
+          "displayHex": "#FEFFFF",
+          "name": null
+        },
+        {
+          "id": "mard:H3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H3",
+          "displayHex": "#B6B1BA",
+          "name": null
+        },
+        {
+          "id": "mard:H4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H4",
+          "displayHex": "#89858C",
+          "name": null
+        },
+        {
+          "id": "mard:H5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H5",
+          "displayHex": "#48464E",
+          "name": null
+        },
+        {
+          "id": "mard:H6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H6",
+          "displayHex": "#2F2B2F",
+          "name": null
+        },
+        {
+          "id": "mard:H7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H7",
+          "displayHex": "#000000",
+          "name": null
+        },
+        {
+          "id": "mard:H8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H8",
+          "displayHex": "#E7D6DB",
+          "name": null
+        },
+        {
+          "id": "mard:H9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H9",
+          "displayHex": "#EDEDED",
+          "name": null
+        },
+        {
+          "id": "mard:H10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H10",
+          "displayHex": "#EEE9EA",
+          "name": null
+        },
+        {
+          "id": "mard:H11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H11",
+          "displayHex": "#CECDD5",
+          "name": null
+        },
+        {
+          "id": "mard:H12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H12",
+          "displayHex": "#FFF5ED",
+          "name": null
+        },
+        {
+          "id": "mard:H13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H13",
+          "displayHex": "#F5ECD2",
+          "name": null
+        },
+        {
+          "id": "mard:H14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H14",
+          "displayHex": "#CFD7D3",
+          "name": null
+        },
+        {
+          "id": "mard:H15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H15",
+          "displayHex": "#98A6A8",
+          "name": null
+        },
+        {
+          "id": "mard:H16",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H16",
+          "displayHex": "#1D1414",
+          "name": null
+        },
+        {
+          "id": "mard:H17",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H17",
+          "displayHex": "#F1EDED",
+          "name": null
+        },
+        {
+          "id": "mard:H18",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H18",
+          "displayHex": "#FFFDF0",
+          "name": null
+        },
+        {
+          "id": "mard:H19",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H19",
+          "displayHex": "#F6EFE2",
+          "name": null
+        },
+        {
+          "id": "mard:H20",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H20",
+          "displayHex": "#949FA3",
+          "name": null
+        },
+        {
+          "id": "mard:H21",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H21",
+          "displayHex": "#FFFBE1",
+          "name": null
+        },
+        {
+          "id": "mard:H22",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H22",
+          "displayHex": "#CACAD4",
+          "name": null
+        },
+        {
+          "id": "mard:H23",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "H",
+          "code": "H23",
+          "displayHex": "#9A9D94",
+          "name": null
+        },
+        {
+          "id": "mard:M1",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M1",
+          "displayHex": "#BCC6B8",
+          "name": null
+        },
+        {
+          "id": "mard:M2",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M2",
+          "displayHex": "#8AA386",
+          "name": null
+        },
+        {
+          "id": "mard:M3",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M3",
+          "displayHex": "#697D80",
+          "name": null
+        },
+        {
+          "id": "mard:M4",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M4",
+          "displayHex": "#E3D2BC",
+          "name": null
+        },
+        {
+          "id": "mard:M5",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M5",
+          "displayHex": "#D0CCAA",
+          "name": null
+        },
+        {
+          "id": "mard:M6",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M6",
+          "displayHex": "#B0A782",
+          "name": null
+        },
+        {
+          "id": "mard:M7",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M7",
+          "displayHex": "#B4A497",
+          "name": null
+        },
+        {
+          "id": "mard:M8",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M8",
+          "displayHex": "#B38281",
+          "name": null
+        },
+        {
+          "id": "mard:M9",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M9",
+          "displayHex": "#A58767",
+          "name": null
+        },
+        {
+          "id": "mard:M10",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M10",
+          "displayHex": "#C5B2BC",
+          "name": null
+        },
+        {
+          "id": "mard:M11",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M11",
+          "displayHex": "#9F7594",
+          "name": null
+        },
+        {
+          "id": "mard:M12",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M12",
+          "displayHex": "#644749",
+          "name": null
+        },
+        {
+          "id": "mard:M13",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M13",
+          "displayHex": "#D19066",
+          "name": null
+        },
+        {
+          "id": "mard:M14",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M14",
+          "displayHex": "#C77362",
+          "name": null
+        },
+        {
+          "id": "mard:M15",
+          "source": "owner-seed",
+          "version": "2026-07-24",
+          "paletteId": "mard",
+          "series": "M",
+          "code": "M15",
+          "displayHex": "#757D78",
+          "name": null
+        }
+      ]
+    }
+  ]
+}
