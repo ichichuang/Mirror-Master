@@ -328,6 +328,42 @@ def test_upload_byte_limit_is_enforced(
     )
 
 
+def test_vercel_multipart_request_limit_is_enforced(
+    client: TestClient,
+    generated_rgba_image: Image.Image,
+    png_bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_bytes = png_bytes(generated_rgba_image)
+    contract = generated_contract(image_bytes)
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setattr(limits, "VERCEL_MAX_MULTIPART_REQUEST_BYTES", 1)
+
+    response = post_mirror(client, image_bytes, contract)
+
+    assert_structured_chinese_error(
+        response, "VERCEL_MULTIPART_REQUEST_TOO_LARGE", expected_status=413
+    )
+
+
+def test_vercel_png_response_limit_is_enforced(
+    client: TestClient,
+    generated_rgba_image: Image.Image,
+    png_bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_bytes = png_bytes(generated_rgba_image)
+    contract = generated_contract(image_bytes)
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setattr(limits, "VERCEL_MAX_PNG_RESPONSE_BYTES", 1)
+
+    response = post_mirror(client, image_bytes, contract)
+
+    assert_structured_chinese_error(
+        response, "VERCEL_PNG_RESPONSE_TOO_LARGE", expected_status=413
+    )
+
+
 def test_decoded_pixel_limit_is_enforced(
     client: TestClient,
     generated_rgba_image: Image.Image,

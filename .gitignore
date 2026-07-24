@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.vercel/
 
 # Production output
 dist/
@@ -29,3 +30,4 @@ yarn-error.log*
 .idea/
 .vscode/
 *.code-workspace
+.env*

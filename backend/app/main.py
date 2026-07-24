@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app import limits
 from app.errors import ApiError
 from app.service import create_detection_contract, create_mirror_png
 
@@ -26,6 +27,55 @@ async def add_privacy_headers(request: Request, call_next):
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.middleware("http")
+async def enforce_vercel_multipart_limit(request: Request, call_next):
+    if (
+        limits.is_vercel_runtime()
+        and request.headers.get("content-type", "").lower().startswith(
+            "multipart/form-data"
+        )
+    ):
+        content_length = request.headers.get("content-length")
+        try:
+            request_size = int(content_length) if content_length else None
+        except ValueError:
+            request_size = None
+
+        if request_size is None:
+            error = ApiError(
+                413,
+                "VERCEL_MULTIPART_CONTENT_LENGTH_REQUIRED",
+                "Vercel 部署要求 multipart 请求提供有效的 Content-Length，"
+                "以便在平台 4.5 MB 限制前拒绝请求。",
+            )
+            return JSONResponse(
+                status_code=error.status_code,
+                content=error.as_response(),
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
+        if request_size > limits.VERCEL_MAX_MULTIPART_REQUEST_BYTES:
+            error = ApiError(
+                413,
+                "VERCEL_MULTIPART_REQUEST_TOO_LARGE",
+                "Vercel 部署的 multipart 请求最多为 4 MiB；"
+                "更大的图片请使用现有 VPS/Docker 部署。",
+            )
+            return JSONResponse(
+                status_code=error.status_code,
+                content=error.as_response(),
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
+    return await call_next(request)
 
 
 @app.exception_handler(ApiError)

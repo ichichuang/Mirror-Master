@@ -88,9 +88,21 @@ async def _read_upload(upload: UploadFile) -> bytes:
         )
 
     content = bytearray()
+    max_upload_bytes = (
+        limits.VERCEL_MAX_MULTIPART_REQUEST_BYTES
+        if limits.is_vercel_runtime()
+        else limits.MAX_UPLOAD_BYTES
+    )
     while chunk := await upload.read(limits.UPLOAD_READ_CHUNK_BYTES):
         content.extend(chunk)
-        if len(content) > limits.MAX_UPLOAD_BYTES:
+        if len(content) > max_upload_bytes:
+            if limits.is_vercel_runtime():
+                raise ApiError(
+                    413,
+                    "VERCEL_MULTIPART_REQUEST_TOO_LARGE",
+                    "Vercel 部署的 multipart 请求最多为 4 MiB；"
+                    "更大的图片请使用现有 VPS/Docker 部署。",
+                )
             raise ApiError(
                 413,
                 "IMAGE_UPLOAD_TOO_LARGE",
@@ -222,6 +234,17 @@ async def create_mirror_png(
             image_bytes, upload.content_type or ""
         )
         validate_grid_contract(contract, source.size)
-        return _encode_png(mirror_cells(source, contract))
+        png_bytes = _encode_png(mirror_cells(source, contract))
+        if (
+            limits.is_vercel_runtime()
+            and len(png_bytes) > limits.VERCEL_MAX_PNG_RESPONSE_BYTES
+        ):
+            raise ApiError(
+                413,
+                "VERCEL_PNG_RESPONSE_TOO_LARGE",
+                "Vercel 部署生成的 PNG 最多为 4 MiB；"
+                "更大的图片请使用现有 VPS/Docker 部署。",
+            )
+        return png_bytes
     finally:
         await upload.close()

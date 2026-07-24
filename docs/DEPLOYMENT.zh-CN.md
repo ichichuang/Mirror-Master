@@ -71,7 +71,15 @@ Mirror Master 不是纯静态前端。浏览器负责上传、预览、选区和
 
 因此，把 `dist` 单独放到 Vercel 静态托管会得到一个无法完成识别和镜像的前端。Mirror Master 必须部署到能够运行 Python、原生图像依赖和 HTTP API 的容器服务器或等价的容器平台。这里否定的是“仅静态前端部署”，不是对某个云厂商全部产品形态的评价。
 
-### 1.2 推荐拓扑
+### 1.2 Vercel 容器 Function（单容器）
+
+Vercel 可识别仓库根目录的 `Dockerfile.vercel`，将其中的 OCI 镜像作为一个容器 Function 部署。该镜像与普通生产 `Dockerfile` 一样：Node/pnpm 阶段构建 `dist`，Python 3.12 阶段安装锁定的 FastAPI、OpenCV、NumPy 和 Pillow 依赖，最后由同一个 Uvicorn/FastAPI 进程同时提供 `/`、`/api/health`、识别和镜像接口。它不是只部署 `dist` 的静态站点。
+
+容器必须监听 `0.0.0.0:${PORT:-80}`；`Dockerfile.vercel` 已使用该启动方式，且不启用 reload 或访问日志。`vercel.json` 只关闭框架自动识别，避免把该项目当成独立 Vite 静态输出；`.vercelignore` 不上传本地环境、依赖目录、测试/夹具、截图、临时产物、密钥或 Git 元数据。
+
+**Vercel 的请求/响应限制与 VPS/Docker 不同。** 当运行环境存在 `VERCEL` 或 `VERCEL_ENV` 时，应用会在平台约 `4.5 MB` 限制之前拒绝超过 **4 MiB** 的完整 `multipart/form-data` 请求，并拒绝超过 **4 MiB** 的生成 PNG，二者均返回中文结构化 `413` 错误。客户端必须为 multipart 请求发送有效 `Content-Length`。这不是 20 MiB 合同在 Vercel 上的声明：20 MiB 上传限制仅保留给现有 VPS/Docker 部署。任何更大的图片或生成结果都必须使用现有 VPS/Docker 部署。
+
+### 1.3 推荐拓扑
 
 ```text
 浏览器
