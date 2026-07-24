@@ -1,5 +1,9 @@
 # Mirror Master 生产部署指南
 
+> [产品规范](PRODUCT_SPEC.zh-CN.md) 是唯一产品权威。本文件仅是非规范性运维说明。
+>
+> **重建暂停通知（2026-07-24）**：Vercel Git 自动部署已在仓库配置中禁用。重建验收与 owner 明确批准前不得触发任何部署；owner 需在 Vercel Dashboard 的项目 `Settings → Git` 中断开 Git 仓库，并保留项目、域名和部署历史。下文 Vercel 内容仅作历史参考。
+
 本文面向需要自行运营 Mirror Master 的管理员，说明如何在一台可运行容器的服务器上部署、启用 HTTPS、验证、升级、回滚和排障。
 
 Mirror Master 不是纯静态前端。浏览器负责上传、预览、选区和下载；Python 服务负责图片解码、网格识别、合同校验、单元镜像和 PNG 编码。图片会上传到部署者控制的 Mirror Master 服务，在内存中处理，不由应用持久化，也不会由应用发送给第三方。
