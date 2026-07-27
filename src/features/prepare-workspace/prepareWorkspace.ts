@@ -1,4 +1,6 @@
 import type { ProjectMode } from '../../domain/project';
+import type { Checkbox } from '@vaadin/checkbox';
+import type { RadioGroup } from '@vaadin/radio-group';
 import type { CropPercent } from '../crop-controls/cropControls';
 import type { ModePreference, NewPatternMode } from '../customer-flow/modeRecommendation';
 import {
@@ -328,7 +330,8 @@ export function mountPreparePresetControls(
 ): PreparePresetControlsController {
   let state = createPrepareWorkspaceState(options.initialState);
   let destroyed = false;
-  root.addEventListener('change', onChange);
+  let syncingPresetGroups = false;
+  root.addEventListener('value-changed', onPresetChange);
   root.addEventListener('input', onInput);
   render();
 
@@ -352,38 +355,39 @@ export function mountPreparePresetControls(
     destroy() {
       if (destroyed) return;
       destroyed = true;
-      root.removeEventListener('change', onChange);
+      root.removeEventListener('value-changed', onPresetChange);
       root.removeEventListener('input', onInput);
     },
   });
 
-  function onChange(event: Event): void {
-    const InputConstructor = root.ownerDocument.defaultView?.HTMLInputElement;
+  function onPresetChange(event: Event): void {
+    if (syncingPresetGroups) return;
     const target = event.target;
-    if (
-      InputConstructor === undefined ||
-      !(target instanceof InputConstructor) ||
-      !target.checked
-    ) {
+    if (!(target instanceof HTMLElement) || target.localName !== 'vaadin-radio-group') {
       return;
     }
-    if (target.name === 'pattern-size-preset') {
-      const preset = Number(target.value);
-      if (preset === 29 || preset === 48 || preset === 72) {
+    const group = target as RadioGroup;
+    if (group.matches('[data-pattern-size-preset]')) {
+      const preset = Number(group.value);
+      if (
+        (preset === 29 || preset === 48 || preset === 72) &&
+        preset !== state.patternSizePreset
+      ) {
         update({ type: 'selectPatternSize', preset });
       }
       return;
     }
-    if (target.name === 'bead-size-preset') {
+    if (group.matches('[data-bead-size-preset]')) {
       const preset =
-        target.value === 'custom'
+        group.value === 'custom'
           ? 'custom'
-          : target.value === '2.6'
+          : group.value === '2.6'
             ? 2.6
-            : target.value === '5'
+            : group.value === '5'
               ? 5
               : null;
       if (preset === null) return;
+      if (preset === state.beadSizePreset) return;
       update({ type: 'selectBeadSize', preset });
       if (preset === 'custom') {
         const details = root.querySelector<HTMLDetailsElement>('[data-professional-settings]');
@@ -391,16 +395,22 @@ export function mountPreparePresetControls(
       }
       return;
     }
-    if (target.name === 'color-count-preset') {
-      const preset = Number(target.value);
-      if (preset === 12 || preset === 24 || preset === 48) {
+    if (group.matches('[data-color-count-preset]')) {
+      const preset = Number(group.value);
+      if (
+        (preset === 12 || preset === 24 || preset === 48) &&
+        preset !== state.colorCountPreset
+      ) {
         update({ type: 'selectColorCount', preset });
       }
       return;
     }
-    if (target.name === 'processing-preset') {
-      if (target.value === 'easy' || target.value === 'gradient') {
-        update({ type: 'selectProcessing', preset: target.value });
+    if (group.matches('[data-processing-preset]')) {
+      if (
+        (group.value === 'easy' || group.value === 'gradient') &&
+        group.value !== state.processingPreset
+      ) {
+        update({ type: 'selectProcessing', preset: group.value });
       }
     }
   }
@@ -465,10 +475,12 @@ export function mountPreparePresetControls(
     setInputValue(root, '[data-bead-diameter]', state.beadDiameterMm);
     setInputValue(root, '[data-bead-pitch]', state.beadPitchMm);
     setInputValue(root, '[data-maximum-colors]', state.maximumColors);
-    checkPreset(root, 'pattern-size-preset', state.patternSizePreset);
-    checkPreset(root, 'bead-size-preset', state.beadSizePreset);
-    checkPreset(root, 'color-count-preset', state.colorCountPreset);
-    checkPreset(root, 'processing-preset', state.processingPreset);
+    syncingPresetGroups = true;
+    setPresetValue(root, '[data-pattern-size-preset]', state.patternSizePreset);
+    setPresetValue(root, '[data-bead-size-preset]', state.beadSizePreset);
+    setPresetValue(root, '[data-color-count-preset]', state.colorCountPreset);
+    setPresetValue(root, '[data-processing-preset]', state.processingPreset);
+    syncingPresetGroups = false;
     for (const element of root.querySelectorAll<HTMLElement>('[data-physical-size]')) {
       const nextText =
         `约 ${(state.physicalSizeMm.widthMm / 10).toFixed(1)} × ` +
@@ -479,14 +491,6 @@ export function mountPreparePresetControls(
     if (maximumColors) {
       maximumColors.disabled = state.availableColorCount === 0;
       maximumColors.min = state.availableColorCount === 0 ? '0' : '1';
-    }
-    const dithering = root.querySelector<HTMLButtonElement>('[data-dithering]');
-    if (dithering) {
-      dithering.dataset.value = state.dithering;
-      const label = dithering.querySelector<HTMLElement>('[data-select-label]');
-      if (label) {
-        label.textContent = state.dithering === 'none' ? '干净色块' : '细腻过渡';
-      }
     }
     const customBeadFields = root.querySelector<HTMLFieldSetElement>('[data-custom-bead-fields]');
     if (customBeadFields) {
@@ -557,14 +561,11 @@ export interface AvailableColorGridRenderer {
 }
 
 export interface AvailableColorGridRendererOptions {
-  readonly searchInput?: HTMLInputElement;
   readonly status?: HTMLElement;
-  readonly onToggle?: (colorId: string, selected: boolean) => void;
 }
 
 interface ColorChoiceNodes {
-  readonly root: HTMLLabelElement;
-  readonly input: HTMLInputElement;
+  readonly root: Checkbox;
   readonly swatch: HTMLSpanElement;
   readonly code: HTMLElement;
 }
@@ -579,34 +580,12 @@ export function createAvailableColorGridRenderer(
   options: AvailableColorGridRendererOptions = {},
 ): AvailableColorGridRenderer {
   const document = root.ownerDocument;
-  const window = document.defaultView;
   const groups = new Map<string, ColorGroupNodes>();
   const choices = new Map<string, ColorChoiceNodes>();
-  let visibleColorIds: readonly string[] = Object.freeze([]);
-  let activeColorId: string | undefined;
-  let composing = false;
-  let destroyed = false;
-  if (root.id === '') {
-    root.id = `available-color-listbox-${String(nextAvailableColorListboxId())}`;
-  }
-  root.setAttribute('role', 'listbox');
-  root.setAttribute('aria-multiselectable', 'true');
+  root.setAttribute('role', 'group');
   if (options.status) {
-    if (options.status.id === '') options.status.id = `${root.id}-status`;
     options.status.setAttribute('role', 'status');
     options.status.setAttribute('aria-live', 'polite');
-  }
-  if (options.searchInput) {
-    options.searchInput.setAttribute('role', 'combobox');
-    options.searchInput.setAttribute('aria-autocomplete', 'list');
-    options.searchInput.setAttribute('aria-expanded', 'true');
-    options.searchInput.setAttribute('aria-controls', root.id);
-    if (options.status) {
-      options.searchInput.setAttribute('aria-describedby', options.status.id);
-    }
-    options.searchInput.addEventListener('keydown', onSearchKeydown);
-    options.searchInput.addEventListener('compositionstart', onCompositionStart);
-    options.searchInput.addEventListener('compositionend', onCompositionEnd);
   }
 
   return Object.freeze({
@@ -614,7 +593,6 @@ export function createAvailableColorGridRenderer(
       const activeColorIds = new Set(input.colors.map((color: PrepareColor) => color.id));
       const normalizedQuery = input.query.trim().toLocaleLowerCase();
       const visibleBySeries = new Map<string, number>();
-      const nextVisibleIds: string[] = [];
 
       for (const color of input.colors) {
         const group = ensureGroup(color.series);
@@ -626,7 +604,6 @@ export function createAvailableColorGridRenderer(
         const visible = matchesSeries && searchable.includes(normalizedQuery);
         choice.root.hidden = !visible;
         if (visible) {
-          nextVisibleIds.push(color.id);
           visibleBySeries.set(color.series, (visibleBySeries.get(color.series) ?? 0) + 1);
         }
       }
@@ -641,23 +618,12 @@ export function createAvailableColorGridRenderer(
       }
       const visibleCount = [...visibleBySeries.values()].reduce((total, count) => total + count, 0);
       root.setAttribute('aria-label', `选择手边有的拼豆颜色，当前显示 ${String(visibleCount)} 色`);
-      visibleColorIds = Object.freeze(nextVisibleIds);
-      if (!visibleColorIds.includes(activeColorId ?? '')) {
-        activeColorId = visibleColorIds[0];
-      }
-      updateActivePresentation();
       if (options.status) {
         options.status.textContent =
           visibleCount === 0 ? '没有符合条件的颜色' : `显示 ${String(visibleCount)} 种颜色`;
       }
     },
-    destroy() {
-      if (destroyed) return;
-      destroyed = true;
-      options.searchInput?.removeEventListener('keydown', onSearchKeydown);
-      options.searchInput?.removeEventListener('compositionstart', onCompositionStart);
-      options.searchInput?.removeEventListener('compositionend', onCompositionEnd);
-    },
+    destroy() {},
   });
 
   function ensureGroup(series: string): ColorGroupNodes {
@@ -687,91 +653,32 @@ export function createAvailableColorGridRenderer(
       }
       return retained;
     }
+    const checkbox = document.createElement('vaadin-checkbox');
     const label = document.createElement('label');
-    const input = document.createElement('input');
     const swatch = document.createElement('span');
     const code = document.createElement('small');
-    label.className = 'available-color-choice';
-    label.dataset.availableColorKey = color.id;
-    label.id = `${root.id}-option-${safeDomId(color.id)}`;
-    label.setAttribute('role', 'option');
-    input.type = 'checkbox';
-    input.tabIndex = -1;
-    input.dataset.availableColorId = color.id;
+    checkbox.className = 'available-color-choice';
+    checkbox.dataset.availableColorKey = color.id;
+    checkbox.dataset.availableColorId = color.id;
+    label.className = 'available-color-choice-content';
+    label.slot = 'label';
     swatch.className = 'available-color-swatch';
     swatch.setAttribute('aria-hidden', 'true');
-    label.append(input, swatch, code);
-    group.choices.append(label);
-    const nodes = Object.freeze({ root: label, input, swatch, code });
+    label.append(swatch, code);
+    checkbox.append(label);
+    group.choices.append(checkbox);
+    const nodes = Object.freeze({ root: checkbox, swatch, code });
     choices.set(color.id, nodes);
     return nodes;
-  }
-
-  function onCompositionStart(): void {
-    composing = true;
-  }
-
-  function onCompositionEnd(): void {
-    composing = false;
-  }
-
-  function onSearchKeydown(event: KeyboardEvent): void {
-    if (composing || event.isComposing) return;
-    if (visibleColorIds.length === 0) return;
-    const currentIndex = Math.max(0, visibleColorIds.indexOf(activeColorId ?? ''));
-    if (event.key === 'ArrowDown') {
-      activeColorId = visibleColorIds[(currentIndex + 1) % visibleColorIds.length];
-    } else if (event.key === 'ArrowUp') {
-      activeColorId =
-        visibleColorIds[(currentIndex - 1 + visibleColorIds.length) % visibleColorIds.length];
-    } else if (event.key === 'Home') {
-      activeColorId = visibleColorIds[0];
-    } else if (event.key === 'End') {
-      activeColorId = visibleColorIds.at(-1);
-    } else if (event.key === 'Enter' || event.key === ' ') {
-      toggleActiveChoice();
-    } else {
-      return;
-    }
-    event.preventDefault();
-    updateActivePresentation();
-    if (event.key !== 'Enter' && event.key !== ' ') {
-      choices.get(activeColorId ?? '')?.root.scrollIntoView({ block: 'nearest' });
-    }
-  }
-
-  function toggleActiveChoice(): void {
-    if (!activeColorId) return;
-    const choice = choices.get(activeColorId);
-    if (!choice || choice.root.hidden) return;
-    choice.input.checked = !choice.input.checked;
-    choice.root.setAttribute('aria-selected', String(choice.input.checked));
-    options.onToggle?.(activeColorId, choice.input.checked);
-    const EventConstructor = window?.Event;
-    if (EventConstructor) {
-      choice.input.dispatchEvent(new EventConstructor('change', { bubbles: true }));
-    }
-  }
-
-  function updateActivePresentation(): void {
-    const active = activeColorId ? choices.get(activeColorId) : undefined;
-    if (options.searchInput && active && !active.root.hidden) {
-      options.searchInput.setAttribute('aria-activedescendant', active.root.id);
-    } else {
-      options.searchInput?.removeAttribute('aria-activedescendant');
-    }
-    for (const [colorId, choice] of choices) {
-      choice.root.dataset.active = String(colorId === activeColorId && !choice.root.hidden);
-    }
   }
 }
 
 function updateChoice(choice: ColorChoiceNodes, color: PrepareColor, selected: boolean): void {
   const label = `${color.paletteLabel} ${color.code}${color.name ? ` · ${color.name}` : ''}`;
   choice.root.title = label;
-  if (choice.input.checked !== selected) choice.input.checked = selected;
-  choice.input.setAttribute('aria-label', label);
-  choice.root.setAttribute('aria-selected', String(selected));
+  if (choice.root.checked !== selected) choice.root.checked = selected;
+  choice.root.setAttribute('aria-label', label);
+  choice.root.toggleAttribute('data-selected', selected);
   choice.swatch.style.setProperty('--swatch', color.displayHex);
   choice.code.textContent = color.code;
 }
@@ -815,24 +722,14 @@ function setInputValue(root: ParentNode, selector: string, value: number): void 
   if (input && input.value !== nextValue) input.value = nextValue;
 }
 
-function checkPreset(
+function setPresetValue(
   root: ParentNode,
-  name: string,
+  selector: string,
   value: PatternSizePreset | BeadSizePreset | ColorCountPreset | ProcessingPreset,
 ): void {
-  for (const input of root.querySelectorAll<HTMLInputElement>(`input[name="${name}"]`)) {
-    const checked = input.value === String(value);
-    if (input.checked !== checked) input.checked = checked;
+  const group = root.querySelector<RadioGroup>(selector);
+  const nextValue = String(value);
+  if (group && group.value !== nextValue) {
+    group.value = nextValue;
   }
-}
-
-let availableColorListboxSequence = 0;
-
-function nextAvailableColorListboxId(): number {
-  availableColorListboxSequence += 1;
-  return availableColorListboxSequence;
-}
-
-function safeDomId(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
 }

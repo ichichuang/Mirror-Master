@@ -2,6 +2,7 @@ import './generated/phosphor-icons.css';
 import './design/generated/tokens.css';
 import './styles/base.css';
 import './styles/page.css';
+import './styles/vaadin-theme.css';
 
 import { renderApp } from './app';
 import { brandConfig } from './brand/brand.config';
@@ -83,6 +84,10 @@ import {
   type ExportCoordinatorEvent,
 } from './features/export-completion/exportCoordinator';
 import {
+  createConfirmationDialog,
+  type ConfirmationDialogController,
+} from './features/confirmation/confirmationDialog';
+import {
   beginExport,
   closeExportCompletion,
   completeExport,
@@ -97,17 +102,9 @@ import {
   type ExportTaskId,
 } from './features/export-completion/exportState';
 import {
-  createEditorSheetSelectController,
-  type EditorSheetSelectController,
-} from './features/pattern-editor/editorSheetSelect';
-import {
-  createAvailableColorMobilePage,
-  type AvailableColorMobilePageController,
-} from './features/prepare-workspace/availableColorMobilePage';
-import {
-  createPreparationSelectController,
-  type PreparationSelectController,
-} from './features/prepare-workspace/preparationSelect';
+  createAvailableColorDialog,
+  type AvailableColorDialogController,
+} from './features/prepare-workspace/availableColorDialog';
 import {
   createAvailableColorGridRenderer,
   createLatestSourceRequest,
@@ -144,18 +141,11 @@ import {
   ProjectImportError,
 } from './features/project-import/projectImport';
 import {
-  createUiSelectPopover,
-  type UiSelectPopoverController,
-} from './features/ui-select/uiSelect';
-import {
-  createMobileStageHost,
-  type MobileStageHostController,
-} from './features/ui-select/mobileStageHost';
-import {
-  createShortChoiceController,
-  type ShortChoiceController,
-} from './features/ui-select/shortChoice';
-import type { UiSelectOption } from './features/ui-select/state';
+  createVaadinSelectController,
+  requiredVaadinElement,
+  type VaadinChoiceOption,
+  type VaadinSelectController,
+} from './features/vaadin-controls/vaadinControls';
 import {
   captureWorkspaceSurfaceFocus,
   createResponsiveWorkspaceMount,
@@ -172,13 +162,6 @@ import {
 
 type AppStage = 'upload' | 'prepare' | 'editor' | 'chart';
 type InspectorPanel = 'tools' | 'palette' | 'materials' | 'settings';
-interface SelectController {
-  readonly destroy: () => void;
-  readonly selectedId: () => string | undefined;
-  readonly setOptions: (options: readonly UiSelectOption[]) => void;
-  readonly setValue: (selectedId: string) => void;
-}
-
 interface SelectedImage {
   readonly file: File;
   readonly objectUrl: string;
@@ -218,13 +201,6 @@ document
 app.innerHTML = renderApp();
 
 const shell = required(app, '[data-app-shell]', HTMLElement);
-const appHeader = required(app, '.app-header', HTMLElement);
-const mobileStageHostElement = required(app, '[data-mobile-stage-host]', HTMLElement);
-const mobileStageHost: MobileStageHostController = createMobileStageHost(
-  mobileStageHostElement,
-  appHeader,
-);
-const mainWorkspace = required(app, '[data-app-shell] > .main-workspace', HTMLElement);
 const uploadWorkspace = required(app, '[data-upload-workspace]', HTMLElement);
 const prepareWorkspace = required(app, '[data-prepare-workspace]', HTMLElement);
 const patternWorkspace = required(app, '[data-pattern-workspace]', HTMLElement);
@@ -239,24 +215,15 @@ const appLive = required(app, '[data-app-live]', HTMLElement);
 const sessionStatus = required(app, '[data-session-status]', HTMLElement);
 const headerContext = required(app, '[data-header-context]', HTMLElement);
 const headerReplace = required(app, '[data-replace-image]', HTMLButtonElement);
-const overlayRoot = required(app, '[data-overlay-root]', HTMLElement);
-const confirmationSurface = required(app, '[data-confirmation-surface]', HTMLElement);
-const confirmationTitle = required(confirmationSurface, '[data-confirmation-title]', HTMLElement);
-const confirmationDescription = required(
-  confirmationSurface,
-  '[data-confirmation-description]',
-  HTMLElement,
+const availableColorDialog = requiredVaadinElement(
+  app,
+  '[data-available-color-dialog]',
+  'vaadin-dialog',
 );
-const confirmationStatus = required(confirmationSurface, '[data-confirmation-status]', HTMLElement);
-const confirmationSave = required(
-  confirmationSurface,
-  '[data-confirmation-save]',
-  HTMLButtonElement,
-);
-const confirmationContinue = required(
-  confirmationSurface,
-  '[data-confirmation-continue]',
-  HTMLButtonElement,
+const confirmationDialog = requiredVaadinElement(
+  app,
+  '[data-confirmation-dialog]',
+  'vaadin-confirm-dialog',
 );
 const workspaceToolRail = required(patternWorkspace, '[data-tool-rail]', HTMLElement);
 const workspaceInspector = required(patternWorkspace, '[data-workspace-inspector]', HTMLElement);
@@ -328,19 +295,17 @@ let chartAxis: 'horizontal' | 'vertical' = 'horizontal';
 let loadRevision = 0;
 let preparePresetControls: PreparePresetControlsController | null = null;
 let availableColorGridRenderer: AvailableColorGridRenderer | null = null;
-let availableColorMobilePageController: AvailableColorMobilePageController | null = null;
-let boardSelectController: ShortChoiceController | null = null;
-let paletteSelectController: ShortChoiceController | null = null;
-let availableSeriesSelectController: PreparationSelectController | null = null;
-let ditheringSelectController: ShortChoiceController | null = null;
-let editorSeriesSelectControllers: readonly SelectController[] = Object.freeze([]);
-let editorDesktopSeriesController: UiSelectPopoverController | null = null;
-let editorMobileSeriesController: EditorSheetSelectController | null = null;
+let availableColorDialogController: AvailableColorDialogController | null = null;
+let boardSelectController: VaadinSelectController | null = null;
+let paletteSelectController: VaadinSelectController | null = null;
+let availableSeriesSelectController: VaadinSelectController | null = null;
+let ditheringSelectController: VaadinSelectController | null = null;
+let editorSeriesSelectControllers: readonly VaadinSelectController[] = Object.freeze([]);
 let workspaceLayoutMode: WorkspaceLayoutMode | null = null;
 let syncingPreparePresetCrop = false;
 let confirmationRequest: ConfirmationRequest | null = null;
-let confirmationReturnFocus: HTMLElement | null = null;
 let confirmationSaving = false;
+let confirmationDialogController: ConfirmationDialogController | null = null;
 
 const exportCoordinator = createExportCoordinator({
   requestPatternExport: ({ project, format, template, signal }) =>
@@ -401,19 +366,24 @@ function applyCapabilitiesToInterface(): void {
   required(app, '[data-upload-constraints]', HTMLElement).textContent =
     `${mimeLabels}，最大 ${formatFileSize(appCapabilities.upload.maximumBytes)}`;
 
-  const taskInputs = [...app.querySelectorAll<HTMLInputElement>('input[name="customer-task"]')];
+  const taskGroup = requiredVaadinElement(app, '[data-customer-task]', 'vaadin-radio-group');
+  const taskOptions = [
+    ...taskGroup.querySelectorAll<HTMLElementTagNameMap['vaadin-radio-button']>(
+      'vaadin-radio-button',
+    ),
+  ];
   const newPatternSupported = appCapabilities.modes.some(
     (candidate) => candidate === 'photo' || candidate === 'pixelArt',
   );
-  for (const input of taskInputs) {
-    input.disabled =
-      input.value === 'newPattern'
+  for (const option of taskOptions) {
+    option.disabled =
+      option.value === 'newPattern'
         ? !newPatternSupported
         : !appCapabilities.modes.includes('existingChart');
   }
-  const selectedTask = taskInputs.find((input) => input.value === customerTask);
+  const selectedTask = taskOptions.find((option) => option.value === customerTask);
   if (!selectedTask || selectedTask.disabled) {
-    const fallbackTask = taskInputs.find((input) => !input.disabled);
+    const fallbackTask = taskOptions.find((option) => !option.disabled);
     if (fallbackTask && isCustomerTask(fallbackTask.value)) {
       customerTask = fallbackTask.value;
       prepareState = null;
@@ -477,10 +447,17 @@ function applyCapabilitiesToInterface(): void {
   customBoardFields.hidden = !customBoardSelected;
   customBoardFields.disabled = !customBoardSelected;
 
-  for (const input of prepareWorkspace.querySelectorAll<HTMLInputElement>(
-    'input[name="sampling"]',
-  )) {
-    input.disabled = !appCapabilities.sampling.includes(input.value as 'average' | 'nearest');
+  const samplingGroup = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-sampling]',
+    'vaadin-radio-group',
+  );
+  for (const option of samplingGroup.querySelectorAll<
+    HTMLElementTagNameMap['vaadin-radio-button']
+  >('vaadin-radio-button')) {
+    option.disabled = !appCapabilities.sampling.includes(
+      option.value as 'average' | 'nearest',
+    );
   }
   if (!appCapabilities.sampling.includes(samplingSelection.value)) {
     samplingSelection = createAutomaticSampling(
@@ -519,11 +496,10 @@ function applyCapabilitiesToInterface(): void {
       format as 'png' | 'pdf' | 'csv' | 'projectJson',
     );
   }
-  for (const input of queryPatternWorkspaceAll('[data-export-template]', HTMLInputElement)) {
-    input.disabled = !appCapabilities.pngTemplates.includes(input.value as ExportPngTemplate);
-    if (input.checked && input.disabled) {
-      input.checked = false;
-    }
+  for (const option of queryPatternWorkspaceElements<
+    HTMLElementTagNameMap['vaadin-radio-button']
+  >('[data-export-template]', 'vaadin-radio-button')) {
+    option.disabled = !appCapabilities.pngTemplates.includes(option.value as ExportPngTemplate);
   }
   const supportedTemplate = appCapabilities.pngTemplates.includes('annotated')
     ? 'annotated'
@@ -532,15 +508,12 @@ function applyCapabilitiesToInterface(): void {
     exportCompletionState = setExportPngTemplate(exportCompletionState, supportedTemplate);
   }
   for (const panel of queryPatternWorkspaceAll('[data-export-completion]', HTMLElement)) {
-    const checkedTemplate = panel.querySelector<HTMLInputElement>('[data-export-template]:checked');
-    if (!checkedTemplate) {
-      const fallbackTemplate = panel.querySelector<HTMLInputElement>(
-        `[data-export-template="${supportedTemplate}"]`,
-      );
-      if (fallbackTemplate) {
-        fallbackTemplate.checked = true;
-      }
-    }
+    const group = requiredVaadinElement(
+      panel,
+      '[data-export-template-options]',
+      'vaadin-radio-group',
+    );
+    group.value = exportCompletionState.pngTemplate;
   }
   syncExportCompletionUi();
   for (const button of chartWorkspace.querySelectorAll<HTMLButtonElement>('[data-chart-axis]')) {
@@ -554,19 +527,18 @@ function applyCapabilitiesToInterface(): void {
 }
 
 function setupUpload(): void {
-  for (const input of app.querySelectorAll<HTMLInputElement>('input[name="customer-task"]')) {
-    input.addEventListener('change', () => {
-      if (input.checked && isCustomerTask(input.value)) {
-        customerTask = input.value;
-        recommendationRequests.cancel();
-        prepareState = null;
-        mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
-        samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
-        syncUploadPrepareControls(app, currentUploadPrepareFlow());
-        syncSamplingControls(prepareWorkspace, samplingSelection);
-      }
-    });
-  }
+  const taskGroup = requiredVaadinElement(app, '[data-customer-task]', 'vaadin-radio-group');
+  taskGroup.addEventListener('value-changed', () => {
+    const selectedTask = taskGroup.value ?? '';
+    if (!isCustomerTask(selectedTask) || selectedTask === customerTask) return;
+    customerTask = selectedTask;
+    recommendationRequests.cancel();
+    prepareState = null;
+    mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
+    samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
+    syncUploadPrepareControls(app, currentUploadPrepareFlow());
+    syncSamplingControls(prepareWorkspace, samplingSelection);
+  });
 
   fileInput.addEventListener('change', () => {
     void acceptFiles(fileInput.files ? [...fileInput.files] : []);
@@ -829,8 +801,16 @@ function setupPrepare(): void {
   const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
   const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
   const aspectButton = required(prepareWorkspace, '[data-aspect-lock]', HTMLButtonElement);
-  const boardPreset = required(prepareWorkspace, '[data-board-preset]', HTMLFieldSetElement);
-  const paletteSelect = required(prepareWorkspace, '[data-palette-id]', HTMLFieldSetElement);
+  const boardPreset = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-board-preset]',
+    'vaadin-select',
+  );
+  const paletteSelect = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-palette-id]',
+    'vaadin-select',
+  );
   const maximumColors = required(prepareWorkspace, '[data-maximum-colors]', HTMLInputElement);
   const alphaThreshold = required(prepareWorkspace, '[data-alpha-threshold]', HTMLInputElement);
   const beadDiameter = required(prepareWorkspace, '[data-bead-diameter]', HTMLInputElement);
@@ -846,29 +826,29 @@ function setupPrepare(): void {
     '[data-custom-board-columns]',
     HTMLInputElement,
   );
-  const selectAllColors = required(prepareWorkspace, '[data-select-all-colors]', HTMLButtonElement);
-  const clearAllColors = required(prepareWorkspace, '[data-clear-all-colors]', HTMLButtonElement);
-  const availableColorGrid = required(prepareWorkspace, '[data-available-color-grid]', HTMLElement);
-  const availableColorSearch = required(
-    prepareWorkspace,
-    '[data-available-color-search]',
-    HTMLInputElement,
-  );
-  const availableColorSeries = required(
-    prepareWorkspace,
-    '[data-available-color-series]',
-    HTMLButtonElement,
-  );
-  const openAvailableColors = required(
+  const openAvailableColors = requiredVaadinElement(
     prepareWorkspace,
     '[data-open-available-colors]',
-    HTMLButtonElement,
+    'vaadin-button',
   );
-  const availableColorFilter = required(
+  const availableColorTemplate = required(
     prepareWorkspace,
-    '[data-available-color-filter]',
-    HTMLElement,
+    '[data-available-color-dialog-template]',
+    HTMLTemplateElement,
   );
+  availableColorDialogController = createAvailableColorDialog({
+    dialog: availableColorDialog,
+    template: availableColorTemplate,
+    trigger: openAvailableColors,
+  });
+  const {
+    selectAll: selectAllColors,
+    clearAll: clearAllColors,
+    grid: availableColorGrid,
+    search: availableColorSearch,
+    series: availableColorSeries,
+    status: availableColorStatus,
+  } = availableColorDialogController;
   const generateButton = required(prepareWorkspace, '[data-generate-pattern]', HTMLButtonElement);
   const returnEditorButton = required(prepareWorkspace, '[data-return-editor]', HTMLButtonElement);
   const cropFrame = required(prepareWorkspace, '[data-crop-frame]', HTMLElement);
@@ -1000,18 +980,23 @@ function setupPrepare(): void {
     announce('已清除颜色选择；生成前请至少选择一种颜色。');
   });
   availableColorGrid.addEventListener('change', (event) => {
-    const input = event.target;
-    if (!(input instanceof HTMLInputElement) || !input.dataset.availableColorId) {
+    const target = event.target;
+    if (
+      !(target instanceof HTMLElement) ||
+      target.localName !== 'vaadin-checkbox' ||
+      !target.dataset.availableColorId
+    ) {
       return;
     }
-    if (input.checked) {
-      availableColorIds.add(input.dataset.availableColorId);
+    const checkbox = target as HTMLElementTagNameMap['vaadin-checkbox'];
+    if (checkbox.checked) {
+      availableColorIds.add(checkbox.dataset.availableColorId ?? '');
     } else if (availableColorIds.size === 1) {
-      input.checked = true;
+      checkbox.checked = true;
       announce('至少保留一种颜色。');
       return;
     } else {
-      availableColorIds.delete(input.dataset.availableColorId);
+      availableColorIds.delete(checkbox.dataset.availableColorId ?? '');
     }
     maximumColors.max = String(availableColorIds.size);
     preparePresetControls?.setAvailableColorCount(availableColorIds.size);
@@ -1119,17 +1104,10 @@ function setupPrepare(): void {
   }
 
   availableColorGridRenderer = createAvailableColorGridRenderer(availableColorGrid, {
-    searchInput: availableColorSearch,
-    status: required(prepareWorkspace, '[data-available-color-filter-status]', HTMLElement),
+    status: availableColorStatus,
   });
-  availableColorMobilePageController = createAvailableColorMobilePage({
-    mobileStageHost,
-    content: availableColorFilter,
-    trigger: openAvailableColors,
-    searchInput: availableColorSearch,
-  });
-  boardSelectController = createShortChoiceController({
-    root: boardPreset,
+  boardSelectController = createVaadinSelectController({
+    element: boardPreset,
     options: boardSelectOptions(),
     selectedId: selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare'),
     onChange() {
@@ -1137,20 +1115,16 @@ function setupPrepare(): void {
       updatePrepareSummaries();
     },
   });
-  paletteSelectController = createShortChoiceController({
-    root: paletteSelect,
+  paletteSelectController = createVaadinSelectController({
+    element: paletteSelect,
     options: paletteSelectOptions(),
     selectedId: selectValue(prepareWorkspace, '[data-palette-id]', 'mard'),
     onChange(selectedId) {
       applyPreparePalette(selectedId);
     },
   });
-  availableSeriesSelectController = createPreparationSelectController({
-    trigger: availableColorSeries,
-    overlayRoot,
-    mobileStageHost,
-    id: 'prepare-color-series',
-    title: '筛选颜色系列',
+  availableSeriesSelectController = createVaadinSelectController({
+    element: availableColorSeries,
     options: [{ id: '', label: '全部系列' }],
     selectedId: '',
     onChange(selectedId) {
@@ -1158,9 +1132,13 @@ function setupPrepare(): void {
       renderAvailableColorFilter();
     },
   });
-  const ditheringChoices = required(prepareWorkspace, '[data-dithering]', HTMLFieldSetElement);
-  ditheringSelectController = createShortChoiceController({
-    root: ditheringChoices,
+  const ditheringChoices = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-dithering]',
+    'vaadin-select',
+  );
+  ditheringSelectController = createVaadinSelectController({
+    element: ditheringChoices,
     options: ditheringSelectOptions(),
     selectedId: selectValue(prepareWorkspace, '[data-dithering]', 'none'),
     onChange(selectedId) {
@@ -1183,33 +1161,39 @@ function setupPrepare(): void {
     },
     onChange() {
       if (!syncingPreparePresetCrop) {
-        ditheringSelectController?.setValue(
-          selectValue(prepareWorkspace, '[data-dithering]', 'none'),
-        );
+        ditheringSelectController?.setValue(preparePresetControls?.getState().dithering ?? 'none');
         updatePrepareSummaries();
       }
     },
   });
-  for (const input of prepareWorkspace.querySelectorAll<HTMLInputElement>(
-    'input[name="mode-preference"]',
-  )) {
-    input.addEventListener('change', () => {
-      if (input.checked && isModePreference(input.value) && prepareState?.task === 'newPattern') {
-        prepareState = setModePreference(prepareState, input.value);
-        applyPrepareModeState();
-      }
-    });
-  }
-  for (const input of prepareWorkspace.querySelectorAll<HTMLInputElement>(
-    'input[name="sampling"]',
-  )) {
-    input.addEventListener('change', () => {
-      if (input.checked && isSamplingValue(input.value)) {
-        samplingSelection = chooseSampling(samplingSelection, input.value, 'user');
-        syncSamplingControls(prepareWorkspace, samplingSelection);
-      }
-    });
-  }
+  const modePreferenceGroup = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-mode-preference]',
+    'vaadin-radio-group',
+  );
+  modePreferenceGroup.addEventListener('value-changed', () => {
+    const preference = modePreferenceGroup.value ?? '';
+    if (
+      !isModePreference(preference) ||
+      preference === prepareState?.preference ||
+      prepareState?.task !== 'newPattern'
+    ) {
+      return;
+    }
+    prepareState = setModePreference(prepareState, preference);
+    applyPrepareModeState();
+  });
+  const samplingControl = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-sampling]',
+    'vaadin-radio-group',
+  );
+  samplingControl.addEventListener('value-changed', () => {
+    const value = samplingControl.value ?? '';
+    if (!isSamplingValue(value) || value === samplingSelection.value) return;
+    samplingSelection = chooseSampling(samplingSelection, value, 'user');
+    syncSamplingControls(prepareWorkspace, samplingSelection);
+  });
   updateCustomBoardVisibility();
   initializePrepareColorSeries();
   syncAlphaThresholdCopy();
@@ -1241,7 +1225,7 @@ function setupPrepare(): void {
   }
 
   function updateCustomBoardVisibility(): void {
-    const isCustom = boardPreset.dataset.value === 'custom';
+    const isCustom = boardPreset.value === 'custom';
     customBoardFields.hidden = !isCustom;
     customBoardFields.disabled = !isCustom;
   }
@@ -1264,7 +1248,7 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
   if (!selectedImage) {
     return;
   }
-  availableColorMobilePageController?.close();
+  availableColorDialogController?.close();
   showStage('prepare');
   const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
   const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
@@ -1527,12 +1511,22 @@ function initializePrepareColorSeries(): void {
   ];
   availableSeriesSelectController?.setOptions(options);
   availableSeriesSelectController?.setValue(prepareColorSeries);
-  required(app, '[data-available-color-search]', HTMLInputElement).value = prepareColorQuery;
+  if (
+    availableColorDialogController &&
+    availableColorDialogController.search.value !== prepareColorQuery
+  ) {
+    availableColorDialogController.search.value = prepareColorQuery;
+  }
 }
 
 function updateAvailableColorSummary(): void {
-  required(app, '[data-available-color-summary]', HTMLElement).textContent =
-    availableColorIds.size === 0 ? '尚未选择颜色' : `已选择 ${String(availableColorIds.size)} 色`;
+  const summary = availableColorDialogController?.content.querySelector<HTMLElement>(
+    '[data-available-color-summary]',
+  );
+  if (summary) {
+    summary.textContent =
+      availableColorIds.size === 0 ? '尚未选择颜色' : `已选择 ${String(availableColorIds.size)} 色`;
+  }
 }
 
 async function startPatternGeneration(replacementConfirmed = false): Promise<void> {
@@ -1822,25 +1816,34 @@ function setupPatternWorkspace(): void {
   });
   patternWorkspace.addEventListener('input', (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLInputElement)) {
+    if (!(target instanceof HTMLElement)) {
       return;
     }
-    if (target.matches('[data-color-search]')) {
-      paletteQuery = target.value;
-      syncPaletteControls(target);
-      applyPaletteFilters();
-      return;
-    }
-    if (target.matches('[data-color-filter]') && target.checked) {
-      paletteScope = target.value === 'used' || target.value === 'recent' ? target.value : 'all';
-      syncPaletteControls(target);
+    if (target.localName === 'vaadin-text-field' && target.matches('[data-color-search]')) {
+      const search = target as HTMLElementTagNameMap['vaadin-text-field'];
+      paletteQuery = search.value;
+      syncPaletteControls(search);
       applyPaletteFilters();
     }
   });
-  patternWorkspace.addEventListener('change', (event) => {
+  patternWorkspace.addEventListener('value-changed', (event) => {
     const target = event.target;
-    if (target instanceof HTMLInputElement && target.matches('[data-export-template]')) {
-      const template = target.value === 'pure' ? 'pure' : 'annotated';
+    if (!(target instanceof HTMLElement) || target.localName !== 'vaadin-radio-group') {
+      return;
+    }
+    const group = target as HTMLElementTagNameMap['vaadin-radio-group'];
+    if (group.matches('[data-color-filter]')) {
+      const nextScope =
+        group.value === 'used' || group.value === 'recent' ? group.value : 'all';
+      if (nextScope === paletteScope) return;
+      paletteScope = nextScope;
+      syncPaletteControls(group);
+      applyPaletteFilters();
+      return;
+    }
+    if (group.matches('[data-export-template-options]')) {
+      const template = group.value === 'pure' ? 'pure' : 'annotated';
+      if (template === exportCompletionState.pngTemplate) return;
       exportCompletionState = setExportPngTemplate(exportCompletionState, template);
       syncExportCompletionUi();
     }
@@ -2001,37 +2004,20 @@ function setupPatternWorkspace(): void {
     applySheetState(motion.stableState);
   });
 
-  const seriesTriggers = queryPatternWorkspaceAll('[data-color-series-filter]', HTMLButtonElement);
-  const desktopSeriesTrigger = seriesTriggers.find(
-    (trigger) => trigger.closest('[data-palette-controls="desktop"]') !== null,
+  const seriesSelects = queryPatternWorkspaceElements<HTMLElementTagNameMap['vaadin-select']>(
+    '[data-color-series-filter]',
+    'vaadin-select',
   );
-  const mobileSeriesTrigger = seriesTriggers.find(
-    (trigger) => trigger.closest('[data-palette-controls="mobile"]') !== null,
-  );
-  const controllers: SelectController[] = [];
-  if (desktopSeriesTrigger) {
-    editorDesktopSeriesController = createUiSelectPopover({
-      trigger: desktopSeriesTrigger,
-      overlayRoot,
-      id: 'editor-series-desktop',
-      options: [{ id: '', label: '全部系列' }],
-      selectedId: '',
-      onChange: selectEditorSeries,
-    });
-    controllers.push(editorDesktopSeriesController);
-  }
-  if (mobileSeriesTrigger) {
-    editorMobileSeriesController = createEditorSheetSelectController({
-      sheet: workspaceSheet,
-      content: mobileSheetContent,
-      trigger: mobileSeriesTrigger,
-      id: 'editor-series-mobile',
-      title: '筛选颜色系列',
-      options: [{ id: '', label: '全部系列' }],
-      selectedId: '',
-      onChange: selectEditorSeries,
-    });
-    controllers.push(editorMobileSeriesController);
+  const controllers: VaadinSelectController[] = [];
+  for (const select of seriesSelects) {
+    controllers.push(
+      createVaadinSelectController({
+        element: select,
+        options: [{ id: '', label: '全部系列' }],
+        selectedId: '',
+        onChange: selectEditorSeries,
+      }),
+    );
   }
   editorSeriesSelectControllers = Object.freeze(controllers);
 
@@ -2535,27 +2521,27 @@ function initializePaletteControls(): void {
   applyPaletteFilters();
 }
 
-function syncPaletteControls(source?: HTMLInputElement): void {
-  for (const input of queryPatternWorkspaceAll('[data-color-search]', HTMLInputElement)) {
-    if (input !== source) {
-      input.value = paletteQuery;
+function syncPaletteControls(
+  source?:
+    | HTMLElementTagNameMap['vaadin-text-field']
+    | HTMLElementTagNameMap['vaadin-radio-group'],
+): void {
+  for (const search of queryPatternWorkspaceElements<
+    HTMLElementTagNameMap['vaadin-text-field']
+  >('[data-color-search]', 'vaadin-text-field')) {
+    if (search !== source && search.value !== paletteQuery) {
+      search.value = paletteQuery;
     }
   }
-  for (const input of queryPatternWorkspaceAll('[data-color-filter]', HTMLInputElement)) {
-    input.checked = input.value === paletteScope;
+  for (const group of queryPatternWorkspaceElements<
+    HTMLElementTagNameMap['vaadin-radio-group']
+  >('[data-color-filter]', 'vaadin-radio-group')) {
+    if (group !== source && group.value !== paletteScope) {
+      group.value = paletteScope;
+    }
   }
   for (const controller of editorSeriesSelectControllers) {
     controller.setValue(paletteSeries);
-  }
-  const mobileTrigger = workspaceSheet.querySelector<HTMLButtonElement>(
-    '[data-palette-controls="mobile"] [data-color-series-filter]',
-  );
-  if (mobileTrigger) {
-    setSelectTriggerValue(
-      mobileTrigger,
-      paletteSeries,
-      paletteSeries === '' ? '全部系列' : `${paletteSeries} 系列`,
-    );
   }
 }
 
@@ -2692,10 +2678,14 @@ function syncExportCompletionUi(): void {
       button.classList.toggle('is-active', selected);
       button.setAttribute('aria-pressed', String(selected));
     }
-    const templates = required(panel, '[data-export-template-options]', HTMLFieldSetElement);
+    const templates = requiredVaadinElement(
+      panel,
+      '[data-export-template-options]',
+      'vaadin-radio-group',
+    );
     templates.hidden = exportCompletionState.selectedTask !== 'shareImage';
-    for (const input of panel.querySelectorAll<HTMLInputElement>('[data-export-template]')) {
-      input.checked = input.value === exportCompletionState.pngTemplate;
+    if (templates.value !== exportCompletionState.pngTemplate) {
+      templates.value = exportCompletionState.pngTemplate;
     }
     const runButton = required(panel, '[data-export-run]', HTMLButtonElement);
     runButton.textContent =
@@ -2867,54 +2857,20 @@ function handleReplaceImageClick(): void {
 }
 
 function setupConfirmationSurface(): void {
-  confirmationSurface.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    if (target.closest('[data-confirmation-cancel]')) {
-      closeConfirmation(true);
-      return;
-    }
-    if (target.closest('[data-confirmation-continue]')) {
-      const request = confirmationRequest;
-      if (!request || confirmationSaving) {
-        return;
-      }
-      closeConfirmation(false);
-      request.onContinue();
-      return;
-    }
-    if (target.closest('[data-confirmation-save]')) {
+  confirmationDialogController = createConfirmationDialog({
+    dialog: confirmationDialog,
+    onConfirm() {
       void saveBeforeConfirmation();
-    }
-  });
-  confirmationSurface.addEventListener('keydown', (event) => {
-    if (event.key === 'Tab') {
-      const focusable = [
-        ...confirmationSurface.querySelectorAll<HTMLButtonElement>(
-          'button:not(:disabled):not([tabindex="-1"])',
-        ),
-      ].filter((button) => !button.hidden);
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) {
-        return;
-      }
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-      return;
-    }
-    if (event.key !== 'Escape' || confirmationSaving) {
-      return;
-    }
-    event.preventDefault();
-    closeConfirmation(true);
+    },
+    onReject() {
+      const request = confirmationRequest;
+      if (!request || confirmationSaving) return;
+      confirmationRequest = null;
+      request.onContinue();
+    },
+    onCancel() {
+      if (!confirmationSaving) confirmationRequest = null;
+    },
   });
 }
 
@@ -2923,34 +2879,7 @@ function openConfirmation(request: ConfirmationRequest): void {
     return;
   }
   confirmationRequest = request;
-  confirmationReturnFocus =
-    document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  confirmationTitle.textContent = request.title;
-  confirmationDescription.textContent = request.description;
-  confirmationStatus.textContent = '';
-  confirmationSurface.hidden = false;
-  shell.dataset.confirmationOpen = 'true';
-  appHeader.inert = true;
-  mainWorkspace.inert = true;
-  confirmationContinue.focus();
-}
-
-function closeConfirmation(restoreFocus: boolean): void {
-  if (confirmationSaving) {
-    return;
-  }
-  confirmationSurface.hidden = true;
-  delete shell.dataset.confirmationOpen;
-  appHeader.inert = false;
-  mainWorkspace.inert = false;
-  confirmationRequest = null;
-  confirmationStatus.textContent = '';
-  confirmationSave.disabled = false;
-  confirmationContinue.disabled = false;
-  if (restoreFocus) {
-    confirmationReturnFocus?.focus();
-  }
-  confirmationReturnFocus = null;
+  confirmationDialogController?.open(request);
 }
 
 async function saveBeforeConfirmation(): Promise<void> {
@@ -2960,9 +2889,6 @@ async function saveBeforeConfirmation(): Promise<void> {
     return;
   }
   confirmationSaving = true;
-  confirmationSave.disabled = true;
-  confirmationContinue.disabled = true;
-  confirmationStatus.textContent = '正在保存项目…';
   const result = await exportCoordinator.start({
     project,
     task: 'saveProject',
@@ -2970,16 +2896,13 @@ async function saveBeforeConfirmation(): Promise<void> {
   });
   confirmationSaving = false;
   if (result.outcome === 'downloaded') {
-    confirmationStatus.textContent = '项目已保存，正在继续…';
-    closeConfirmation(false);
+    confirmationRequest = null;
     request.onContinue();
     return;
   }
-  confirmationSave.disabled = false;
-  confirmationContinue.disabled = false;
-  confirmationStatus.textContent =
-    result.outcome === 'failed' ? result.message : '保存已取消，请重试或选择其他操作。';
-  confirmationSave.focus();
+  confirmationDialogController?.reopenWithError(
+    result.outcome === 'failed' ? result.message : '保存已取消，请重试或选择其他操作。',
+  );
 }
 
 function confirmReplaceImage(replacementConfirmed = false): void {
@@ -3007,7 +2930,7 @@ function resetToUpload(): void {
   exportCoordinator.invalidate();
   chartMirrorController?.abort();
   recommendationRequests.cancel();
-  availableColorMobilePageController?.close();
+  availableColorDialogController?.close();
   canvasController?.destroy();
   canvasController = null;
   history = null;
@@ -3036,11 +2959,10 @@ function resetToUpload(): void {
 function showStage(nextStage: AppStage): void {
   if (stage === 'prepare' && nextStage !== 'prepare') {
     availableSeriesSelectController?.close();
-    availableColorMobilePageController?.close();
+    availableColorDialogController?.close();
   }
   if (stage === 'editor' && nextStage !== 'editor') {
-    editorDesktopSeriesController?.close();
-    editorMobileSeriesController?.cancel();
+    for (const controller of editorSeriesSelectControllers) controller.close();
     firstUseHintSession.dismiss();
     syncFirstUseHint();
     setCanvasJumpOpen(false);
@@ -3081,25 +3003,17 @@ function updateWorkspaceLayout(): void {
     (sourceUsesDesktopSurface
       ? workspaceInspector.contains(activeElement) || workspaceToolRail.contains(activeElement)
       : workspaceSheet.contains(activeElement));
-  const sourceSeriesController = sourceUsesDesktopSurface
-    ? editorDesktopSeriesController
-    : editorMobileSeriesController;
-  const sourceSeriesWasOpen = sourceSeriesController?.isOpen() ?? false;
   const sourceFocusRoot = sourceUsesDesktopSurface ? patternWorkspace : workspaceSheet;
-  const sourceSeriesTrigger = sourceFocusRoot.querySelector<HTMLElement>(
-    '[data-color-series-filter]',
-  );
   const focusSnapshot = crossingDesktopBoundary
     ? captureWorkspaceSurfaceFocus(
         sourceFocusRoot,
-        sourceSeriesWasOpen ? sourceSeriesTrigger : focusWasInSourceSurface ? activeElement : null,
+        focusWasInSourceSurface ? activeElement : null,
         activePanel,
       )
     : null;
 
   if (crossingDesktopBoundary) {
-    editorDesktopSeriesController?.close();
-    editorMobileSeriesController?.cancel();
+    for (const controller of editorSeriesSelectControllers) controller.close();
   }
 
   const layout = responsiveWorkspaceMount.update(viewportWidth);
@@ -3310,7 +3224,7 @@ function applyDecimalLimits(input: HTMLInputElement, minimum: number, maximum: n
   clampDecimalInput(input, minimum, maximum);
 }
 
-function boardSelectOptions(): readonly UiSelectOption[] {
+function boardSelectOptions(): readonly VaadinChoiceOption[] {
   return Object.freeze([
     Object.freeze({ id: 'standardSquare', label: '29 × 29 标准方板' }),
     Object.freeze({ id: 'smallSquare', label: '14 × 14 小方板' }),
@@ -3318,7 +3232,7 @@ function boardSelectOptions(): readonly UiSelectOption[] {
   ]);
 }
 
-function paletteSelectOptions(): readonly UiSelectOption[] {
+function paletteSelectOptions(): readonly VaadinChoiceOption[] {
   return Object.freeze(
     PALETTES.map((palette) =>
       Object.freeze({
@@ -3329,7 +3243,7 @@ function paletteSelectOptions(): readonly UiSelectOption[] {
   );
 }
 
-function ditheringSelectOptions(): readonly UiSelectOption[] {
+function ditheringSelectOptions(): readonly VaadinChoiceOption[] {
   return Object.freeze([
     Object.freeze({ id: 'none', label: '干净色块' }),
     Object.freeze({ id: 'floydSteinberg', label: '细腻过渡' }),
@@ -3337,15 +3251,7 @@ function ditheringSelectOptions(): readonly UiSelectOption[] {
 }
 
 function selectValue(root: ParentNode, selector: string, fallback: string): string {
-  return root.querySelector<HTMLElement>(selector)?.dataset.value ?? fallback;
-}
-
-function setSelectTriggerValue(trigger: HTMLButtonElement, value: string, label: string): void {
-  trigger.dataset.value = value;
-  const labelElement = trigger.querySelector<HTMLElement>('[data-select-label]');
-  if (labelElement && labelElement.textContent !== label) {
-    labelElement.textContent = label;
-  }
+  return root.querySelector<HTMLElementTagNameMap['vaadin-select']>(selector)?.value ?? fallback;
 }
 
 function croppedImageDimensions(): { readonly width: number; readonly height: number } {
@@ -3487,13 +3393,13 @@ function cleanup(): void {
   canvasController?.destroy();
   preparePresetControls?.destroy();
   availableColorGridRenderer?.destroy();
-  availableColorMobilePageController?.destroy();
+  availableColorDialogController?.destroy();
   boardSelectController?.destroy();
   paletteSelectController?.destroy();
   availableSeriesSelectController?.destroy();
   ditheringSelectController?.destroy();
   for (const controller of editorSeriesSelectControllers) controller.destroy();
-  mobileStageHost.destroy();
+  confirmationDialogController?.destroy();
   responsiveWorkspaceMount.destroy();
   for (const controller of workspacePanelControllers) controller.destroy();
   clearChartResult();
@@ -3517,6 +3423,24 @@ function queryPatternWorkspaceAll<ElementType extends Element>(
     for (const element of root.querySelectorAll(selector)) {
       if (element instanceof elementType) {
         matches.add(element);
+      }
+    }
+  }
+  return [...matches];
+}
+
+function queryPatternWorkspaceElements<ElementType extends Element>(
+  selector: string,
+  tagName: string,
+): readonly ElementType[] {
+  const matches = new Set<ElementType>();
+  for (const root of [patternWorkspace, ...workspaceSurfaceRoots]) {
+    if (root.matches(selector) && root.localName === tagName) {
+      matches.add(root as unknown as ElementType);
+    }
+    for (const element of root.querySelectorAll(selector)) {
+      if (element.localName === tagName) {
+        matches.add(element as unknown as ElementType);
       }
     }
   }

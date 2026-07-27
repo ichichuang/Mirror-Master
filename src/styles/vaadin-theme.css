@@ -1,0 +1,308 @@
+:root,
+[data-theme='mint-studio'] {
+  --vaadin-clickable-cursor: pointer;
+  --vaadin-field-default-width: 100%;
+  --vaadin-focus-ring-color: var(--color-focus-ring);
+  --vaadin-input-field-background: var(--color-background-panel);
+  --vaadin-input-field-border-color: var(--color-border-default);
+  --vaadin-input-field-border-radius: var(--radius-md);
+  --vaadin-input-field-border-width: 1px;
+  --vaadin-input-field-value-color: var(--color-text-primary);
+  --vaadin-input-field-label-color: var(--color-text-secondary);
+  --vaadin-input-field-placeholder-color: var(--color-text-secondary);
+  --vaadin-input-field-error-color: var(--color-status-error);
+  --vaadin-button-border-radius: var(--radius-md);
+  --vaadin-button-height: 2.75rem;
+  --vaadin-button-font-weight: 680;
+  --vaadin-dialog-background: var(--color-background-panel);
+  --vaadin-dialog-border-color: var(--color-border-default);
+  --vaadin-dialog-border-radius: var(--radius-sheet);
+  --vaadin-dialog-border-width: 1px;
+  --vaadin-dialog-padding: var(--space-4);
+  --vaadin-dialog-shadow: var(--shadow-panel);
+  --vaadin-dialog-text-color: var(--color-text-primary);
+  --vaadin-dialog-title-color: var(--color-text-primary);
+  --vaadin-overlay-backdrop-background: color-mix(
+    in srgb,
+    var(--color-text-primary) 38%,
+    transparent
+  );
+  --vaadin-checkbox-background: var(--color-background-panel);
+  --vaadin-checkbox-border-color: var(--color-border-strong);
+  --vaadin-checkbox-border-radius: 4px;
+  --vaadin-checkbox-border-width: 1px;
+  --vaadin-checkbox-marker-color: var(--color-text-on-primary);
+}
+
+vaadin-select,
+vaadin-text-field {
+  width: 100%;
+  min-width: 0;
+}
+
+vaadin-select::part(input-field),
+vaadin-text-field::part(input-field) {
+  min-height: 2.75rem;
+}
+
+vaadin-select::part(overlay) {
+  max-height: min(20rem, calc(100dvh - 1.5rem));
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-background-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+vaadin-select::part(content) {
+  padding: var(--space-1);
+}
+
+vaadin-select[focus-ring]::part(input-field),
+vaadin-text-field[focus-ring]::part(input-field) {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+vaadin-button[theme~='primary'] {
+  --vaadin-button-background: var(--color-action-primary);
+  --vaadin-button-border-color: var(--color-action-primary);
+  --vaadin-button-border-width: 1px;
+  --vaadin-button-text-color: var(--color-text-on-primary);
+}
+
+vaadin-button[theme~='primary']:hover:not([disabled]) {
+  --vaadin-button-background: var(--color-action-primary-hover);
+  --vaadin-button-border-color: var(--color-action-primary-hover);
+}
+
+vaadin-button[theme~='secondary'] {
+  --vaadin-button-background: var(--color-background-panel);
+  --vaadin-button-border-color: var(--color-border-default);
+  --vaadin-button-border-width: 1px;
+  --vaadin-button-text-color: var(--color-text-primary);
+}
+
+vaadin-button[theme~='tertiary'] {
+  --vaadin-button-background: transparent;
+  --vaadin-button-text-color: var(--color-action-primary);
+}
+
+vaadin-radio-group::part(label) {
+  color: var(--color-text-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.task-selector::part(group-field) {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.preset-cards::part(group-field) {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.preset-cards-three::part(group-field) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preset-cards-two::part(group-field),
+.mode-preference::part(group-field),
+.sampling-options::part(group-field),
+.export-template-options::part(group-field) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+vaadin-radio-button[theme~='card']::part(radio) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.mode-preference vaadin-radio-button::part(radio),
+.sampling-options vaadin-radio-button::part(radio),
+.export-template-options vaadin-radio-button::part(radio) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.mode-option,
+.preset-card {
+  --vaadin-radio-button-gap: 0;
+}
+
+.mode-option label[slot='label'],
+.preset-card label[slot='label'],
+.mode-preference label[slot='label'],
+.sampling-options label[slot='label'],
+.export-template-options label[slot='label'] {
+  width: 100%;
+  cursor: pointer;
+}
+
+.mode-preference vaadin-radio-button,
+.sampling-options vaadin-radio-button,
+.export-template-options vaadin-radio-button {
+  position: relative;
+  display: grid;
+  min-height: 3.5rem;
+  align-content: center;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-primary);
+  background: var(--color-background-panel);
+  cursor: pointer;
+  --vaadin-radio-button-gap: 0;
+  --vaadin-radio-button-size: 1px;
+}
+
+.mode-preference vaadin-radio-button[checked],
+.sampling-options vaadin-radio-button[checked],
+.export-template-options vaadin-radio-button[checked] {
+  border-color: var(--color-action-primary);
+  color: var(--color-action-primary);
+  background: var(--color-action-primary-soft);
+}
+
+.mode-preference vaadin-radio-button[focus-ring],
+.sampling-options vaadin-radio-button[focus-ring],
+.export-template-options vaadin-radio-button[focus-ring] {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.palette-scope::part(group-field) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+
+.palette-scope vaadin-radio-button {
+  display: grid;
+  min-height: 2.75rem;
+  place-items: center;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  background: var(--color-background-panel);
+  font-size: 0.76rem;
+  font-weight: 700;
+  --vaadin-radio-button-gap: 0;
+}
+
+.palette-scope vaadin-radio-button::part(radio) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.palette-scope vaadin-radio-button[checked] {
+  border-color: var(--color-action-primary);
+  color: var(--color-action-primary);
+  background: var(--color-action-primary-soft);
+}
+
+.palette-scope vaadin-radio-button[focus-ring] {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.available-color-choice {
+  --vaadin-checkbox-size: 1rem;
+  --vaadin-checkbox-gap: 0;
+}
+
+.available-color-choice::part(checkbox) {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+}
+
+.available-color-choice::part(label) {
+  width: 100%;
+}
+
+.available-color-choice-content {
+  display: grid;
+  width: 100%;
+  place-items: center;
+  gap: 0.2rem;
+  cursor: pointer;
+}
+
+.available-color-choice[checked] {
+  --vaadin-checkbox-background: var(--color-action-primary);
+  --vaadin-checkbox-border-color: var(--color-action-primary);
+}
+
+vaadin-dialog[theme~='color-picker']::part(overlay) {
+  width: min(52rem, calc(100vw - 2rem));
+  height: min(46rem, calc(100dvh - 2rem));
+  max-width: none;
+  max-height: none;
+}
+
+vaadin-dialog[theme~='color-picker']::part(content) {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.available-color-dialog-content {
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto auto auto minmax(8rem, 1fr) auto;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+}
+
+.available-color-dialog-content .available-color-grid {
+  min-height: 8rem;
+  max-height: none;
+}
+
+vaadin-confirm-dialog[theme~='destructive-confirmation']::part(overlay) {
+  width: min(32rem, calc(100vw - 2rem));
+}
+
+vaadin-confirm-dialog[theme~='destructive-confirmation']::part(message) {
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+vaadin-confirm-dialog[theme~='destructive-confirmation']::part(reject-button) {
+  color: var(--color-status-error);
+}
+
+@media (max-width: 767px) {
+  vaadin-dialog[theme~='color-picker']::part(overlay) {
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  vaadin-dialog[theme~='color-picker']::part(content) {
+    padding-bottom: calc(var(--space-4) + var(--layout-safe-bottom));
+  }
+
+  .available-color-dialog-content .available-color-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .available-color-dialog-content .available-color-filter-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}

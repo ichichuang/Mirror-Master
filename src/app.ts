@@ -2,7 +2,6 @@ import { ACCEPTED_IMAGE_ACCEPT } from './features/local-image-input/types';
 import { brandConfig } from './brand/brand.config';
 import { EXPORT_TASKS, type ExportTaskDefinition } from './features/export-completion/exportState';
 import { FIRST_USE_HINT_MESSAGE } from './features/pattern-editor/firstUseHint';
-import { PALETTES } from './generated/palettes';
 
 export function renderApp(): string {
   return `
@@ -46,9 +45,8 @@ export function renderApp(): string {
         ${renderChartWorkspace()}
       </main>
 
-      <div class="mobile-stage-host" data-mobile-stage-host hidden></div>
-      ${renderConfirmationSurface()}
-      <div class="app-overlay-root" data-overlay-root></div>
+      <vaadin-dialog data-available-color-dialog theme="color-picker"></vaadin-dialog>
+      <vaadin-confirm-dialog data-confirmation-dialog theme="destructive-confirmation"></vaadin-confirm-dialog>
       <p
         class="app-live visually-hidden"
         role="status"
@@ -68,7 +66,12 @@ function renderUploadWorkspace(): string {
         <p>先选择要完成的事情，再上传一张图片。</p>
       </div>
 
-      <div class="mode-selector task-selector" role="radiogroup" aria-label="制作任务">
+      <vaadin-radio-group
+        class="mode-selector task-selector"
+        aria-label="制作任务"
+        data-customer-task
+        value="newPattern"
+      >
         ${renderTaskOption(
           'newPattern',
           '制作新图纸',
@@ -82,7 +85,7 @@ function renderUploadWorkspace(): string {
           '镜像拼豆格，保留坐标和图例',
           'ph-squares-four',
         )}
-      </div>
+      </vaadin-radio-group>
 
       <label class="primary-upload" for="image-file-input" data-drop-zone>
         <i class="ph ph-upload-simple" aria-hidden="true"></i>
@@ -133,15 +136,21 @@ function renderTaskOption(
   checked = false,
 ): string {
   return `
-    <label class="mode-option">
-      <input type="radio" name="customer-task" value="${value}" ${checked ? 'checked' : ''} />
-      <span class="mode-icon" aria-hidden="true"><i class="ph ${icon}"></i></span>
-      <span>
-        <strong>${title}</strong>
-        <small>${description}</small>
-      </span>
-      <i class="ph ph-check mode-check" aria-hidden="true"></i>
-    </label>
+    <vaadin-radio-button
+      class="mode-option"
+      theme="card"
+      value="${value}"
+      ${checked ? 'checked' : ''}
+    >
+      <label class="mode-option-content" slot="label">
+        <span class="mode-icon" aria-hidden="true"><i class="ph ${icon}"></i></span>
+        <span>
+          <strong>${title}</strong>
+          <small>${description}</small>
+        </span>
+        <i class="ph ph-check mode-check" aria-hidden="true"></i>
+      </label>
+    </vaadin-radio-button>
   `;
 }
 
@@ -202,12 +211,16 @@ function renderPrepareWorkspace(): string {
                   <h2>图案大小</h2>
                 </div>
               </div>
-              <fieldset class="preset-cards preset-cards-three">
-                <legend class="visually-hidden">选择图案大小</legend>
+              <vaadin-radio-group
+                class="preset-cards preset-cards-three"
+                aria-label="选择图案大小"
+                data-pattern-size-preset
+                value="48"
+              >
                 ${renderPresetCard('pattern-size-preset', '29', '小巧', '长边 29 颗', false)}
                 ${renderPresetCard('pattern-size-preset', '48', '推荐', '长边 48 颗', true)}
                 ${renderPresetCard('pattern-size-preset', '72', '细致', '长边 72 颗', false)}
-              </fieldset>
+              </vaadin-radio-group>
               <div class="dimension-inputs">
                 <label>
                   <span>宽（颗）</span>
@@ -244,12 +257,16 @@ function renderPrepareWorkspace(): string {
                   <h2>拼豆规格</h2>
                 </div>
               </div>
-              <fieldset class="preset-cards preset-cards-three">
-                <legend class="visually-hidden">选择拼豆规格</legend>
+              <vaadin-radio-group
+                class="preset-cards preset-cards-three"
+                aria-label="选择拼豆规格"
+                data-bead-size-preset
+                value="5"
+              >
                 ${renderPresetCard('bead-size-preset', '5', '常规', '5 mm', true)}
                 ${renderPresetCard('bead-size-preset', '2.6', '迷你', '2.6 mm', false)}
                 ${renderPresetCard('bead-size-preset', 'custom', '自定义', '按实际尺寸', false)}
-              </fieldset>
+              </vaadin-radio-group>
             </section>
 
             <section class="settings-section customer-setting">
@@ -264,29 +281,23 @@ function renderPrepareWorkspace(): string {
                   <strong>色板</strong>
                   <small>按手边可用的拼豆选择</small>
                 </span>
-                <fieldset
-                  class="preset-cards preset-cards-two short-choice-control"
+                <vaadin-select
+                  class="short-choice-control"
                   data-palette-id
-                  data-value="mard"
-                >
-                  <legend class="visually-hidden">选择色板</legend>
-                  ${PALETTES.map((palette) =>
-                    renderShortChoiceCard(
-                      'prepare-palette',
-                      palette.id,
-                      palette.label,
-                      `${String(palette.colorIds.length)} 色`,
-                      palette.id === 'mard',
-                    ),
-                  ).join('')}
-                </fieldset>
+                  aria-label="选择色板"
+                  value="mard"
+                ></vaadin-select>
               </div>
-              <fieldset class="preset-cards preset-cards-three">
-                <legend class="visually-hidden">选择颜色细节</legend>
+              <vaadin-radio-group
+                class="preset-cards preset-cards-three"
+                aria-label="选择颜色细节"
+                data-color-count-preset
+                value="24"
+              >
                 ${renderPresetCard('color-count-preset', '12', '简单', '最多 12 色', false)}
                 ${renderPresetCard('color-count-preset', '24', '推荐', '最多 24 色', true)}
                 ${renderPresetCard('color-count-preset', '48', '细致', '最多 48 色', false)}
-              </fieldset>
+              </vaadin-radio-group>
             </section>
 
             <section class="settings-section customer-setting">
@@ -296,8 +307,12 @@ function renderPrepareWorkspace(): string {
                   <h2>制作方式</h2>
                 </div>
               </div>
-              <fieldset class="preset-cards preset-cards-two processing-cards">
-                <legend class="visually-hidden">选择制作方式</legend>
+              <vaadin-radio-group
+                class="preset-cards preset-cards-two processing-cards"
+                aria-label="选择制作方式"
+                data-processing-preset
+                value="easy"
+              >
                 ${renderPresetCard('processing-preset', 'easy', '容易制作', '色块清楚，备料更直接', true)}
                 ${renderPresetCard(
                   'processing-preset',
@@ -306,7 +321,7 @@ function renderPrepareWorkspace(): string {
                   '用相邻颜色交错表现过渡',
                   false,
                 )}
-              </fieldset>
+              </vaadin-radio-group>
             </section>
 
             <details class="advanced-settings" data-professional-settings>
@@ -318,37 +333,28 @@ function renderPrepareWorkspace(): string {
               <i class="ph ph-caret-down" aria-hidden="true"></i>
             </summary>
             <div class="advanced-settings-content">
-                <fieldset class="mode-preference">
-                  <legend>图片处理方式</legend>
-                  <label>
-                    <input
-                      type="radio"
-                      name="mode-preference"
-                      value="auto"
-                      data-mode-preference="auto"
-                      checked
-                    />
+                <vaadin-radio-group
+                  class="mode-preference"
+                  label="图片处理方式"
+                  data-mode-preference
+                  value="auto"
+                >
+                  <vaadin-radio-button value="auto">
+                    <label slot="label">
                     <span>自动推荐<small>根据图片格式和颜色给出建议</small></span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="mode-preference"
-                      value="photo"
-                      data-mode-preference="photo"
-                    />
+                    </label>
+                  </vaadin-radio-button>
+                  <vaadin-radio-button value="photo">
+                    <label slot="label">
                     <span>自然图片<small>适合照片与插画</small></span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="mode-preference"
-                      value="pixelArt"
-                      data-mode-preference="pixelArt"
-                    />
+                    </label>
+                  </vaadin-radio-button>
+                  <vaadin-radio-button value="pixelArt">
+                    <label slot="label">
                     <span>清晰像素<small>保留明确的像素边缘</small></span>
-                  </label>
-                </fieldset>
+                    </label>
+                  </vaadin-radio-button>
+                </vaadin-radio-group>
                 <p
                   class="recommendation-status"
                   role="status"
@@ -420,34 +426,12 @@ function renderPrepareWorkspace(): string {
                     <strong>拼板</strong>
                     <small data-board-summary>约需 4 块拼板</small>
                   </span>
-                  <fieldset
-                    class="preset-cards preset-cards-three short-choice-control"
+                  <vaadin-select
+                    class="short-choice-control"
                     data-board-preset
-                    data-value="standardSquare"
-                  >
-                    <legend class="visually-hidden">选择拼板</legend>
-                    ${renderShortChoiceCard(
-                      'prepare-board',
-                      'standardSquare',
-                      '标准方板',
-                      '29 × 29',
-                      true,
-                    )}
-                    ${renderShortChoiceCard(
-                      'prepare-board',
-                      'smallSquare',
-                      '小方板',
-                      '14 × 14',
-                      false,
-                    )}
-                    ${renderShortChoiceCard(
-                      'prepare-board',
-                      'custom',
-                      '自定义',
-                      '按实际孔位',
-                      false,
-                    )}
-                  </fieldset>
+                    aria-label="选择拼板"
+                    value="standardSquare"
+                  ></vaadin-select>
                 </div>
                 <fieldset class="custom-board-fields" data-custom-board-fields hidden disabled>
                   <legend>自定义拼板格数</legend>
@@ -493,106 +477,89 @@ function renderPrepareWorkspace(): string {
                   />
                 </label>
 
-                <button
-                  class="secondary-button available-color-mobile-trigger"
-                  type="button"
+                <vaadin-button
+                  class="available-color-trigger"
+                  theme="secondary"
                   data-open-available-colors
                 >
                   选择手边有的颜色
-                  <i class="ph ph-caret-right" aria-hidden="true"></i>
-                </button>
-                <section class="available-color-filter" data-available-color-filter>
-                  <div class="available-color-filter-heading">
-                    <span>
-                      <strong>手边有的颜色</strong>
-                      <small data-available-color-summary>已选择 221 色</small>
-                    </span>
-                    <div>
-                      <button class="text-button" type="button" data-select-all-colors>全部选中</button>
-                      <button class="text-button" type="button" data-clear-all-colors>清除选择</button>
+                </vaadin-button>
+                <template data-available-color-dialog-template>
+                  <section
+                    class="available-color-filter available-color-dialog-content"
+                    data-available-color-filter
+                  >
+                    <div class="available-color-filter-heading">
+                      <span>
+                        <strong>选择可用色号</strong>
+                        <small data-available-color-summary>已选择 221 色</small>
+                      </span>
+                      <div>
+                        <vaadin-button theme="tertiary" data-select-all-colors>全部选中</vaadin-button>
+                        <vaadin-button theme="tertiary" data-clear-all-colors>清除选择</vaadin-button>
+                      </div>
                     </div>
-                  </div>
-                  <p>取消没有的色号，生成时就不会使用它。</p>
-                  <div class="available-color-controls" role="search" aria-label="筛选可用颜色">
-                    <label>
-                      <span>搜索色号或名称</span>
-                      <input
-                        type="search"
-                        autocomplete="off"
+                    <p>取消没有的色号，生成时就不会使用它。</p>
+                    <div class="available-color-controls" role="search" aria-label="筛选可用颜色">
+                      <vaadin-text-field
+                        label="搜索色号或名称"
                         placeholder="例如 A14、海蓝"
-                        role="combobox"
-                        aria-autocomplete="list"
-                        aria-expanded="true"
-                        aria-controls="available-color-listbox"
-                        aria-describedby="available-color-filter-status"
+                        clear-button-visible
                         data-available-color-search
-                      />
-                    </label>
-                    <div class="selector-field">
-                      <span>系列</span>
-                      ${renderSelectTrigger(
-                        'data-available-color-series',
-                        '',
-                        '全部系列',
-                        '筛选颜色系列',
-                      )}
+                      ></vaadin-text-field>
+                      <vaadin-select
+                        label="系列"
+                        data-available-color-series
+                        value=""
+                      ></vaadin-select>
                     </div>
-                  </div>
-                  <div
-                    id="available-color-listbox"
-                    class="available-color-grid"
-                    role="listbox"
-                    aria-multiselectable="true"
-                    data-available-color-grid
-                    aria-label="选择手边有的拼豆颜色"
-                  ></div>
-                  <p
-                    id="available-color-filter-status"
-                    class="color-filter-status"
-                    role="status"
-                    aria-live="polite"
-                    data-available-color-filter-status
-                  ></p>
-                </section>
+                    <div
+                      class="available-color-grid"
+                      role="group"
+                      data-available-color-grid
+                      aria-label="选择手边有的拼豆颜色"
+                    ></div>
+                    <div class="available-color-dialog-footer">
+                      <p
+                        class="color-filter-status"
+                        role="status"
+                        aria-live="polite"
+                        data-available-color-filter-status
+                      ></p>
+                      <vaadin-button theme="primary" data-close-available-colors>完成</vaadin-button>
+                    </div>
+                  </section>
+                </template>
 
-              <fieldset class="sampling-options">
-                  <legend>格子取色方式</legend>
-                <label>
-                  <input type="radio" name="sampling" value="average" checked />
+              <vaadin-radio-group
+                class="sampling-options"
+                label="格子取色方式"
+                data-sampling
+                value="average"
+              >
+                <vaadin-radio-button value="average">
+                  <label slot="label">
                     <span>平均取色<small>自然图片更平滑</small></span>
-                </label>
-                <label>
-                  <input type="radio" name="sampling" value="nearest" />
+                  </label>
+                </vaadin-radio-button>
+                <vaadin-radio-button value="nearest">
+                  <label slot="label">
                     <span>保留像素<small>清晰像素更锐利</small></span>
-                </label>
-              </fieldset>
+                  </label>
+                </vaadin-radio-button>
+              </vaadin-radio-group>
 
                 <div class="short-choice-field">
                 <span>
                     <strong>颜色接近方式</strong>
                     <small>与上方“制作方式”保持同步</small>
                 </span>
-                  <fieldset
-                    class="preset-cards preset-cards-two short-choice-control"
+                  <vaadin-select
+                    class="short-choice-control"
                     data-dithering
-                    data-value="none"
-                  >
-                    <legend class="visually-hidden">选择颜色接近方式</legend>
-                    ${renderShortChoiceCard(
-                      'prepare-dithering',
-                      'none',
-                      '干净色块',
-                      '边界清楚',
-                      true,
-                    )}
-                    ${renderShortChoiceCard(
-                      'prepare-dithering',
-                      'floydSteinberg',
-                      '细腻过渡',
-                      '相邻颜色交错',
-                      false,
-                    )}
-                  </fieldset>
+                    aria-label="选择颜色接近方式"
+                    value="none"
+                  ></vaadin-select>
                 </div>
               <label class="field-row transparency-control">
                 <span>
@@ -686,53 +653,18 @@ function renderPresetCard(
   checked: boolean,
 ): string {
   return `
-    <label class="preset-card">
-      <input type="radio" name="${name}" value="${value}" ${checked ? 'checked' : ''} />
-      <span><strong>${title}</strong><small>${description}</small></span>
-      <i class="ph ph-check" aria-hidden="true"></i>
-    </label>
-  `;
-}
-
-function renderShortChoiceCard(
-  name: string,
-  value: string,
-  title: string,
-  description: string,
-  checked: boolean,
-): string {
-  return `
-    <label class="preset-card short-choice-card">
-      <input
-        type="radio"
-        name="${name}"
-        value="${value}"
-        data-short-choice-option
-        ${checked ? 'checked' : ''}
-      />
-      <span><strong>${title}</strong><small>${description}</small></span>
-      <i class="ph ph-check" aria-hidden="true"></i>
-    </label>
-  `;
-}
-
-function renderSelectTrigger(
-  dataAttribute: string,
-  value: string,
-  label: string,
-  accessibleLabel: string,
-): string {
-  return `
-    <button
-      class="ui-select-trigger"
-      type="button"
-      ${dataAttribute}
-      data-value="${value}"
-      aria-label="${accessibleLabel}"
+    <vaadin-radio-button
+      class="preset-card"
+      theme="card"
+      data-choice-group="${name}"
+      value="${value}"
+      ${checked ? 'checked' : ''}
     >
-      <span data-select-label>${label}</span>
-      <i class="ph ph-caret-down" aria-hidden="true"></i>
-    </button>
+      <label class="preset-card-content" slot="label">
+        <span><strong>${title}</strong><small>${description}</small></span>
+        <i class="ph ph-check" aria-hidden="true"></i>
+      </label>
+    </vaadin-radio-button>
   `;
 }
 
@@ -1027,43 +959,31 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
       data-palette-controls="${surface}"
       aria-label="颜色筛选"
     >
-      <label class="palette-search" for="${searchId}">
-        <span>搜索色号或名称</span>
-        <span class="search-input">
-          <input
-            id="${searchId}"
-            type="search"
-            autocomplete="off"
-            placeholder="例如 A14、海蓝"
-            aria-describedby="color-filter-status-${surface}"
-            data-color-search
-          />
-        </span>
-      </label>
-      <fieldset class="palette-scope">
-        <legend>显示颜色</legend>
-        <label>
-          <input type="radio" name="color-scope-${surface}" value="all" data-color-filter="all" checked />
-          <span>全部</span>
-        </label>
-        <label>
-          <input type="radio" name="color-scope-${surface}" value="used" data-color-filter="used" />
-          <span>已使用</span>
-        </label>
-        <label>
-          <input type="radio" name="color-scope-${surface}" value="recent" data-color-filter="recent" />
-          <span>最近</span>
-        </label>
-      </fieldset>
-      <label class="palette-series">
-        <span>系列</span>
-        ${renderSelectTrigger(
-          'data-color-series-filter',
-          '',
-          '全部系列',
-          `筛选${surface === 'desktop' ? '桌面' : '移动端'}颜色系列`,
-        )}
-      </label>
+      <vaadin-text-field
+        id="${searchId}"
+        class="palette-search"
+        label="搜索色号或名称"
+        placeholder="例如 A14、海蓝"
+        clear-button-visible
+        data-color-search
+      ></vaadin-text-field>
+      <vaadin-radio-group
+        class="palette-scope"
+        label="显示颜色"
+        data-color-filter
+        value="all"
+      >
+        <vaadin-radio-button value="all" label="全部"></vaadin-radio-button>
+        <vaadin-radio-button value="used" label="已使用"></vaadin-radio-button>
+        <vaadin-radio-button value="recent" label="最近"></vaadin-radio-button>
+      </vaadin-radio-group>
+      <vaadin-select
+        class="palette-series"
+        label="系列"
+        data-color-series-filter
+        aria-label="筛选${surface === 'desktop' ? '桌面' : '移动端'}颜色系列"
+        value=""
+      ></vaadin-select>
       <p
         id="color-filter-status-${surface}"
         class="color-filter-status"
@@ -1097,28 +1017,22 @@ function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
       <div class="export-task-grid" role="group" aria-label="导出任务">
         ${EXPORT_TASKS.map((task) => renderExportTask(task)).join('')}
       </div>
-      <fieldset class="export-template-options" data-export-template-options>
-        <legend>分享图片样式</legend>
-        <label>
-          <input
-            type="radio"
-            name="export-template-${surface}"
-            value="pure"
-            data-export-template="pure"
-          />
+      <vaadin-radio-group
+        class="export-template-options"
+        data-export-template-options
+        label="分享图片样式"
+        value="annotated"
+      >
+        <vaadin-radio-button value="pure" data-export-template="pure">
+          <label slot="label">
           <span>纯图案<small>透明背景，只保留拼豆图案</small></span>
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="export-template-${surface}"
-            value="annotated"
-            data-export-template="annotated"
-            checked
-          />
+          </label>
+        </vaadin-radio-button>
+        <vaadin-radio-button value="annotated" data-export-template="annotated" checked>
+          <label slot="label">
           <span>带标注<small>包含网格、坐标和材料图例</small></span>
-        </label>
-      </fieldset>
+          </label>
+        </vaadin-radio-button>
       <button class="primary-button export-run" type="button" data-export-run>
         下载分享图片
       </button>
@@ -1240,49 +1154,6 @@ function renderChartWorkspace(): string {
         </button>
       </div>
       <p class="visually-hidden" role="status" aria-live="polite" data-editor-live></p>
-    </section>
-  `;
-}
-
-function renderConfirmationSurface(): string {
-  return `
-    <section
-      class="app-confirmation"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="confirmation-title"
-      aria-describedby="confirmation-description"
-      data-confirmation-surface
-      hidden
-    >
-      <div
-        class="confirmation-backdrop"
-        data-confirmation-cancel
-        aria-hidden="true"
-      ></div>
-      <div class="confirmation-panel">
-        <div class="confirmation-heading">
-          <span class="confirmation-icon" aria-hidden="true">
-            <i class="ph ph-shield-check"></i>
-          </span>
-          <div>
-            <span class="eyebrow">尚未保存的修改</span>
-            <h2 id="confirmation-title" data-confirmation-title>要继续吗？</h2>
-          </div>
-        </div>
-        <p id="confirmation-description" data-confirmation-description></p>
-        <p class="inline-status" role="status" aria-live="polite" data-confirmation-status></p>
-        <div class="confirmation-actions">
-          <button class="secondary-button" type="button" data-confirmation-save>
-            <i class="ph ph-export" aria-hidden="true"></i>
-            先保存项目
-          </button>
-          <button class="danger-button" type="button" data-confirmation-continue>
-            放弃修改并继续
-          </button>
-          <button class="text-button" type="button" data-confirmation-cancel>取消</button>
-        </div>
-      </div>
     </section>
   `;
 }

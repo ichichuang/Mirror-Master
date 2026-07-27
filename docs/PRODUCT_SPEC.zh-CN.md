@@ -121,7 +121,7 @@ owner 完成本地运行时验收后，生产基础设施、域名、证书、�
 
 - 任何生成、智能识别和导出都必须显示中文进行中、成功、空状态、取消和失败状态。
 - 更换图片、重新生成或载入项目时，如会覆盖未保存编辑，必须先明确告知影响。
-- 覆盖未保存编辑的确认必须使用项目自有主题表面，不得调用浏览器原生确认框；操作固定为“先保存项目”“放弃修改并继续”“取消”。确认表面复用当前响应式工作区，不得在移动端叠加第二个 sheet、drawer 或 modal。
+- 覆盖未保存编辑的确认必须使用官方 `vaadin-confirm-dialog`，不得调用浏览器原生确认框或自研焦点锁定表面；操作固定为“先保存项目”“放弃修改并继续”“取消”。组件按现有语义 Token 适配主题，并由 Vaadin 负责 modality、焦点、Escape、Overlay 与移动端兼容。
 - 网络请求使用 `AbortController`；新请求取消旧请求；取消不是错误 toast。
 - 编辑历史存在于当前项目会话；刷新后不自动恢复上传图片或未显式下载的项目。
 
@@ -254,9 +254,11 @@ AppShell
 │  ├─ MaterialsPanel
 │  ├─ ToolsPanel
 │  ├─ ExportCompletionPanel
-│  ├─ MobilePickerPanel
 │  └─ SafeAreaPrimaryAction
-└─ OverlayRoot (desktop popovers only)
+└─ Vaadin Overlays
+   ├─ Anchored Select (all viewports)
+   ├─ Color Dialog (desktop centered / mobile full-screen theme)
+   └─ ConfirmDialog
 ```
 
 - 同一时刻只有一个主工作区可见。
@@ -290,16 +292,16 @@ AppShell
 
 #### 3.4.8 顾客选择控件家族
 
-顾客可见流程不得把原生 `<select>` 作为主要选择控件，也不得用一次性 `div` 菜单复制选择器。全部选择场景必须归入同一套可访问控件家族，并共享选中值、活动项、禁用、错误、帮助文本和移动端呈现合同：
+顾客可见流程不得用一次性 `div` 菜单、移动选择舞台、DOM 搬运页面或自研 Listbox 复制选择器。通用表单、选择、确认与 Overlay 统一使用当前官方 `@vaadin/*` Web Components；只安装实际使用的组件包，不得使用已弃用的 `@vaadin/vaadin-*` 包，也不得混入第二个 UI 组件库。
 
-- 2–4 个互斥且需要并排比较的选项使用 segmented control 或 radio cards；语义必须是原生 radio 或等价的 `radiogroup` / `radio`。
-- 桌面短列表使用 `UiSelectPopover`。浮层 portal 到应用级 overlay root，使用 `position: fixed`，根据 trigger 的 `getBoundingClientRect()` 定位，不受 inspector 或 sheet 的 overflow 裁剪。
-- 长色号列表使用可搜索 ARIA combobox/listbox；输入、活动项、选中项、结果数量和无结果状态必须可被屏幕阅读器理解。
-- `320–767 px` 的短列表和长列表统一进入现有 `WorkspaceSheet` 的 `MobilePickerPanel`；picker 替换 sheet 内容并提供明确返回，不创建第二层 sheet、drawer、popover 或 modal。
-- `UiSelectPopover` 打开时保留当前选中项并把活动项滚动到可见位置；在 window scroll、任意可滚动祖先滚动、resize、浏览器缩放和 `visualViewport` resize/scroll 时重新定位。
-- 浮层先按可用空间选择向下或向上展开，再把水平与垂直边界 clamp 到 viewport 安全边距内；宽度至少等于 trigger，且不得出现在 trigger 后方、偏离锚点或被应用 chrome 遮挡。
-- 键盘合同：Arrow Up/Down 移动活动项，Home/End 到首尾，Enter/Space 选择，Escape 关闭并恢复原值，Tab 关闭并按文档顺序移出；关闭后除 Tab 自然离开外均把焦点返回 trigger。
-- 打开状态、活动项和选中项分别持久；仅移动活动项不得提前提交值。指针、触控和键盘选择必须走同一变更入口。
+- Vaadin 负责通用 Select、ComboBox、Dialog、ConfirmDialog、Button、TextField、Checkbox、RadioGroup 的焦点、ARIA、键盘、Overlay、viewport 定位与移动端兼容；项目代码只负责顾客工作流、值、校验、拼豆颜色渲染和主题映射。
+- 色板、拼板、颜色系列、抖动方式及其他短单值列表使用 `vaadin-select`。桌面与移动端使用同一个字段旁锚定浮层，点选后立即提交并关闭；“全部系列 / A 系列 / B 系列”等短列表不得导航到全屏页面。
+- 需要搜索的长单值列表使用 `vaadin-combo-box`，不得重新实现筛选、活动项、键盘循环或 IME 合成处理。
+- 2–4 个互斥且确实需要同时比较的顾客预设使用可见 radio cards，但状态与语义必须由 `vaadin-radio-group` / `vaadin-radio-button` 或只负责业务值同步的薄适配器承载，不得实现第二套键盘或焦点引擎。
+- “手边有的颜色”使用唯一 `vaadin-dialog`：包含 `vaadin-text-field` 搜索、`vaadin-select` 系列筛选、项目自有拼豆色块网格和 `vaadin-button` 操作。移动端对话框使用全屏主题，桌面使用居中宽面板；关闭、重新打开或切换系列不得丢失选中值和网格滚动位置。
+- 拼豆颜色网格可使用 Vaadin Checkbox 或可靠的原生 checkbox，但项目只自定义色块、色号、分组、计数和业务状态。选中、当前活动、hover 与键盘焦点必须视觉分离，不能让全部已选颜色同时呈现为焦点。
+- 全部 Vaadin 组件只能通过现有语义 Token、公开 CSS 自定义属性、`theme` 属性和文档化 `::part()` 适配；不得查询或依赖私有 Shadow DOM 结构。
+- 业务代码通过类型化的小控制器同步值，不得使用宽泛 `any`，也不得从 Vaadin 私有 DOM 读取状态。
 
 #### 3.4.9 顾客化准备预设
 
@@ -629,7 +631,7 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 准备阶段和编辑阶段均提供按色号搜索、按 series 分组；编辑阶段提供“全部可用”“已使用”“最近使用”筛选。
 - 准备阶段提供选择全部与清空选择；清空后必须阻止生成并给出可操作提示，不得静默保留最后一色。
 - 最近使用颜色仅存在当前项目会话，不写入持久存储。
-- 切换工具、颜色、材料、设置、预设、选择器或编辑矩阵时，不得用 `innerHTML` 重建整个 PrepareWorkspace、inspector、WorkspaceSheet、MobilePickerPanel 或 ExportCompletionPanel；通过持久节点做定点属性/文本更新，面板节点身份、焦点、输入值、selection range、输入法 composition、展开状态和滚动位置必须保持。若流程转换有意移除 focused control，焦点必须移到对应的逻辑 trigger 或新状态标题，不得落到 document body。
+- 切换工具、颜色、材料、设置、预设、选择器或编辑矩阵时，不得用 `innerHTML` 重建整个 PrepareWorkspace、inspector、WorkspaceSheet、Color Dialog 或 ExportCompletionPanel；通过持久节点做定点属性/文本更新，面板节点身份、焦点、输入值、selection range、输入法 composition、展开状态和滚动位置必须保持。若流程转换有意移除 focused control，焦点必须移到对应的逻辑 trigger 或新状态标题，不得落到 document body。
 - 收起态 sheet 始终显示当前工具名称、当前颜色 swatch 与色号、“工具与颜色”入口和当前阶段主操作；不得只剩细 drag handle 或让顾客先展开才知道当前状态。
 - 移动端 bottom sheet 拖动期间高度跟随 pointer，松手后按位置与速度吸附到收起、半屏或全屏；取消手势恢复最近稳定态。
 
@@ -868,7 +870,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
    - 材料：总数、分色数、实际尺寸、拼板。
    - 编辑：工具、颜色、撤销/重做、视图、镜像和按需展开的“定位格子”。
    - 完成：分享图片、打印制作、材料清单、保存项目。
-   - 选择器：短列表或长列表的移动 picker 临时替换 sheet 内容并可返回，不新增容器层。
+   - 选择器：短列表在原字段旁打开锚定 `vaadin-select`；复杂颜色选择打开单一全屏主题 `vaadin-dialog`，不替换或搬运 sheet DOM。
 
 ### 16.2 桌面端
 
@@ -883,10 +885,10 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 生成后直接进入可编辑矩阵，不创建虚假“完成页”。
 - 导出入口显示当前图纸统计摘要，不显示 revision、`rN`、schema 或其他实现术语。
 - 当前会话在内存中保留源 `File`、裁剪与全部生成设置，允许从编辑器返回准备阶段调整并再次生成。
-- 返回准备阶段不清空当前矩阵；重新生成前如存在生成后的编辑，使用项目自有确认表面明确提示将以新矩阵替换这些编辑，并提供“先保存项目”“放弃修改并继续”“取消”。
+- 返回准备阶段不清空当前矩阵；重新生成前如存在生成后的编辑，使用 `vaadin-confirm-dialog` 明确提示将以新矩阵替换这些编辑，并提供“先保存项目”“放弃修改并继续”“取消”。
 - “重新生成”保留源图片与设置，成功后建立新的差异历史基线并替换矩阵；请求失败或取消时保持旧矩阵。
 - 从项目 JSON 恢复且没有源图片时仍可继续编辑和导出；若要重新生成，必须重新选择图片并明确显示来源匹配责任。
-- “更换图片”在存在未保存编辑时使用同一项目确认表面；确认后回到上传阶段并清理旧图、旧矩阵、历史、请求和 Object URL。
+- “更换图片”在存在未保存编辑时使用同一 `vaadin-confirm-dialog`；确认后回到上传阶段并清理旧图、旧矩阵、历史、请求和 Object URL。
 - 刷新后显示明确空状态，不暗示项目已云端保存。
 
 ## 17. 无障碍
@@ -898,9 +900,9 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 裁剪同时提供 X、Y、宽、高数值输入以及键盘移动/缩放；Pointer 控件不是唯一入口。
 - inspector tabs 必须具备 `tablist`、roving `tabindex`、`aria-controls`、对应 `tabpanel`，并支持左右/Home/End 键切换。
 - segmented/radio cards 必须暴露组名、单一选中项、禁用状态和错误说明；点击整个卡片与 Space/Arrow 操作得到相同结果。
-- `UiSelectPopover` trigger 必须暴露 `aria-haspopup=listbox`、`aria-expanded` 与浮层关系；listbox 使用稳定 option ID 和 `aria-activedescendant` 或 roving focus，活动项与选中项不得混淆。
-- 可搜索颜色选择器使用标准 combobox/listbox 关系，宣告筛选结果数量和无结果状态；关闭后按第 3.4.8 节恢复或移动焦点。
-- 移动 picker 打开后焦点进入标题或搜索框，焦点被限制在当前 sheet 表面；返回后恢复到原 trigger。软键盘和 `visualViewport` 变化不得遮挡搜索框、活动项或确认操作。
+- `vaadin-select`、`vaadin-radio-group` 与 `vaadin-radio-button` 负责通用键盘行为、选中状态、禁用状态、焦点与可访问关系；项目不得复制 listbox、roving focus 或 active-descendant 引擎。
+- 可用颜色 Dialog 使用 `vaadin-text-field` 筛选项目自有复选网格，并通过稳定 `role=status` 宣告结果数量和无结果状态；关闭后的焦点恢复由 `vaadin-dialog` 负责。
+- 移动端颜色 Dialog 使用全屏主题，标题、搜索、系列、网格、数量和完成操作始终属于同一个 Dialog；软键盘和安全区不得遮挡搜索框、网格或完成操作。
 - 异步生成、导入、导出、撤销/重做、手势取消和 sheet 状态通过稳定的 `role=status` / `aria-live` 区域宣告，不能依赖 toast 消失前被看见。
 - 所有主要控件和 sheet 完整标题拖拽区的命中区域至少 44 × 44 CSS px；焦点环在 Canvas、裁剪、tabs、颜色和导出控件上始终可见。
 - `prefers-reduced-motion` 下禁用非必要 sheet 弹性和画布过渡。
@@ -959,8 +961,8 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - bottom sheet 拖动期间跟手并在取消/松手后稳定吸附；inspector 切换和编辑不丢滚动或焦点。
 - 裁剪可用键盘和数值输入完成；tabs 箭头键、roving focus、tabpanel 关系完整。
 - 收起态 sheet 始终显示当前工具、当前颜色、“工具与颜色”和主操作；标题区整体可点击/拖拽，所有命中区至少 44 × 44 CSS px。
-- 移动 picker、软键盘与安全区同时出现时，搜索、活动项、返回和确认操作仍可见；任何时刻只有一个 sheet 表面。
-- sheet、toast、选择上下文栏和 popover 不得持续遮挡当前目标 cell；矩阵四边与四角均可移入无控件遮挡的可编辑区域。
+- 移动全屏颜色 Dialog、软键盘与安全区同时出现时，标题、搜索、系列、网格、数量和完成操作仍可见；不得叠加第二层移动选择表面。
+- sheet、toast、选择上下文栏和 Vaadin overlay 不得持续遮挡当前目标 cell；矩阵四边与四角均可移入无控件遮挡的可编辑区域。
 - `prefers-reduced-motion`、200% 文本缩放和屏幕阅读器状态分别通过聚焦验收。
 - 更换图片清理旧结果和 Object URL。
 - 刷新显示真实空状态；服务失败后可重试并恢复流程。
@@ -971,12 +973,11 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 自动推荐在固定图片 fixtures 上稳定解析为 `photo` 或 `pixelArt`，专业设置手动覆盖后生成请求和项目 JSON 使用覆盖值。
 - 小巧/推荐/细致、自定义宽高、常规/迷你/自定义拼豆、简单/推荐/细致颜色和容易制作/模拟渐变逐项映射到第 3.4.9 节既有合同；预计成品尺寸随每次改动更新。
 - 默认准备表面不出现最大颜色、可用色 IDs、采样、抖动、透明阈值、间距或自定义拼板尺寸；这些值在展开“专业设置”后可编辑并保持既有项目值。
-- 顾客主流程没有原生 `<select>`。2–4 选项、桌面短列表、长颜色列表和移动 picker 分别使用第 3.4.8 节规定的控件。
-- `UiSelectPopover` 对 portal、fixed 锚定、向上/向下翻转、viewport clamp、scroll/resize/zoom/`visualViewport` 重定位、层级和 trigger 对齐均有聚焦测试。
-- 选择器对 Arrow/Home/End/Enter/Space/Escape/Tab、活动项/选中项分离、焦点返回、ARIA 关系与筛选状态均有聚焦测试。
-- 移动 picker 替换现有 sheet 内容并可返回，测试中不得发现叠加 sheet、modal、drawer 或 popover。
+- 顾客主流程没有原生 `<select>`。短单值列表使用锚定 `vaadin-select`；需要同时看见全部选项的预设使用 Vaadin radio cards；颜色多选使用单一 `vaadin-dialog`。
+- `vaadin-select` 的锚定、翻转、viewport placement、scroll/resize/zoom/`visualViewport` 重定位、层级、键盘、焦点返回和 ARIA 关系由官方组件合同覆盖，项目只验证业务值同步与主题适配。
+- 颜色 Dialog 在桌面为居中宽面板、移动端为全屏主题；关闭和重新打开后保持查询、系列、网格滚动与已选值，且不得出现叠加 sheet、drawer 或自研 popover。
 - 首次手势提示非阻塞且只在当前页面会话显示；“定位格子”按需展开；矩形选择显示尺寸及复制、移动、清空、取消。
-- 工具、颜色、材料、设置、预设和矩阵更新前后，PrepareWorkspace、inspector、WorkspaceSheet、MobilePickerPanel 与 ExportCompletionPanel 的关键节点身份、焦点元素、输入值、selection range、composition、展开状态和滚动位置保持；有意移除控件时焦点移动到规定的逻辑目标。
+- 工具、颜色、材料、设置、预设和矩阵更新前后，PrepareWorkspace、inspector、WorkspaceSheet、Vaadin Color Dialog 与 ExportCompletionPanel 的关键业务节点身份、输入值、展开状态和滚动位置保持；有意移除控件时焦点移动到规定的逻辑目标。
 - 导出只有分享图片 PNG、打印制作 PDF、材料清单 CSV、保存项目 JSON 四个任务；PNG 只有纯图案/带标注，PDF 始终为制作级拼板文档，移动端导出不叠加 modal。
 - 顾客界面、状态、PNG/PDF/CSV 可见文字和下载文件名的术语扫描不得出现 revision、`rN`、schema、contract、alpha、CIEDE2000 或内部枚举值；项目 JSON 和必要内部元数据除外。
 
@@ -995,7 +996,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 | 修复 repair  | `backend/app/main.py`                  | 增加新接口、统一错误与取消安全；保留静态前端挂载和 health。                            |
 | 修复 repair  | `src/features/grid-api/client.ts`      | 改为通用 API client，接受 `AbortSignal`，保留 grid 合同解析。                          |
 | 修复 repair  | `src/app.ts`、`src/main.ts`            | 保留领域编排与状态机，拆出顾客流程、持久面板和导出工作区，避免继续扩张整页字符串渲染。 |
-| 修复 repair  | `src/styles/page.css`、`tokens.css`    | 在既有薄荷工作台 tokens 上补全选择器、上下文栏、safe area、单一 sheet 和响应式状态。   |
+| 修复 repair  | `src/styles/page.css`、`tokens.css`、`src/styles/vaadin-theme.css` | 在既有薄荷工作台 tokens 上补全产品布局，并通过单一 Vaadin 主题适配器映射公开 CSS 属性、parts、safe area 和响应式 Dialog 状态。 |
 | 替换 replace | README 中产品定义                      | 改为完整拼豆生成器，并只指向本文件作为产品权威。                                       |
 | 新增 new     | owner seed、palette 生成脚本与生成资产 | 从唯一 owner seed 同时生成 JSON、TypeScript、Python 和人类清单，并执行 39/221 验证。   |
 | 新增 new     | `src/domain/project/*`                 | 项目 schema、矩阵不变量、统计、物理尺寸和拼板。                                        |
@@ -1004,7 +1005,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 | 新增 new     | `src/features/pattern-editor/*`        | Canvas、工具、命中测试、Pointer Events、历史和视图变换。                               |
 | 新增 new     | `src/features/pattern-export/*`        | PNG/CSV/JSON client 导出与 PDF API。                                                   |
 | 新增 new     | 顾客流程与预设模块                     | 两任务入口、自动推荐、顾客预设到既有 generation/grid 合同的纯函数映射。                |
-| 新增 new     | 共用选择器与 overlay 模块              | radio cards、`UiSelectPopover`、combobox/listbox 与单一移动 picker，共享状态合同。     |
+| 替换 replace | Vaadin 表单、选择与 overlay 组件       | 使用官方 Select、Dialog、ConfirmDialog、Button、TextField、Checkbox、RadioGroup；删除自研 popover/listbox/mobile picker/focus-trap。 |
 | 新增 new     | 持久 inspector/sheet 模块              | 定点更新 DOM，保持节点身份、焦点、输入和滚动；承载 peek、工具、材料与完成导出状态。    |
 | 新增 new     | backend pattern/palette/export 模块    | 后端权威生成、校验、统计与 Pillow 导出。                                               |
 
@@ -1062,15 +1063,15 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 - 前端：palette validation、schema、deterministic mapping、transparency、statistics、dimensions、undo/redo、horizontal/vertical double mirror、export consistency。
 - 前端补充：gesture state、pinch/pan bounds、pointer cancellation、stroke interpolation、diff history、palette restriction、项目 JSON round-trip、custom board、capabilities fallback、inspector focus/scroll、bottom sheet drag、keyboard crop 和 tabs semantics。
-- 顾客交互聚焦测试：两任务入口、自动推荐与手动覆盖、全部预设映射、专业设置折叠、radio cards、`UiSelectPopover` portal/fixed positioning/flip/clamp/reposition、popover 键盘与 ARIA、combobox/listbox 搜索、单一移动 picker、sheet peek 精确内容、完整标题拖拽区、首次提示、定位格子、选择上下文栏、单层导出、术语负向扫描、持久节点身份/焦点/输入/selection range/滚动，以及 320/375/390/430/768/1024/1440 响应式状态。
+- 顾客交互聚焦测试：两任务入口、自动推荐与手动覆盖、全部预设映射、专业设置折叠、Vaadin radio cards、Select、ComboBox、颜色 Dialog、ConfirmDialog、值同步、关闭后焦点、滚动保持、sheet peek 精确内容、完整标题拖拽区、首次提示、定位格子、选择上下文栏、单层导出、术语负向扫描，以及 320/375/390/430/768/1024/1440 响应式状态。
 - 后端：palette parity、project validation、generate determinism、alpha zero、API errors、existing-chart label/coordinate/legend preservation、double mirror RGBA identity、pure/annotated PNG、multi-page PDF coverage、CSV parity、custom board 和 immutable revision consistency。
 - 不添加 Playwright。
 - 依次运行 `pnpm run generate:palettes`、`pnpm run generate:icons`、`pnpm run generate:tokens`、`pnpm run generate:brand`，确认生成 diff 只包含预期变化；随后运行总门禁 `pnpm run check` 并单独记录其中测试、类型、lint、格式和 production build 结果。
 - 运行后端 pytest 并记录通过/失败/跳过数。
 - 运行 `pnpm run benchmark:editor`，记录可重复的 100 × 100 / 300 × 300 编辑环境、结果和阈值判定。
 - 通过 `./scripts/start-local.sh` 启动统一 FastAPI 服务，检查 `/api/health`、`/api/capabilities`、`/api/palettes`，并以真实 fixtures 检查 pattern generate/export 与 grid detect/mirror。
-- 使用应用内浏览器且不使用 mock，分别以真实照片、真实像素画、owner 已有图纸和项目 JSON 完成手动验收；覆盖鼠标、触控模拟与键盘，全部 dropdown/picker、准备预设、专业设置、sheet 三态、编辑工具、平移/缩放、选择、重新生成、材料、正反面、矩阵镜像、智能图纸镜像及四种导出。
-- 在 390 px 移动视口和 1440 px 桌面视口至少捕获：任务上传、准备默认、专业设置展开、编辑 sheet peek/桌面 inspector、选择上下文、导出完成、已有图纸镜像；另捕获桌面 popover 与移动 picker 打开态。320/375/430/768/1024 的布局可用检查必须记录，即使不为每个状态重复截图。
+- 使用应用内浏览器且不使用 mock，分别以真实照片、真实像素画、owner 已有图纸和项目 JSON 完成手动验收；覆盖鼠标、触控模拟与键盘，全部 Vaadin Select、ComboBox、Dialog、ConfirmDialog、准备预设、专业设置、sheet 三态、编辑工具、平移/缩放、选择、重新生成、材料、正反面、矩阵镜像、智能图纸镜像及四种导出。
+- 在 390 px 移动视口和 1440 px 桌面视口至少捕获：任务上传、准备默认、专业设置展开、编辑 sheet peek/桌面 inspector、选择上下文、导出完成、已有图纸镜像；另捕获锚定 Select、移动全屏颜色 Dialog 和桌面居中颜色 Dialog。320/375/430/768/1024 的布局可用检查必须记录，即使不为每个状态重复截图。
 - 刷新根目录 `design-qa.md`，明确它是链接本规范的非规范性验收证据；逐张记录截图路径、viewport、DPR、fixture、状态、日期、工作树基线、预期/实际、控制台结果和剩余问题。旧 commit 截图不得冒充当前验收。
 - Product Design 验收必须在同一轮中用图像查看工具同时检查批准的视觉参考与最新浏览器截图，至少记录文案、布局、字体、颜色、容器/间距、Canvas chrome、响应式和交互状态的对照结果；P0/P1/P2 未清零时不得交付。
 

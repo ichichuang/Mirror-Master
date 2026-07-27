@@ -15,13 +15,6 @@ import {
   syncCropNumericInputValues,
   type PrepareColor,
 } from '../src/features/prepare-workspace/prepareWorkspace';
-import {
-  createPreparationSelectController,
-  type SelectionMediaQuery,
-} from '../src/features/prepare-workspace/preparationSelect';
-import { createAvailableColorMobilePage } from '../src/features/prepare-workspace/availableColorMobilePage';
-import { createMobileStageHost } from '../src/features/ui-select/mobileStageHost';
-
 test('mounted customer cards update real prepare controls and live physical size', () => {
   const window = new Window();
   const document = window.document;
@@ -61,14 +54,7 @@ test('mounted customer cards update real prepare controls and live physical size
   changeRadio(window, prepare, 'color-count-preset', '48');
   assert.equal(prepare.querySelector<HTMLInputElement>('[data-maximum-colors]')?.value, '48');
   changeRadio(window, prepare, 'processing-preset', 'gradient');
-  assert.equal(
-    prepare.querySelector<HTMLButtonElement>('[data-dithering]')?.dataset.value,
-    'floydSteinberg',
-  );
-  assert.equal(
-    prepare.querySelector<HTMLElement>('[data-dithering] [data-select-label]')?.textContent,
-    '细腻过渡',
-  );
+  assert.equal(controller.getState().dithering, 'floydSteinberg');
   assert.equal(controller.getState().processingPreset, 'gradient');
   controller.destroy();
   window.close();
@@ -97,11 +83,7 @@ test('mounted manual controls reverse-sync cards and custom bead size opens the 
   assert.ok(columns);
   columns.value = '49';
   columns.dispatchEvent(new window.Event('input', { bubbles: true }));
-  assert.equal(
-    prepare.querySelector<HTMLInputElement>('input[name="pattern-size-preset"][value="48"]')
-      ?.checked,
-    false,
-  );
+  assert.equal(radioGroupValue(prepare, 'pattern-size-preset'), 'custom');
   assert.equal(controller.getState().patternSizePreset, 'custom');
   const customPatternState = prepare.querySelector<HTMLElement>('[data-pattern-size-custom]');
   assert.ok(customPatternState);
@@ -121,18 +103,10 @@ test('mounted manual controls reverse-sync cards and custom bead size opens the 
   assert.ok(maximum);
   maximum.value = '12';
   maximum.dispatchEvent(new window.Event('input', { bubbles: true }));
-  assert.equal(
-    prepare.querySelector<HTMLInputElement>('input[name="color-count-preset"][value="12"]')
-      ?.checked,
-    true,
-  );
+  assert.equal(radioGroupValue(prepare, 'color-count-preset'), '12');
 
   controller.setDithering('floydSteinberg');
-  assert.equal(
-    prepare.querySelector<HTMLInputElement>('input[name="processing-preset"][value="gradient"]')
-      ?.checked,
-    true,
-  );
+  assert.equal(radioGroupValue(prepare, 'processing-preset'), 'gradient');
   controller.destroy();
   window.close();
 });
@@ -420,8 +394,10 @@ test('available-color updates retain keyed choices, focus, and scroll position',
   assert.strictEqual(document.activeElement, search);
   assert.equal(grid.scrollTop, 73);
   assert.equal(
-    grid.querySelector<HTMLInputElement>(
-      '[data-available-color-key="mard:A2"] input[data-available-color-id]',
+    (
+      grid.querySelector<HTMLElement>(
+        '[data-available-color-key="mard:A2"][data-available-color-id]',
+      ) as (HTMLElement & { checked?: boolean }) | null
     )?.checked,
     true,
   );
@@ -429,85 +405,6 @@ test('available-color updates retain keyed choices, focus, and scroll position',
     grid.querySelector<HTMLElement>('[data-available-color-key="mard:B1"]')?.hidden,
     true,
   );
-  renderer.destroy();
-  window.close();
-});
-
-test('available-color search is a multiselect combobox with composition-safe keyboard toggles', () => {
-  const window = new Window();
-  const document = window.document;
-  const search = document.createElement('input');
-  const grid = document.createElement('div');
-  const status = document.createElement('p');
-  document.body.append(search, grid, status);
-  const toggled: string[] = [];
-  const renderer = createAvailableColorGridRenderer(grid, {
-    searchInput: search,
-    status,
-    onToggle(colorId) {
-      toggled.push(colorId);
-    },
-  });
-  const colors: readonly PrepareColor[] = [
-    {
-      id: 'mard:A1',
-      code: 'A1',
-      name: '奶油白',
-      series: 'A',
-      displayHex: '#F5F0E4',
-      paletteLabel: 'MARD',
-    },
-    {
-      id: 'mard:A2',
-      code: 'A2',
-      name: '象牙白',
-      series: 'A',
-      displayHex: '#E8DFC9',
-      paletteLabel: 'MARD',
-    },
-  ];
-  renderer.update({
-    colors,
-    selectedIds: new Set(['mard:A1']),
-    query: '',
-    series: '',
-  });
-
-  assert.equal(search.getAttribute('role'), 'combobox');
-  assert.equal(search.getAttribute('aria-autocomplete'), 'list');
-  assert.equal(search.getAttribute('aria-expanded'), 'true');
-  assert.equal(search.getAttribute('aria-controls'), grid.id);
-  assert.equal(grid.getAttribute('role'), 'listbox');
-  assert.equal(grid.getAttribute('aria-multiselectable'), 'true');
-  assert.equal(status.getAttribute('role'), 'status');
-  assert.equal(status.textContent, '显示 2 种颜色');
-  const options = [...grid.querySelectorAll<HTMLElement>('[role="option"]')];
-  assert.equal(options.length, 2);
-  assert.equal(options[0]?.getAttribute('aria-selected'), 'true');
-  assert.equal(options[1]?.getAttribute('aria-selected'), 'false');
-  assert.equal(search.getAttribute('aria-activedescendant'), options[0]?.id);
-  for (const checkbox of grid.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
-    assert.equal(checkbox.tabIndex, -1);
-  }
-
-  search.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-  assert.equal(search.getAttribute('aria-activedescendant'), options[1]?.id);
-  search.dispatchEvent(new window.CompositionEvent('compositionstart', { bubbles: true }));
-  for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', ' ']) {
-    const event = new window.KeyboardEvent('keydown', {
-      key,
-      bubbles: true,
-      cancelable: true,
-    });
-    search.dispatchEvent(event);
-    assert.equal(event.defaultPrevented, false, `${key} must remain available to the IME`);
-    assert.equal(search.getAttribute('aria-activedescendant'), options[1]?.id);
-    assert.deepEqual(toggled, []);
-  }
-  search.dispatchEvent(new window.CompositionEvent('compositionend', { bubbles: true }));
-  search.dispatchEvent(new window.KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-  assert.deepEqual(toggled, ['mard:A2']);
-
   renderer.destroy();
   window.close();
 });
@@ -537,111 +434,6 @@ test('crop numeric synchronization preserves the active multi-key value and care
   assert.equal(x.value, '12.3');
   assert.equal(x.selectionStart, 4);
   assert.equal(x.selectionEnd, 4);
-  window.close();
-});
-
-test('long preparation selectors commit immediately in the application-level mobile stage', () => {
-  const window = new Window();
-  const document = window.document;
-  const header = document.createElement('header');
-  const trigger = document.createElement('button');
-  const overlay = document.createElement('div');
-  const mobileHost = document.createElement('div');
-  mobileHost.hidden = true;
-  header.getBoundingClientRect = () =>
-    ({ top: 0, right: 390, bottom: 56, left: 0, width: 390, height: 56 }) as DOMRect;
-  document.body.append(header, trigger, overlay, mobileHost);
-  const media = new MutableMediaQuery();
-  media.setMatches(true);
-  const stageHost = createMobileStageHost(mobileHost, header);
-  const changes: string[] = [];
-  const controller = createPreparationSelectController({
-    trigger,
-    overlayRoot: overlay,
-    mobileStageHost: stageHost,
-    id: 'prepare-board',
-    title: '选择拼板',
-    options: [
-      { id: '29', label: '29 × 29' },
-      { id: '14', label: '14 × 14' },
-    ],
-    selectedId: '29',
-    mediaQuery: media,
-    onChange(selectedId) {
-      changes.push(selectedId);
-    },
-  });
-
-  trigger.focus();
-  trigger.click();
-  assert.ok(mobileHost.querySelector('[data-mobile-single-select]'));
-  assert.equal(
-    mobileHost.querySelector<HTMLInputElement>('[data-mobile-selection-search]')?.hidden,
-    true,
-  );
-  mobileHost.querySelector<HTMLButtonElement>('[data-mobile-selection-option="14"]')?.click();
-  assert.deepEqual(changes, ['14']);
-  assert.equal(controller.selectedId(), '14');
-  assert.equal(mobileHost.hidden, true);
-  assert.strictEqual(document.activeElement, trigger);
-
-  controller.destroy();
-  stageHost.destroy();
-  window.close();
-});
-
-test('mobile available colors move only the filter into a dedicated page and restore focus and state', () => {
-  const window = new Window();
-  const document = window.document;
-  document.body.innerHTML = renderApp();
-  const header = document.querySelector<HTMLElement>('.app-header');
-  const mobileHost = document.querySelector<HTMLElement>('[data-mobile-stage-host]');
-  const panel = document.querySelector<HTMLElement>('[data-prepare-settings-panel]');
-  const content = document.querySelector<HTMLElement>('[data-available-color-filter]');
-  const trigger = document.querySelector<HTMLButtonElement>('[data-open-available-colors]');
-  const search = document.querySelector<HTMLInputElement>('[data-available-color-search]');
-  const grid = document.querySelector<HTMLElement>('[data-available-color-grid]');
-  assert.ok(header && mobileHost && panel && content && trigger && search && grid);
-  header.getBoundingClientRect = () =>
-    ({ top: 0, right: 390, bottom: 56, left: 0, width: 390, height: 56 }) as DOMRect;
-  const originalParent = content.parentElement;
-  const media = new MutableMediaQuery();
-  media.setMatches(true);
-  const stageHost = createMobileStageHost(mobileHost, header);
-  search.value = 'A14';
-  grid.scrollTop = 67;
-  trigger.focus();
-
-  const controller = createAvailableColorMobilePage({
-    mobileStageHost: stageHost,
-    content,
-    trigger,
-    searchInput: search,
-    mediaQuery: media,
-  });
-  trigger.click();
-
-  assert.equal(mobileHost.querySelectorAll('[data-available-color-mobile-page]').length, 1);
-  assert.equal(panel.hidden, false);
-  assert.equal(panel.inert, false);
-  assert.ok(content.closest('[data-available-color-mobile-page]'));
-  assert.equal(search.value, 'A14');
-  assert.equal(grid.scrollTop, 67);
-  assert.strictEqual(document.activeElement, search);
-
-  trigger.click();
-  assert.equal(mobileHost.querySelectorAll('[data-available-color-mobile-page]').length, 1);
-  mobileHost.querySelector<HTMLButtonElement>('[data-available-color-mobile-complete]')?.click();
-  assert.equal(mobileHost.querySelectorAll('[data-available-color-mobile-page]').length, 0);
-  assert.strictEqual(content.parentElement, originalParent);
-  assert.equal(panel.hidden, false);
-  assert.equal(panel.inert, false);
-  assert.equal(search.value, 'A14');
-  assert.equal(grid.scrollTop, 67);
-  assert.strictEqual(document.activeElement, trigger);
-
-  controller.destroy();
-  stageHost.destroy();
   window.close();
 });
 
@@ -680,26 +472,18 @@ test('external preset synchronization preserves a focused numeric caret', () => 
 });
 
 function changeRadio(window: Window, root: ParentNode, name: string, value: string): void {
-  const input = root.querySelector<HTMLInputElement>(`input[name="${name}"][value="${value}"]`);
-  assert.ok(input);
-  input.checked = true;
-  input.dispatchEvent(new window.Event('change', { bubbles: true }));
+  const group = root.querySelector<HTMLElement>(`[data-${name}]`) as
+    | (HTMLElement & { value: string })
+    | null;
+  assert.ok(group);
+  group.value = value;
+  group.dispatchEvent(new window.CustomEvent('value-changed', { bubbles: true }));
 }
 
-class MutableMediaQuery implements SelectionMediaQuery {
-  matches = false;
-  readonly listeners = new Set<() => void>();
-
-  addEventListener(_type: 'change', listener: () => void): void {
-    this.listeners.add(listener);
-  }
-
-  removeEventListener(_type: 'change', listener: () => void): void {
-    this.listeners.delete(listener);
-  }
-
-  setMatches(matches: boolean): void {
-    this.matches = matches;
-    for (const listener of this.listeners) listener();
-  }
+function radioGroupValue(root: ParentNode, name: string): string | undefined {
+  return (
+    root.querySelector<HTMLElement>(`[data-${name}]`) as
+      | (HTMLElement & { value?: string })
+      | null
+  )?.value;
 }

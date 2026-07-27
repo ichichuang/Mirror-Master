@@ -37,7 +37,13 @@
     "vite": "^8.1.5"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.8.0",
-    "@phosphor-icons/web": "^2.1.2"
+    "@phosphor-icons/web": "^2.1.2",
+    "@vaadin/button": "^25.2.6",
+    "@vaadin/checkbox": "^25.2.6",
+    "@vaadin/confirm-dialog": "^25.2.6",
+    "@vaadin/dialog": "^25.2.6",
+    "@vaadin/radio-group": "^25.2.6",
+    "@vaadin/select": "^25.2.6",
+    "@vaadin/text-field": "^25.2.6"
   }
 }

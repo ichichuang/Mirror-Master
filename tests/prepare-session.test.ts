@@ -80,5 +80,9 @@ test('late mode recommendations update only automatic sampling and preserve user
 });
 
 function checkedValue(root: ParentNode, name: string): string | undefined {
-  return root.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)?.value;
+  return (
+    root.querySelector<HTMLElement>(`[data-${name}]`) as
+      | (HTMLElement & { value?: string })
+      | null
+  )?.value;
 }

@@ -1,4 +1,5 @@
 import type { ProjectMode } from '../../domain/project';
+import type { RadioGroup } from '@vaadin/radio-group';
 import type { CustomerTask, NewPatternMode } from '../customer-flow/modeRecommendation';
 import {
   beginRecommendation,
@@ -45,8 +46,8 @@ export function beginUploadedImage(
 }
 
 export function syncUploadPrepareControls(root: ParentNode, flow: UploadPrepareFlow): void {
-  syncCheckedRadio(root, 'customer-task', flow.customerTask);
-  syncCheckedRadio(root, 'mode-preference', flow.prepareState?.preference ?? 'auto');
+  syncRadioGroup(root, '[data-customer-task]', flow.customerTask);
+  syncRadioGroup(root, '[data-mode-preference]', flow.prepareState?.preference ?? 'auto');
 }
 
 export function createAutomaticSampling(
@@ -76,7 +77,7 @@ export function recommendSampling(
 }
 
 export function syncSamplingControls(root: ParentNode, selection: SamplingSelection): void {
-  syncCheckedRadio(root, 'sampling', selection.value);
+  syncRadioGroup(root, '[data-sampling]', selection.value);
 }
 
 function supportedSampling(
@@ -90,9 +91,7 @@ function supportedSampling(
   return value;
 }
 
-function syncCheckedRadio(root: ParentNode, name: string, value: string): void {
-  for (const input of root.querySelectorAll<HTMLInputElement>(`input[name="${name}"]`)) {
-    const checked = input.value === value;
-    if (input.checked !== checked) input.checked = checked;
-  }
+function syncRadioGroup(root: ParentNode, selector: string, value: string): void {
+  const group = root.querySelector<RadioGroup>(selector);
+  if (group && group.value !== value) group.value = value;
 }

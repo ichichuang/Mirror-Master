@@ -6,6 +6,10 @@ import { renderApp } from '../src/app';
 
 const markup = renderApp();
 const pageCss = readFileSync(new URL('../src/styles/page.css', import.meta.url), 'utf8');
+const vaadinThemeCss = readFileSync(
+  new URL('../src/styles/vaadin-theme.css', import.meta.url),
+  'utf8',
+);
 
 test('upload starts with exactly two customer tasks and keeps project JSON secondary', () => {
   assert.match(markup, /id="image-file-input"[\s\S]*data-file-input/u);
@@ -16,10 +20,10 @@ test('upload starts with exactly two customer tasks and keeps project JSON secon
 
   const upload = sectionMarkup('data-upload-workspace', 'data-prepare-workspace');
   assert.deepEqual(
-    [...upload.matchAll(/name="customer-task"[\s\S]*?value="([^"]+)"/gu)].map((match) => match[1]),
+    valuesInVaadinGroup(upload, 'data-customer-task'),
     ['newPattern', 'mirrorExistingChart'],
   );
-  assert.equal(countMatches(upload, /name="customer-task"[^>]*checked/g), 1);
+  assert.match(upload, /data-customer-task[\s\S]*value="newPattern"/u);
   assert.match(upload, /制作新图纸/u);
   assert.match(upload, /镜像已有图纸/u);
   assert.doesNotMatch(upload, /value="photo"/u);
@@ -53,9 +57,7 @@ test('prepare workspace keeps one collapsed professional surface for every exper
   assert.doesNotMatch(professional.match(/^<details\b[^>]*>/u)?.[0] ?? '', /\bopen\b/u);
   assert.equal(countMatches(prepare, /<details\b/g), 1);
   for (const selector of [
-    'data-mode-preference="auto"',
-    'data-mode-preference="photo"',
-    'data-mode-preference="pixelArt"',
+    'data-mode-preference',
     'data-board-preset',
     'data-custom-board-columns',
     'data-custom-board-rows',
@@ -63,7 +65,7 @@ test('prepare workspace keeps one collapsed professional surface for every exper
     'data-available-color-grid',
     'data-available-color-search',
     'data-available-color-series',
-    'name="sampling"',
+    'data-sampling',
     'data-dithering',
     'data-alpha-threshold',
     'data-bead-pitch',
@@ -84,11 +86,14 @@ test('prepare default surface exposes approved customer presets and one generati
   assert.match(prepare, /data-palette-id/u);
 });
 
-test('renderApp has no native select and provides desktop overlay plus an application-level mobile host', () => {
+test('renderApp uses Vaadin selectors and dialogs without legacy overlay or mobile hosts', () => {
   assert.doesNotMatch(markup, /<select\b/u);
-  assert.match(markup, /data-overlay-root/u);
+  assert.match(markup, /<vaadin-select\b/u);
+  assert.match(markup, /data-available-color-dialog/u);
+  assert.match(markup, /data-confirmation-dialog/u);
   assert.match(markup, /data-prepare-settings-panel/u);
-  assert.match(markup, /data-mobile-stage-host/u);
+  assert.doesNotMatch(markup, /data-overlay-root/u);
+  assert.doesNotMatch(markup, /data-mobile-stage-host/u);
   assert.doesNotMatch(markup, /data-prepare-picker-surface/u);
   assert.doesNotMatch(markup, /data-mobile-picker-panel/u);
   assert.equal(countMatches(markup, /data-board-preset/g), 1);
@@ -96,38 +101,22 @@ test('renderApp has no native select and provides desktop overlay plus an applic
   assert.equal(countMatches(markup, /data-available-color-series/g), 1);
   assert.equal(countMatches(markup, /data-dithering/g), 1);
   assert.equal(countMatches(markup, /data-color-series-filter/g), 2);
-  assert.match(pageCss, /\.app-overlay-root\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0/u);
-  assert.match(pageCss, /\.mobile-stage-host\s*\{[^}]*position:\s*fixed/u);
+  assert.doesNotMatch(pageCss, /\.app-overlay-root|\.mobile-stage-host/u);
 });
 
-test('short prepare choices stay visible and mobile available colors use a dedicated page', () => {
+test('short prepare choices use anchored Select and available colors use one responsive Dialog', () => {
   assert.match(markup, /data-open-available-colors/u);
-  assert.deepEqual(valuesForRadioGroup(markup, 'prepare-palette'), ['default', 'mard']);
-  assert.deepEqual(valuesForRadioGroup(markup, 'prepare-board'), [
-    'standardSquare',
-    'smallSquare',
-    'custom',
-  ]);
-  assert.deepEqual(valuesForRadioGroup(markup, 'prepare-dithering'), ['none', 'floydSteinberg']);
-  assert.match(pageCss, /\.available-color-mobile-trigger\s*\{[^}]*display:\s*none[^}]*\}/u);
-  assert.doesNotMatch(pageCss, /\.mobile-picker\b/u);
-
-  const mediaStart = pageCss.indexOf('@media (min-width: 320px) and (max-width: 767px)');
-  assert.notEqual(mediaStart, -1);
-  const nextMedia = pageCss.indexOf('@media ', mediaStart + 1);
-  const mobileCss = pageCss.slice(mediaStart, nextMedia === -1 ? undefined : nextMedia);
+  for (const hook of ['data-palette-id', 'data-board-preset', 'data-dithering']) {
+    assert.match(markup, new RegExp(`<vaadin-select[\\s\\S]*?${hook}`, 'u'));
+  }
+  assert.match(markup, /<template data-available-color-dialog-template>/u);
+  assert.match(markup, /<vaadin-text-field[\s\S]*data-available-color-search/u);
+  assert.match(markup, /<vaadin-checkbox|data-available-color-grid/u);
   assert.match(
-    mobileCss,
-    /\.available-color-mobile-trigger\s*\{[^}]*display:\s*(?:inline-)?flex[^}]*\}/u,
+    vaadinThemeCss,
+    /vaadin-dialog\[theme~='color-picker'\]::part\(overlay\)[\s\S]*width:\s*100vw[\s\S]*height:\s*100dvh/u,
   );
-  assert.match(
-    mobileCss,
-    /\[data-prepare-settings-panel\]\s+\.available-color-filter\s*\{[^}]*display:\s*none[^}]*\}/u,
-  );
-  assert.match(
-    pageCss,
-    /\.available-color-mobile-page\s*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/u,
-  );
+  assert.doesNotMatch(pageCss, /available-color-mobile-page|mobile-single-select/u);
 });
 
 test('editor markup provides canvas fit and actual-size hooks', () => {
@@ -249,13 +238,13 @@ test('mobile sheet states use the shared height variable and disable drag transi
 test('new controls retain touch targets, visible focus, and status surfaces', () => {
   assert.match(pageCss, /\.secondary-upload\s*\{[^}]*min-height:\s*2\.75rem/u);
   assert.match(
-    pageCss,
-    /\.palette-controls input\[type='search'\]\s*\{[^}]*min-height:\s*2\.75rem/u,
+    vaadinThemeCss,
+    /vaadin-text-field::part\(input-field\)[\s\S]*min-height:\s*2\.75rem/u,
   );
   assert.match(pageCss, /\.color-filter-status\s*\{[^}]*min-height:/u);
   assert.match(
-    pageCss,
-    /\.palette-scope input:focus-visible \+ span[\s\S]*outline:\s*2px solid var\(--color-focus\)/u,
+    vaadinThemeCss,
+    /\.palette-scope vaadin-radio-button\[focus-ring\][\s\S]*outline:\s*2px solid var\(--color-focus-ring\)/u,
   );
 });
 
@@ -290,7 +279,21 @@ function sectionMarkup(startHook: string, endHook: string): string {
 }
 
 function valuesForRadioGroup(value: string, name: string): string[] {
-  return [...value.matchAll(new RegExp(`name="${name}"[\\s\\S]*?value="([^"]+)"`, 'gu'))].map(
+  return [
+    ...value.matchAll(
+      new RegExp(`data-choice-group="${name}"[\\s\\S]*?value="([^"]+)"`, 'gu'),
+    ),
+  ].map(
+    (match) => match[1] ?? '',
+  );
+}
+
+function valuesInVaadinGroup(value: string, hook: string): string[] {
+  const group = value.match(
+    new RegExp(`<vaadin-radio-group[\\s\\S]*?${hook}[\\s\\S]*?>([\\s\\S]*?)<\\/vaadin-radio-group>`, 'u'),
+  )?.[1];
+  assert.ok(group);
+  return [...group.matchAll(/<vaadin-radio-button[\s\S]*?value="([^"]+)"/gu)].map(
     (match) => match[1] ?? '',
   );
 }
