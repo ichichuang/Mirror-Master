@@ -2,6 +2,7 @@ import { ACCEPTED_IMAGE_ACCEPT } from './features/local-image-input/types';
 import { brandConfig } from './brand/brand.config';
 import { EXPORT_TASKS, type ExportTaskDefinition } from './features/export-completion/exportState';
 import { FIRST_USE_HINT_MESSAGE } from './features/pattern-editor/firstUseHint';
+import { PALETTES } from './generated/palettes';
 
 export function renderApp(): string {
   return `
@@ -45,6 +46,7 @@ export function renderApp(): string {
         ${renderChartWorkspace()}
       </main>
 
+      <div class="mobile-stage-host" data-mobile-stage-host hidden></div>
       ${renderConfirmationSurface()}
       <div class="app-overlay-root" data-overlay-root></div>
       <p
@@ -191,7 +193,6 @@ function renderPrepareWorkspace(): string {
         <aside
           class="prepare-settings"
           aria-label="生成设置"
-          data-prepare-picker-surface
         >
           <div data-prepare-settings-panel>
             <section class="settings-section customer-setting">
@@ -258,12 +259,27 @@ function renderPrepareWorkspace(): string {
                   <h2>色板与颜色细节</h2>
                 </div>
               </div>
-              <div class="field-row">
+              <div class="short-choice-field">
                 <span>
                   <strong>色板</strong>
                   <small>按手边可用的拼豆选择</small>
                 </span>
-                ${renderSelectTrigger('data-palette-id', 'mard', 'MARD · 221 色', '选择色板')}
+                <fieldset
+                  class="preset-cards preset-cards-two short-choice-control"
+                  data-palette-id
+                  data-value="mard"
+                >
+                  <legend class="visually-hidden">选择色板</legend>
+                  ${PALETTES.map((palette) =>
+                    renderShortChoiceCard(
+                      'prepare-palette',
+                      palette.id,
+                      palette.label,
+                      `${String(palette.colorIds.length)} 色`,
+                      palette.id === 'mard',
+                    ),
+                  ).join('')}
+                </fieldset>
               </div>
               <fieldset class="preset-cards preset-cards-three">
                 <legend class="visually-hidden">选择颜色细节</legend>
@@ -399,17 +415,39 @@ function renderPrepareWorkspace(): string {
                   聚焦裁剪框后，用方向键移动；按住 Shift 每次移动 5%；按住 Option / Alt 加方向键调整宽高。
                 </p>
 
-                <div class="field-row">
+                <div class="short-choice-field">
                   <span>
                     <strong>拼板</strong>
                     <small data-board-summary>约需 4 块拼板</small>
                   </span>
-                  ${renderSelectTrigger(
-                    'data-board-preset',
-                    'standardSquare',
-                    '29 × 29 标准方板',
-                    '选择拼板',
-                  )}
+                  <fieldset
+                    class="preset-cards preset-cards-three short-choice-control"
+                    data-board-preset
+                    data-value="standardSquare"
+                  >
+                    <legend class="visually-hidden">选择拼板</legend>
+                    ${renderShortChoiceCard(
+                      'prepare-board',
+                      'standardSquare',
+                      '标准方板',
+                      '29 × 29',
+                      true,
+                    )}
+                    ${renderShortChoiceCard(
+                      'prepare-board',
+                      'smallSquare',
+                      '小方板',
+                      '14 × 14',
+                      false,
+                    )}
+                    ${renderShortChoiceCard(
+                      'prepare-board',
+                      'custom',
+                      '自定义',
+                      '按实际孔位',
+                      false,
+                    )}
+                  </fieldset>
                 </div>
                 <fieldset class="custom-board-fields" data-custom-board-fields hidden disabled>
                   <legend>自定义拼板格数</legend>
@@ -529,12 +567,32 @@ function renderPrepareWorkspace(): string {
                 </label>
               </fieldset>
 
-                <div class="field-row">
+                <div class="short-choice-field">
                 <span>
                     <strong>颜色接近方式</strong>
                     <small>与上方“制作方式”保持同步</small>
                 </span>
-                  ${renderSelectTrigger('data-dithering', 'none', '干净色块', '选择颜色接近方式')}
+                  <fieldset
+                    class="preset-cards preset-cards-two short-choice-control"
+                    data-dithering
+                    data-value="none"
+                  >
+                    <legend class="visually-hidden">选择颜色接近方式</legend>
+                    ${renderShortChoiceCard(
+                      'prepare-dithering',
+                      'none',
+                      '干净色块',
+                      '边界清楚',
+                      true,
+                    )}
+                    ${renderShortChoiceCard(
+                      'prepare-dithering',
+                      'floydSteinberg',
+                      '细腻过渡',
+                      '相邻颜色交错',
+                      false,
+                    )}
+                  </fieldset>
                 </div>
               <label class="field-row transparency-control">
                 <span>
@@ -630,6 +688,28 @@ function renderPresetCard(
   return `
     <label class="preset-card">
       <input type="radio" name="${name}" value="${value}" ${checked ? 'checked' : ''} />
+      <span><strong>${title}</strong><small>${description}</small></span>
+      <i class="ph ph-check" aria-hidden="true"></i>
+    </label>
+  `;
+}
+
+function renderShortChoiceCard(
+  name: string,
+  value: string,
+  title: string,
+  description: string,
+  checked: boolean,
+): string {
+  return `
+    <label class="preset-card short-choice-card">
+      <input
+        type="radio"
+        name="${name}"
+        value="${value}"
+        data-short-choice-option
+        ${checked ? 'checked' : ''}
+      />
       <span><strong>${title}</strong><small>${description}</small></span>
       <i class="ph ph-check" aria-hidden="true"></i>
     </label>
@@ -864,7 +944,6 @@ function renderPatternWorkspace(): string {
           aria-labelledby="inspector-mobile-tab-tools"
           tabindex="0"
           data-sheet-content
-          data-mobile-picker-panel
           data-tabpanel-surface="mobile"
         ></div>
         <div class="sheet-primary">

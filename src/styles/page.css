@@ -22,6 +22,21 @@
   pointer-events: auto;
 }
 
+.mobile-stage-host {
+  position: fixed;
+  z-index: 70;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.mobile-stage-host > * {
+  min-width: 0;
+  min-height: 0;
+}
+
 .app-confirmation {
   position: fixed;
   z-index: 90;
@@ -908,8 +923,34 @@ select {
   gap: 0.16rem;
 }
 
+.short-choice-field {
+  display: grid;
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  gap: var(--space-2);
+}
+
+.short-choice-field > span {
+  display: grid;
+  gap: 0.16rem;
+}
+
 .field-row strong {
   font-size: 0.88rem;
+}
+
+.short-choice-field strong {
+  font-size: 0.88rem;
+}
+
+.short-choice-field small {
+  color: var(--color-ink-muted);
+  font-size: 0.74rem;
+}
+
+.short-choice-card[data-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .range-control {
@@ -1066,7 +1107,8 @@ select {
   display: grid;
   max-height: 18rem;
   grid-template-columns: repeat(auto-fill, minmax(2.9rem, 1fr));
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-medium);
   padding: var(--space-2);
@@ -2523,7 +2565,7 @@ select {
 
 .ui-select-option,
 .color-combobox-option,
-.mobile-picker-option {
+.mobile-selection-option {
   display: flex;
   width: 100%;
   min-height: 2.75rem;
@@ -2539,26 +2581,25 @@ select {
 
 .ui-select-option[aria-selected='true'],
 .color-combobox-option[aria-selected='true'],
-.mobile-picker-option[aria-selected='true'] {
+.mobile-selection-option[aria-selected='true'] {
   color: var(--color-primary);
   background: var(--color-primary-soft);
 }
 
 .ui-select-option[data-active='true']:not([aria-selected='true']),
 .color-combobox-option[data-active='true']:not([aria-selected='true']),
-.mobile-picker-option[data-active='true']:not([aria-selected='true']) {
+.mobile-selection-option[data-active='true']:not([aria-selected='true']) {
   background: var(--color-background-subtle);
 }
 
 .ui-select-option:disabled,
 .color-combobox-option:disabled,
-.mobile-picker-option:disabled {
+.mobile-selection-option:disabled {
   cursor: not-allowed;
   opacity: 0.52;
 }
 
-.color-combobox,
-.mobile-picker {
+.color-combobox {
   display: grid;
   gap: var(--space-2);
 }
@@ -2584,75 +2625,171 @@ select {
   overscroll-behavior: contain;
 }
 
-.color-combobox-status,
-.mobile-picker-status {
+.color-combobox-status {
   min-height: 1.25rem;
   color: var(--color-ink-muted);
   font-size: 0.78rem;
 }
 
-.mobile-picker {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
+.mobile-single-select,
+.available-color-mobile-page {
+  display: grid;
   width: 100%;
   height: 100%;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
-  overflow: auto;
-  padding: var(--space-4) var(--space-4)
-    calc(var(--space-4) + var(--safe-bottom) + var(--mobile-picker-safe-bottom, 0px));
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + var(--safe-bottom));
+  gap: var(--space-2);
   background: var(--color-surface);
   overscroll-behavior: contain;
 }
 
-.mobile-picker h2 {
+.mobile-single-select {
+  grid-template-rows: auto minmax(5rem, 1fr);
+}
+
+.mobile-single-select:has(.mobile-selection-search:not([hidden])) {
+  grid-template-rows: auto auto minmax(5rem, 1fr);
+}
+
+.mobile-selection-heading {
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mobile-selection-heading h2 {
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-ink);
   font-size: 1.05rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.mobile-picker > h2 {
-  position: sticky;
-  z-index: 1;
-  top: 0;
-  padding-block: var(--space-1);
-  background: var(--color-surface);
+.mobile-selection-back {
+  flex: none;
 }
 
-.mobile-picker input,
-.mobile-picker [role='listbox'] {
+.mobile-selection-search,
+.mobile-selection-listbox {
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-medium);
 }
 
-.mobile-picker input {
+.mobile-selection-search {
+  width: 100%;
   min-height: 2.75rem;
   padding-inline: var(--space-3);
+  color: var(--color-ink);
+  background: var(--color-surface-raised);
   font-size: 1rem;
 }
 
-.mobile-picker [role='listbox'] {
+.mobile-selection-listbox {
   display: grid;
-  min-height: 0;
-  overflow: auto;
+  min-height: 5rem;
+  align-content: start;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: var(--space-1);
+  background: var(--color-surface);
+  overscroll-behavior: contain;
   scrollbar-color: var(--color-border-strong) transparent;
   scrollbar-width: thin;
 }
 
-.mobile-picker-actions {
-  position: sticky;
-  bottom: 0;
+.mobile-selection-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  padding-top: var(--space-2);
-  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr);
   background: var(--color-surface);
 }
 
-.mobile-picker-actions button {
-  min-height: 2.75rem;
+.mobile-selection-actions .primary-button {
+  width: 100%;
+  min-height: 3.15rem;
+}
+
+.available-color-mobile-page {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.available-color-mobile-page > .available-color-filter {
+  min-height: 0;
+  grid-template-rows: auto auto auto minmax(5rem, 1fr) auto;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+}
+
+.available-color-mobile-page .available-color-grid {
+  min-height: 5rem;
+  max-height: none;
+}
+
+@media (min-width: 520px) and (max-width: 767px) and (max-height: 520px) {
+  .available-color-mobile-page {
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3) calc(var(--space-2) + var(--safe-bottom));
+  }
+
+  .available-color-mobile-page > .available-color-filter {
+    grid-template-columns: minmax(13rem, 0.75fr) minmax(12rem, 1fr);
+    grid-template-rows: auto auto minmax(5rem, 1fr) auto;
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+
+  .available-color-mobile-page .available-color-filter-heading {
+    display: grid;
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: max-content minmax(0, 1fr);
+    min-height: 0;
+    align-items: center;
+    justify-content: stretch;
+    gap: var(--space-1);
+  }
+
+  .available-color-mobile-page .available-color-filter-heading > div {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+
+  .available-color-mobile-page > .available-color-filter > p {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .available-color-mobile-page .available-color-controls {
+    grid-column: 1;
+    grid-row: 3 / 5;
+    align-content: start;
+    margin: 0;
+  }
+
+  .available-color-mobile-page .available-color-grid {
+    grid-column: 2;
+    grid-row: 1 / 4;
+  }
+
+  .available-color-mobile-page .color-filter-status {
+    grid-column: 2;
+    grid-row: 4;
+  }
+}
+
+.sheet-content[data-selection-open] {
+  overflow: hidden;
+  padding: 0;
+}
+
+.sheet-content[data-selection-open] > .mobile-single-select {
+  padding: var(--space-3) var(--space-4);
 }
 
 @media (min-width: 320px) and (max-width: 767px) {
@@ -2664,35 +2801,16 @@ select {
     display: none;
   }
 
-  .available-color-mobile-panel {
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .available-color-mobile-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-  }
-
-  .available-color-mobile-panel .available-color-filter {
-    display: grid;
-    min-height: 0;
-    overflow: auto;
-    border: 0;
-    padding: 0;
-  }
-
-  .available-color-mobile-panel .available-color-controls {
+  .available-color-mobile-page .available-color-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .available-color-mobile-panel .available-color-filter-heading {
+  .available-color-mobile-page .available-color-filter-heading {
     align-items: flex-start;
     flex-wrap: wrap;
   }
 
-  .available-color-mobile-panel .available-color-filter-heading > span > strong {
+  .available-color-mobile-page .available-color-filter-heading > span > strong {
     display: none;
   }
 }

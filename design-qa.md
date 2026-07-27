@@ -43,6 +43,33 @@ These are approved direction changes, not fidelity defects.
 
 Dynamic pattern content differs from the reference because the implementation renders the actual uploaded image through the real palette conversion pipeline. The spatial hierarchy and interaction model are the fidelity surface under comparison.
 
+## Selector architecture QA — 2026-07-26
+
+### Evidence
+
+- Authoritative failure evidence: the supplied mobile screenshots and task description showing the selector mounted inside `.prepare-settings`, a collapsed listbox, an empty scrollbar line, off-screen options, default-gray controls, and a selection surface beginning below the crop workspace.
+- Existing product styling baseline: `artifacts/qa/mobile-prepare.png`.
+- Updated short-choice capture: `artifacts/qa/mobile-short-choices-portrait.png`, 390 × 844.
+- Updated preparation multi-select captures: `artifacts/qa/mobile-available-colors-portrait.png`, 390 × 844, and `artifacts/qa/mobile-available-colors-landscape.png`, 740 × 390.
+- Updated editor sheet capture: `artifacts/qa/mobile-editor-sheet-selection.png`, 390 × 844.
+- Updated desktop popover capture: `artifacts/qa/desktop-floating-series.png`, 1200 × 800.
+
+### Comparison passes
+
+#### Pass 1
+
+- Replaced two-option palette and processing pickers plus three-option board presets with visible radio cards. A palette tap commits directly; the 390 × 844 capture contains two palette options, no mobile selection surface, no visible search field, and no confirmation action.
+- Moved mobile preparation selection into the root-level host below the 56 px app header. At 390 × 844, the host and selection page both measured 788 px high, from y=56 through y=844.
+- Verified the available-color listbox has a nonzero 381.6 px viewport with 684 px scroll content and 39 visible options. The preparation settings panel remains connected and is not hidden while the page is open.
+
+#### Pass 2
+
+- The first 740 × 390 layout kept the listbox at only 80 px and pushed it behind the footer. Reflowed the multi-select page into two columns for compact landscape.
+- Final 740 × 390 measurements: the page spans y=56–390; the color list spans y=112–323.6 at 211.6 px high; the series trigger ends at y=326.4; the completion footer begins at y=331.6. Title, return action, options, filters, and completion action remain visible without horizontal overflow.
+- In the pattern editor, the selector reuses the one existing bottom sheet. The capture measured one workspace sheet, one temporary selection content surface, a 142 px listbox, hidden search for three options, and unchanged sheet top at y=470 before and after selection. Selection closes immediately and returns focus to the series trigger.
+- The desktop series listbox uses fixed positioning below its trigger. At 1200 × 800 it measured y=458.2–788 with a 329.8 px Floating UI size constraint and `bottom-start` placement.
+- Dynamic buttons resolve through the project text, primary, secondary, option, selected, active, disabled, and focus-visible contracts. No browser-default gray button appears in the updated captures.
+
 ## Final result
 
 passed

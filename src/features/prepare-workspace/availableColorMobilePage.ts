@@ -1,47 +1,42 @@
-import type { AdaptiveSelectMediaQuery } from './adaptiveSelect';
+import type { MobileStageHostController, MobileStageLease } from '../ui-select/mobileStageHost';
+import type { SelectionMediaQuery } from './preparationSelect';
 
-export interface AvailableColorMobilePanelController {
+export interface AvailableColorMobilePageController {
   readonly open: () => void;
   readonly close: () => void;
   readonly isOpen: () => boolean;
   readonly destroy: () => void;
 }
 
-export interface CreateAvailableColorMobilePanelOptions {
-  readonly sheet: HTMLElement;
-  readonly panel: HTMLElement;
+export interface CreateAvailableColorMobilePageOptions {
+  readonly mobileStageHost: MobileStageHostController;
   readonly content: HTMLElement;
   readonly trigger: HTMLButtonElement;
   readonly searchInput: HTMLInputElement;
-  readonly mediaQuery?: AdaptiveSelectMediaQuery;
+  readonly mediaQuery?: SelectionMediaQuery;
 }
 
-interface SurfaceElementState {
-  readonly element: HTMLElement;
-  readonly hidden: HTMLElement['hidden'];
-  readonly inert: boolean;
-}
-
-export function createAvailableColorMobilePanel({
-  sheet,
-  panel,
+export function createAvailableColorMobilePage({
+  mobileStageHost,
   content,
   trigger,
   searchInput,
   mediaQuery: suppliedMediaQuery,
-}: CreateAvailableColorMobilePanelOptions): AvailableColorMobilePanelController {
-  const document = sheet.ownerDocument;
+}: CreateAvailableColorMobilePageOptions): AvailableColorMobilePageController {
+  const document = content.ownerDocument;
   const window = document.defaultView;
   const mediaQueryCandidate =
     suppliedMediaQuery ?? window?.matchMedia('(min-width: 320px) and (max-width: 767px)');
   if (mediaQueryCandidate === undefined) {
     throw new Error('移动颜色面板需要可用的浏览器窗口。');
   }
-  const mediaQuery: AdaptiveSelectMediaQuery = mediaQueryCandidate;
+  const mediaQuery: SelectionMediaQuery = mediaQueryCandidate;
   let surface: HTMLElement | null = null;
   let placeholder: Comment | null = null;
-  let surfaceSnapshot: readonly SurfaceElementState[] = Object.freeze([]);
+  let lease: MobileStageLease | null = null;
   let returnButton: HTMLButtonElement | null = null;
+  let completeButton: HTMLButtonElement | null = null;
+  let gridScrollTop = 0;
   let destroyed = false;
 
   trigger.addEventListener('click', open);
@@ -68,64 +63,59 @@ export function createAvailableColorMobilePanel({
     if (parent === null) return;
     placeholder = document.createComment('available-color-filter');
     parent.insertBefore(placeholder, content);
-    surfaceSnapshot = Object.freeze(
-      [...sheet.children].map((element) => {
-        const htmlElement = asHtmlElement(element);
-        return Object.freeze({
-          element: htmlElement,
-          hidden: htmlElement.hidden,
-          inert: htmlElement.inert,
-        });
-      }),
-    );
-    for (const state of surfaceSnapshot) {
-      state.element.hidden = true;
-      state.element.inert = true;
-    }
     const picker = document.createElement('section');
-    const heading = document.createElement('div');
+    const heading = document.createElement('header');
     const title = document.createElement('h2');
     const back = document.createElement('button');
-    picker.className = 'mobile-picker available-color-mobile-panel';
-    picker.dataset.mobilePicker = '';
-    picker.dataset.availableColorMobilePanel = '';
+    const actions = document.createElement('footer');
+    const complete = document.createElement('button');
+    picker.className = 'available-color-mobile-page';
+    picker.dataset.availableColorMobilePage = '';
     picker.setAttribute('role', 'group');
     picker.setAttribute('aria-labelledby', 'available-color-mobile-title');
     picker.addEventListener('keydown', onSurfaceKeydown);
-    heading.className = 'available-color-mobile-heading';
+    heading.className = 'mobile-selection-heading';
     title.id = 'available-color-mobile-title';
     title.textContent = '选择手边有的颜色';
     back.type = 'button';
-    back.className = 'secondary-button';
+    back.className = 'text-button mobile-selection-back';
     back.dataset.availableColorMobileReturn = '';
     back.textContent = '返回设置';
     back.addEventListener('click', onReturn);
+    actions.className = 'mobile-selection-actions';
+    complete.type = 'button';
+    complete.className = 'primary-button';
+    complete.dataset.availableColorMobileComplete = '';
+    complete.textContent = '完成选择';
+    complete.addEventListener('click', onReturn);
     heading.append(title, back);
-    picker.append(heading, content);
-    sheet.append(picker);
-    panel.hidden = true;
-    panel.inert = true;
+    actions.append(complete);
+    picker.append(heading, content, actions);
+    lease = mobileStageHost.mount(picker);
     surface = picker;
     returnButton = back;
-    searchInput.focus();
+    completeButton = complete;
+    const grid = content.querySelector<HTMLElement>('[data-available-color-grid]');
+    if (grid) grid.scrollTop = gridScrollTop;
+    searchInput.focus({ preventScroll: true });
   }
 
   function close(returnFocus: boolean): void {
     if (surface === null) return;
+    gridScrollTop =
+      content.querySelector<HTMLElement>('[data-available-color-grid]')?.scrollTop ?? 0;
     placeholder?.parentNode?.insertBefore(content, placeholder);
     placeholder?.remove();
     placeholder = null;
     surface.removeEventListener('keydown', onSurfaceKeydown);
     returnButton?.removeEventListener('click', onReturn);
-    surface.remove();
+    completeButton?.removeEventListener('click', onReturn);
+    lease?.release();
+    lease = null;
     surface = null;
     returnButton = null;
-    for (const state of surfaceSnapshot) {
-      state.element.hidden = state.hidden;
-      state.element.inert = state.inert;
-    }
-    surfaceSnapshot = Object.freeze([]);
-    if (returnFocus && !destroyed) trigger.focus();
+    completeButton = null;
+    if (returnFocus && !destroyed) trigger.focus({ preventScroll: true });
   }
 
   function onReturn(): void {
@@ -159,12 +149,4 @@ export function createAvailableColorMobilePanel({
       first.focus();
     }
   }
-}
-
-function asHtmlElement(element: Element): HTMLElement {
-  const window = element.ownerDocument.defaultView;
-  if (window === null || !(element instanceof window.HTMLElement)) {
-    throw new Error('移动颜色面板只能管理 HTML 元素。');
-  }
-  return element;
 }

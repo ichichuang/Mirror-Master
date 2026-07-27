@@ -97,13 +97,17 @@ import {
   type ExportTaskId,
 } from './features/export-completion/exportState';
 import {
-  createAdaptiveSelectController,
-  type AdaptiveSelectController,
-} from './features/prepare-workspace/adaptiveSelect';
+  createEditorSheetSelectController,
+  type EditorSheetSelectController,
+} from './features/pattern-editor/editorSheetSelect';
 import {
-  createAvailableColorMobilePanel,
-  type AvailableColorMobilePanelController,
-} from './features/prepare-workspace/availableColorMobilePanel';
+  createAvailableColorMobilePage,
+  type AvailableColorMobilePageController,
+} from './features/prepare-workspace/availableColorMobilePage';
+import {
+  createPreparationSelectController,
+  type PreparationSelectController,
+} from './features/prepare-workspace/preparationSelect';
 import {
   createAvailableColorGridRenderer,
   createLatestSourceRequest,
@@ -140,11 +144,17 @@ import {
   ProjectImportError,
 } from './features/project-import/projectImport';
 import {
-  createMobilePicker,
   createUiSelectPopover,
-  type MobilePickerController,
   type UiSelectPopoverController,
 } from './features/ui-select/uiSelect';
+import {
+  createMobileStageHost,
+  type MobileStageHostController,
+} from './features/ui-select/mobileStageHost';
+import {
+  createShortChoiceController,
+  type ShortChoiceController,
+} from './features/ui-select/shortChoice';
 import type { UiSelectOption } from './features/ui-select/state';
 import {
   captureWorkspaceSurfaceFocus,
@@ -162,10 +172,12 @@ import {
 
 type AppStage = 'upload' | 'prepare' | 'editor' | 'chart';
 type InspectorPanel = 'tools' | 'palette' | 'materials' | 'settings';
-type SelectController = Pick<
-  UiSelectPopoverController | MobilePickerController,
-  'destroy' | 'selectedId' | 'setOptions' | 'setValue'
->;
+interface SelectController {
+  readonly destroy: () => void;
+  readonly selectedId: () => string | undefined;
+  readonly setOptions: (options: readonly UiSelectOption[]) => void;
+  readonly setValue: (selectedId: string) => void;
+}
 
 interface SelectedImage {
   readonly file: File;
@@ -207,6 +219,11 @@ app.innerHTML = renderApp();
 
 const shell = required(app, '[data-app-shell]', HTMLElement);
 const appHeader = required(app, '.app-header', HTMLElement);
+const mobileStageHostElement = required(app, '[data-mobile-stage-host]', HTMLElement);
+const mobileStageHost: MobileStageHostController = createMobileStageHost(
+  mobileStageHostElement,
+  appHeader,
+);
 const mainWorkspace = required(app, '[data-app-shell] > .main-workspace', HTMLElement);
 const uploadWorkspace = required(app, '[data-upload-workspace]', HTMLElement);
 const prepareWorkspace = required(app, '[data-prepare-workspace]', HTMLElement);
@@ -224,21 +241,13 @@ const headerContext = required(app, '[data-header-context]', HTMLElement);
 const headerReplace = required(app, '[data-replace-image]', HTMLButtonElement);
 const overlayRoot = required(app, '[data-overlay-root]', HTMLElement);
 const confirmationSurface = required(app, '[data-confirmation-surface]', HTMLElement);
-const confirmationTitle = required(
-  confirmationSurface,
-  '[data-confirmation-title]',
-  HTMLElement,
-);
+const confirmationTitle = required(confirmationSurface, '[data-confirmation-title]', HTMLElement);
 const confirmationDescription = required(
   confirmationSurface,
   '[data-confirmation-description]',
   HTMLElement,
 );
-const confirmationStatus = required(
-  confirmationSurface,
-  '[data-confirmation-status]',
-  HTMLElement,
-);
+const confirmationStatus = required(confirmationSurface, '[data-confirmation-status]', HTMLElement);
 const confirmationSave = required(
   confirmationSurface,
   '[data-confirmation-save]',
@@ -319,14 +328,14 @@ let chartAxis: 'horizontal' | 'vertical' = 'horizontal';
 let loadRevision = 0;
 let preparePresetControls: PreparePresetControlsController | null = null;
 let availableColorGridRenderer: AvailableColorGridRenderer | null = null;
-let availableColorMobilePanelController: AvailableColorMobilePanelController | null = null;
-let boardSelectController: AdaptiveSelectController | null = null;
-let paletteSelectController: AdaptiveSelectController | null = null;
-let availableSeriesSelectController: AdaptiveSelectController | null = null;
-let ditheringSelectController: AdaptiveSelectController | null = null;
+let availableColorMobilePageController: AvailableColorMobilePageController | null = null;
+let boardSelectController: ShortChoiceController | null = null;
+let paletteSelectController: ShortChoiceController | null = null;
+let availableSeriesSelectController: PreparationSelectController | null = null;
+let ditheringSelectController: ShortChoiceController | null = null;
 let editorSeriesSelectControllers: readonly SelectController[] = Object.freeze([]);
 let editorDesktopSeriesController: UiSelectPopoverController | null = null;
-let editorMobileSeriesController: MobilePickerController | null = null;
+let editorMobileSeriesController: EditorSheetSelectController | null = null;
 let workspaceLayoutMode: WorkspaceLayoutMode | null = null;
 let syncingPreparePresetCrop = false;
 let confirmationRequest: ConfirmationRequest | null = null;
@@ -820,14 +829,10 @@ function setupPrepare(): void {
   const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
   const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
   const aspectButton = required(prepareWorkspace, '[data-aspect-lock]', HTMLButtonElement);
-  const boardPreset = required(prepareWorkspace, '[data-board-preset]', HTMLButtonElement);
-  const paletteSelect = required(prepareWorkspace, '[data-palette-id]', HTMLButtonElement);
+  const boardPreset = required(prepareWorkspace, '[data-board-preset]', HTMLFieldSetElement);
+  const paletteSelect = required(prepareWorkspace, '[data-palette-id]', HTMLFieldSetElement);
   const maximumColors = required(prepareWorkspace, '[data-maximum-colors]', HTMLInputElement);
-  const alphaThreshold = required(
-    prepareWorkspace,
-    '[data-alpha-threshold]',
-    HTMLInputElement,
-  );
+  const alphaThreshold = required(prepareWorkspace, '[data-alpha-threshold]', HTMLInputElement);
   const beadDiameter = required(prepareWorkspace, '[data-bead-diameter]', HTMLInputElement);
   const beadPitch = required(prepareWorkspace, '[data-bead-pitch]', HTMLInputElement);
   const customBoardFields = required(
@@ -1117,66 +1122,47 @@ function setupPrepare(): void {
     searchInput: availableColorSearch,
     status: required(prepareWorkspace, '[data-available-color-filter-status]', HTMLElement),
   });
-  const pickerSurface = required(prepareWorkspace, '[data-prepare-picker-surface]', HTMLElement);
-  const pickerPanel = required(prepareWorkspace, '[data-prepare-settings-panel]', HTMLElement);
-  availableColorMobilePanelController = createAvailableColorMobilePanel({
-    sheet: pickerSurface,
-    panel: pickerPanel,
+  availableColorMobilePageController = createAvailableColorMobilePage({
+    mobileStageHost,
     content: availableColorFilter,
     trigger: openAvailableColors,
     searchInput: availableColorSearch,
   });
-  boardSelectController = createAdaptiveSelectController({
-    trigger: boardPreset,
-    overlayRoot,
-    id: 'prepare-board',
-    title: '选择拼板',
+  boardSelectController = createShortChoiceController({
+    root: boardPreset,
     options: boardSelectOptions(),
     selectedId: selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare'),
-    mobileSurface: pickerSurface,
-    mobilePanel: pickerPanel,
     onChange() {
       updateCustomBoardVisibility();
       updatePrepareSummaries();
     },
   });
-  paletteSelectController = createAdaptiveSelectController({
-    trigger: paletteSelect,
-    overlayRoot,
-    id: 'prepare-palette',
-    title: '选择色板',
+  paletteSelectController = createShortChoiceController({
+    root: paletteSelect,
     options: paletteSelectOptions(),
     selectedId: selectValue(prepareWorkspace, '[data-palette-id]', 'mard'),
-    mobileSurface: pickerSurface,
-    mobilePanel: pickerPanel,
     onChange(selectedId) {
       applyPreparePalette(selectedId);
     },
   });
-  availableSeriesSelectController = createAdaptiveSelectController({
+  availableSeriesSelectController = createPreparationSelectController({
     trigger: availableColorSeries,
     overlayRoot,
+    mobileStageHost,
     id: 'prepare-color-series',
     title: '筛选颜色系列',
     options: [{ id: '', label: '全部系列' }],
     selectedId: '',
-    mobileSurface: pickerSurface,
-    mobilePanel: pickerPanel,
     onChange(selectedId) {
       prepareColorSeries = selectedId;
       renderAvailableColorFilter();
     },
   });
-  const ditheringTrigger = required(prepareWorkspace, '[data-dithering]', HTMLButtonElement);
-  ditheringSelectController = createAdaptiveSelectController({
-    trigger: ditheringTrigger,
-    overlayRoot,
-    id: 'prepare-dithering',
-    title: '选择颜色接近方式',
+  const ditheringChoices = required(prepareWorkspace, '[data-dithering]', HTMLFieldSetElement);
+  ditheringSelectController = createShortChoiceController({
+    root: ditheringChoices,
     options: ditheringSelectOptions(),
     selectedId: selectValue(prepareWorkspace, '[data-dithering]', 'none'),
-    mobileSurface: pickerSurface,
-    mobilePanel: pickerPanel,
     onChange(selectedId) {
       const dithering = selectedId === 'floydSteinberg' ? 'floydSteinberg' : 'none';
       preparePresetControls?.setDithering(dithering);
@@ -1278,7 +1264,7 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
   if (!selectedImage) {
     return;
   }
-  availableColorMobilePanelController?.close();
+  availableColorMobilePageController?.close();
   showStage('prepare');
   const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
   const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
@@ -1485,11 +1471,7 @@ function updatePrepareSummaries(): void {
 function syncAlphaThresholdCopy(): void {
   const threshold = numberValue(prepareWorkspace, '[data-alpha-threshold]', 0.1);
   const label = required(prepareWorkspace, '[data-alpha-threshold-label]', HTMLElement);
-  const description = required(
-    prepareWorkspace,
-    '[data-alpha-threshold-description]',
-    HTMLElement,
-  );
+  const description = required(prepareWorkspace, '[data-alpha-threshold-description]', HTMLElement);
   if (threshold <= 0.05) {
     label.textContent = '低';
     description.textContent = '低：保留更多半透明内容';
@@ -1545,12 +1527,11 @@ function initializePrepareColorSeries(): void {
   ];
   availableSeriesSelectController?.setOptions(options);
   availableSeriesSelectController?.setValue(prepareColorSeries);
-  required(prepareWorkspace, '[data-available-color-search]', HTMLInputElement).value =
-    prepareColorQuery;
+  required(app, '[data-available-color-search]', HTMLInputElement).value = prepareColorQuery;
 }
 
 function updateAvailableColorSummary(): void {
-  required(prepareWorkspace, '[data-available-color-summary]', HTMLElement).textContent =
+  required(app, '[data-available-color-summary]', HTMLElement).textContent =
     availableColorIds.size === 0 ? '尚未选择颜色' : `已选择 ${String(availableColorIds.size)} 色`;
 }
 
@@ -1582,7 +1563,8 @@ async function startPatternGeneration(replacementConfirmed = false): Promise<voi
   ) {
     openConfirmation({
       title: '重新生成会替换当前编辑',
-      description: '新图纸生成成功后，当前逐格修改和撤销记录将被替换。你可以先保存项目，之后再继续。',
+      description:
+        '新图纸生成成功后，当前逐格修改和撤销记录将被替换。你可以先保存项目，之后再继续。',
       onContinue() {
         void startPatternGeneration(true);
       },
@@ -2039,9 +2021,9 @@ function setupPatternWorkspace(): void {
     controllers.push(editorDesktopSeriesController);
   }
   if (mobileSeriesTrigger) {
-    editorMobileSeriesController = createMobilePicker({
+    editorMobileSeriesController = createEditorSheetSelectController({
       sheet: workspaceSheet,
-      panel: mobileSheetContent,
+      content: mobileSheetContent,
       trigger: mobileSeriesTrigger,
       id: 'editor-series-mobile',
       title: '筛选颜色系列',
@@ -3008,7 +2990,8 @@ function confirmReplaceImage(replacementConfirmed = false): void {
   ) {
     openConfirmation({
       title: '更换图片会结束当前编辑',
-      description: '当前图纸、逐格修改和撤销记录都会从工作区移除。你可以先保存项目，之后再回来继续。',
+      description:
+        '当前图纸、逐格修改和撤销记录都会从工作区移除。你可以先保存项目，之后再回来继续。',
       onContinue() {
         confirmReplaceImage(true);
       },
@@ -3024,7 +3007,7 @@ function resetToUpload(): void {
   exportCoordinator.invalidate();
   chartMirrorController?.abort();
   recommendationRequests.cancel();
-  availableColorMobilePanelController?.close();
+  availableColorMobilePageController?.close();
   canvasController?.destroy();
   canvasController = null;
   history = null;
@@ -3051,6 +3034,10 @@ function resetToUpload(): void {
 }
 
 function showStage(nextStage: AppStage): void {
+  if (stage === 'prepare' && nextStage !== 'prepare') {
+    availableSeriesSelectController?.close();
+    availableColorMobilePageController?.close();
+  }
   if (stage === 'editor' && nextStage !== 'editor') {
     editorDesktopSeriesController?.close();
     editorMobileSeriesController?.cancel();
@@ -3350,7 +3337,7 @@ function ditheringSelectOptions(): readonly UiSelectOption[] {
 }
 
 function selectValue(root: ParentNode, selector: string, fallback: string): string {
-  return root.querySelector<HTMLButtonElement>(selector)?.dataset.value ?? fallback;
+  return root.querySelector<HTMLElement>(selector)?.dataset.value ?? fallback;
 }
 
 function setSelectTriggerValue(trigger: HTMLButtonElement, value: string, label: string): void {
@@ -3500,12 +3487,13 @@ function cleanup(): void {
   canvasController?.destroy();
   preparePresetControls?.destroy();
   availableColorGridRenderer?.destroy();
-  availableColorMobilePanelController?.destroy();
+  availableColorMobilePageController?.destroy();
   boardSelectController?.destroy();
   paletteSelectController?.destroy();
   availableSeriesSelectController?.destroy();
   ditheringSelectController?.destroy();
   for (const controller of editorSeriesSelectControllers) controller.destroy();
+  mobileStageHost.destroy();
   responsiveWorkspaceMount.destroy();
   for (const controller of workspacePanelControllers) controller.destroy();
   clearChartResult();

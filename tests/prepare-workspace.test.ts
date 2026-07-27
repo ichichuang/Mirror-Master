@@ -16,10 +16,11 @@ import {
   type PrepareColor,
 } from '../src/features/prepare-workspace/prepareWorkspace';
 import {
-  createAdaptiveSelectController,
-  type AdaptiveSelectMediaQuery,
-} from '../src/features/prepare-workspace/adaptiveSelect';
-import { createAvailableColorMobilePanel } from '../src/features/prepare-workspace/availableColorMobilePanel';
+  createPreparationSelectController,
+  type SelectionMediaQuery,
+} from '../src/features/prepare-workspace/preparationSelect';
+import { createAvailableColorMobilePage } from '../src/features/prepare-workspace/availableColorMobilePage';
+import { createMobileStageHost } from '../src/features/ui-select/mobileStageHost';
 
 test('mounted customer cards update real prepare controls and live physical size', () => {
   const window = new Window();
@@ -539,20 +540,25 @@ test('crop numeric synchronization preserves the active multi-key value and care
   window.close();
 });
 
-test('adaptive selectors preserve controller DOM and selection across viewport changes', () => {
+test('long preparation selectors commit immediately in the application-level mobile stage', () => {
   const window = new Window();
   const document = window.document;
+  const header = document.createElement('header');
   const trigger = document.createElement('button');
   const overlay = document.createElement('div');
-  const mobileSurface = document.createElement('aside');
-  const mobilePanel = document.createElement('div');
-  mobileSurface.append(mobilePanel);
-  document.body.append(trigger, overlay, mobileSurface);
+  const mobileHost = document.createElement('div');
+  mobileHost.hidden = true;
+  header.getBoundingClientRect = () =>
+    ({ top: 0, right: 390, bottom: 56, left: 0, width: 390, height: 56 }) as DOMRect;
+  document.body.append(header, trigger, overlay, mobileHost);
   const media = new MutableMediaQuery();
+  media.setMatches(true);
+  const stageHost = createMobileStageHost(mobileHost, header);
   const changes: string[] = [];
-  const controller = createAdaptiveSelectController({
+  const controller = createPreparationSelectController({
     trigger,
     overlayRoot: overlay,
+    mobileStageHost: stageHost,
     id: 'prepare-board',
     title: '选择拼板',
     options: [
@@ -560,64 +566,54 @@ test('adaptive selectors preserve controller DOM and selection across viewport c
       { id: '14', label: '14 × 14' },
     ],
     selectedId: '29',
-    mobileSurface,
-    mobilePanel,
     mediaQuery: media,
     onChange(selectedId) {
       changes.push(selectedId);
     },
   });
 
+  trigger.focus();
   trigger.click();
-  const retainedDesktopOption = overlay.querySelector('[data-select-option="29"]');
-  assert.ok(retainedDesktopOption);
-
-  media.setMatches(true);
-  assert.equal(overlay.querySelector('[role="listbox"]'), null);
-  trigger.click();
-  assert.ok(mobileSurface.querySelector('[data-mobile-picker]'));
-  mobileSurface.querySelector<HTMLButtonElement>('[data-mobile-picker-option="14"]')?.click();
-  mobileSurface.querySelector<HTMLButtonElement>('[data-mobile-picker-confirm]')?.click();
+  assert.ok(mobileHost.querySelector('[data-mobile-single-select]'));
+  assert.equal(
+    mobileHost.querySelector<HTMLInputElement>('[data-mobile-selection-search]')?.hidden,
+    true,
+  );
+  mobileHost.querySelector<HTMLButtonElement>('[data-mobile-selection-option="14"]')?.click();
   assert.deepEqual(changes, ['14']);
   assert.equal(controller.selectedId(), '14');
-
-  media.setMatches(false);
-  trigger.click();
-  assert.strictEqual(
-    overlay.querySelector('[data-select-option="29"]'),
-    retainedDesktopOption,
-    'viewport changes must not destroy and rebuild the desktop option DOM',
-  );
-  assert.equal(
-    overlay.querySelector('[data-select-option="14"]')?.getAttribute('aria-selected'),
-    'true',
-  );
+  assert.equal(mobileHost.hidden, true);
+  assert.strictEqual(document.activeElement, trigger);
 
   controller.destroy();
+  stageHost.destroy();
   window.close();
 });
 
-test('mobile available colors replace the prepare panel with one surface and restore focus and state', () => {
+test('mobile available colors move only the filter into a dedicated page and restore focus and state', () => {
   const window = new Window();
   const document = window.document;
   document.body.innerHTML = renderApp();
-  const sheet = document.querySelector<HTMLElement>('[data-prepare-picker-surface]');
+  const header = document.querySelector<HTMLElement>('.app-header');
+  const mobileHost = document.querySelector<HTMLElement>('[data-mobile-stage-host]');
   const panel = document.querySelector<HTMLElement>('[data-prepare-settings-panel]');
   const content = document.querySelector<HTMLElement>('[data-available-color-filter]');
   const trigger = document.querySelector<HTMLButtonElement>('[data-open-available-colors]');
   const search = document.querySelector<HTMLInputElement>('[data-available-color-search]');
   const grid = document.querySelector<HTMLElement>('[data-available-color-grid]');
-  assert.ok(sheet && panel && content && trigger && search && grid);
+  assert.ok(header && mobileHost && panel && content && trigger && search && grid);
+  header.getBoundingClientRect = () =>
+    ({ top: 0, right: 390, bottom: 56, left: 0, width: 390, height: 56 }) as DOMRect;
   const originalParent = content.parentElement;
   const media = new MutableMediaQuery();
   media.setMatches(true);
+  const stageHost = createMobileStageHost(mobileHost, header);
   search.value = 'A14';
   grid.scrollTop = 67;
   trigger.focus();
 
-  const controller = createAvailableColorMobilePanel({
-    sheet,
-    panel,
+  const controller = createAvailableColorMobilePage({
+    mobileStageHost: stageHost,
     content,
     trigger,
     searchInput: search,
@@ -625,18 +621,18 @@ test('mobile available colors replace the prepare panel with one surface and res
   });
   trigger.click();
 
-  assert.equal(sheet.querySelectorAll('[data-mobile-picker]').length, 1);
-  assert.equal(panel.hidden, true);
-  assert.equal(panel.inert, true);
-  assert.ok(content.closest('[data-mobile-picker]'));
+  assert.equal(mobileHost.querySelectorAll('[data-available-color-mobile-page]').length, 1);
+  assert.equal(panel.hidden, false);
+  assert.equal(panel.inert, false);
+  assert.ok(content.closest('[data-available-color-mobile-page]'));
   assert.equal(search.value, 'A14');
   assert.equal(grid.scrollTop, 67);
   assert.strictEqual(document.activeElement, search);
 
   trigger.click();
-  assert.equal(sheet.querySelectorAll('[data-mobile-picker]').length, 1);
-  sheet.querySelector<HTMLButtonElement>('[data-available-color-mobile-return]')?.click();
-  assert.equal(sheet.querySelectorAll('[data-mobile-picker]').length, 0);
+  assert.equal(mobileHost.querySelectorAll('[data-available-color-mobile-page]').length, 1);
+  mobileHost.querySelector<HTMLButtonElement>('[data-available-color-mobile-complete]')?.click();
+  assert.equal(mobileHost.querySelectorAll('[data-available-color-mobile-page]').length, 0);
   assert.strictEqual(content.parentElement, originalParent);
   assert.equal(panel.hidden, false);
   assert.equal(panel.inert, false);
@@ -645,6 +641,7 @@ test('mobile available colors replace the prepare panel with one surface and res
   assert.strictEqual(document.activeElement, trigger);
 
   controller.destroy();
+  stageHost.destroy();
   window.close();
 });
 
@@ -689,7 +686,7 @@ function changeRadio(window: Window, root: ParentNode, name: string, value: stri
   input.dispatchEvent(new window.Event('change', { bubbles: true }));
 }
 
-class MutableMediaQuery implements AdaptiveSelectMediaQuery {
+class MutableMediaQuery implements SelectionMediaQuery {
   matches = false;
   readonly listeners = new Set<() => void>();
 

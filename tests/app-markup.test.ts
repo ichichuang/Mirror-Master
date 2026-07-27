@@ -84,23 +84,33 @@ test('prepare default surface exposes approved customer presets and one generati
   assert.match(prepare, /data-palette-id/u);
 });
 
-test('renderApp has no native select and provides shared overlay and in-surface picker hosts', () => {
+test('renderApp has no native select and provides desktop overlay plus an application-level mobile host', () => {
   assert.doesNotMatch(markup, /<select\b/u);
   assert.match(markup, /data-overlay-root/u);
-  assert.match(markup, /data-prepare-picker-surface/u);
   assert.match(markup, /data-prepare-settings-panel/u);
-  assert.match(markup, /data-mobile-picker-panel/u);
+  assert.match(markup, /data-mobile-stage-host/u);
+  assert.doesNotMatch(markup, /data-prepare-picker-surface/u);
+  assert.doesNotMatch(markup, /data-mobile-picker-panel/u);
   assert.equal(countMatches(markup, /data-board-preset/g), 1);
   assert.equal(countMatches(markup, /data-palette-id/g), 1);
   assert.equal(countMatches(markup, /data-available-color-series/g), 1);
   assert.equal(countMatches(markup, /data-dithering/g), 1);
   assert.equal(countMatches(markup, /data-color-series-filter/g), 2);
   assert.match(pageCss, /\.app-overlay-root\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0/u);
+  assert.match(pageCss, /\.mobile-stage-host\s*\{[^}]*position:\s*fixed/u);
 });
 
-test('mobile prepare uses one explicit available-color picker surface instead of the inline grid', () => {
+test('short prepare choices stay visible and mobile available colors use a dedicated page', () => {
   assert.match(markup, /data-open-available-colors/u);
+  assert.deepEqual(valuesForRadioGroup(markup, 'prepare-palette'), ['default', 'mard']);
+  assert.deepEqual(valuesForRadioGroup(markup, 'prepare-board'), [
+    'standardSquare',
+    'smallSquare',
+    'custom',
+  ]);
+  assert.deepEqual(valuesForRadioGroup(markup, 'prepare-dithering'), ['none', 'floydSteinberg']);
   assert.match(pageCss, /\.available-color-mobile-trigger\s*\{[^}]*display:\s*none[^}]*\}/u);
+  assert.doesNotMatch(pageCss, /\.mobile-picker\b/u);
 
   const mediaStart = pageCss.indexOf('@media (min-width: 320px) and (max-width: 767px)');
   assert.notEqual(mediaStart, -1);
@@ -115,8 +125,8 @@ test('mobile prepare uses one explicit available-color picker surface instead of
     /\[data-prepare-settings-panel\]\s+\.available-color-filter\s*\{[^}]*display:\s*none[^}]*\}/u,
   );
   assert.match(
-    mobileCss,
-    /\.available-color-mobile-panel\s*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)[^}]*\}/u,
+    pageCss,
+    /\.available-color-mobile-page\s*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/u,
   );
 });
 

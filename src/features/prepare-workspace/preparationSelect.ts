@@ -1,89 +1,94 @@
 import {
-  createMobilePicker,
-  createUiSelectPopover,
-  type MobilePickerController,
-  type UiSelectPopoverController,
-} from '../ui-select/uiSelect';
+  createMobileSingleSelectSurface,
+  type MobileSingleSelectSurfaceController,
+} from '../ui-select/mobileSingleSelect';
+import type { MobileStageHostController, MobileStageLease } from '../ui-select/mobileStageHost';
 import type { UiSelectOption } from '../ui-select/state';
+import { createUiSelectPopover, type UiSelectPopoverController } from '../ui-select/uiSelect';
 
-export interface AdaptiveSelectMediaQuery {
+export interface SelectionMediaQuery {
   readonly matches: boolean;
   addEventListener(type: 'change', listener: () => void): void;
   removeEventListener(type: 'change', listener: () => void): void;
 }
 
-export interface AdaptiveSelectController {
+export interface PreparationSelectController {
+  readonly close: () => void;
   readonly selectedId: () => string | undefined;
   readonly setOptions: (options: readonly UiSelectOption[]) => void;
   readonly setValue: (selectedId: string) => void;
   readonly destroy: () => void;
 }
 
-export interface CreateAdaptiveSelectControllerOptions {
+export interface CreatePreparationSelectControllerOptions {
   readonly trigger: HTMLButtonElement;
   readonly overlayRoot: HTMLElement;
+  readonly mobileStageHost: MobileStageHostController;
   readonly id: string;
   readonly title: string;
   readonly options: readonly UiSelectOption[];
   readonly selectedId: string;
-  readonly mobileSurface: HTMLElement;
-  readonly mobilePanel: HTMLElement;
-  readonly mediaQuery?: AdaptiveSelectMediaQuery;
+  readonly mediaQuery?: SelectionMediaQuery;
   readonly onChange?: (selectedId: string) => void;
 }
 
-export function createAdaptiveSelectController({
+export function createPreparationSelectController({
   trigger,
   overlayRoot,
+  mobileStageHost,
   id,
   title,
-  options,
+  options: initialOptions,
   selectedId: initialSelectedId,
-  mobileSurface,
-  mobilePanel,
   mediaQuery: suppliedMediaQuery,
   onChange,
-}: CreateAdaptiveSelectControllerOptions): AdaptiveSelectController {
+}: CreatePreparationSelectControllerOptions): PreparationSelectController {
   const window = trigger.ownerDocument.defaultView;
   const mediaQueryCandidate = suppliedMediaQuery ?? window?.matchMedia('(max-width: 767px)');
   if (mediaQueryCandidate === undefined) {
-    throw new Error('自适应选择器需要可用的浏览器窗口。');
+    throw new Error('准备阶段选择器需要可用的浏览器窗口。');
   }
-  const mediaQuery: AdaptiveSelectMediaQuery = mediaQueryCandidate;
-
+  const mediaQuery: SelectionMediaQuery = mediaQueryCandidate;
   let selectedId: string | undefined = initialSelectedId;
+  let mobileLease: MobileStageLease | undefined;
   let destroyed = false;
+
   const desktopController: UiSelectPopoverController = createUiSelectPopover({
     trigger,
     overlayRoot,
     id: `${id}-desktop`,
-    options,
+    options: initialOptions,
     selectedId: initialSelectedId,
+    listenForTriggerClick: false,
     onChange: commit,
   });
-  const mobileController: MobilePickerController = createMobilePicker({
-    sheet: mobileSurface,
-    panel: mobilePanel,
-    trigger,
+  const mobileController: MobileSingleSelectSurfaceController = createMobileSingleSelectSurface({
+    document: trigger.ownerDocument,
     id: `${id}-mobile`,
     title,
-    options,
+    options: initialOptions,
     selectedId: initialSelectedId,
-    onChange: commit,
+    onSelect(nextSelectedId) {
+      commit(nextSelectedId);
+      closeMobile(true);
+    },
+    onCancel() {
+      closeMobile(true);
+    },
   });
-  trigger.addEventListener('click', onTriggerClick, true);
-  trigger.addEventListener('keydown', onTriggerKeydown, true);
+
+  trigger.addEventListener('click', onTriggerClick);
+  trigger.addEventListener('keydown', onMobileTriggerKeydown, true);
   mediaQuery.addEventListener('change', onMediaChange);
-  const MutationObserverConstructor = window?.MutationObserver;
-  const mobileSurfaceObserver =
-    MutationObserverConstructor === undefined
-      ? undefined
-      : new MutationObserverConstructor(syncTriggerAria);
-  mobileSurfaceObserver?.observe(mobileSurface, { childList: true });
   syncSelectedId();
   syncTriggerAria();
 
   return Object.freeze({
+    close() {
+      desktopController.close();
+      closeMobile(false);
+      syncTriggerAria();
+    },
     selectedId: () => selectedId,
     setOptions(nextOptions: readonly UiSelectOption[]) {
       if (destroyed) return;
@@ -97,14 +102,15 @@ export function createAdaptiveSelectController({
       desktopController.setValue(nextSelectedId);
       mobileController.setValue(nextSelectedId);
       syncSelectedId();
+      syncTriggerAria();
     },
     destroy() {
       if (destroyed) return;
+      closeMobile(false);
       destroyed = true;
+      trigger.removeEventListener('click', onTriggerClick);
+      trigger.removeEventListener('keydown', onMobileTriggerKeydown, true);
       mediaQuery.removeEventListener('change', onMediaChange);
-      mobileSurfaceObserver?.disconnect();
-      trigger.removeEventListener('click', onTriggerClick, true);
-      trigger.removeEventListener('keydown', onTriggerKeydown, true);
       desktopController.destroy();
       mobileController.destroy();
     },
@@ -113,20 +119,19 @@ export function createAdaptiveSelectController({
   function onTriggerClick(event: MouseEvent): void {
     if (destroyed) return;
     event.preventDefault();
-    event.stopImmediatePropagation();
     if (mediaQuery.matches) {
       desktopController.close();
-      if (mobileController.isOpen()) mobileController.cancel();
-      else mobileController.open();
+      if (mobileLease) closeMobile(true);
+      else openMobile();
     } else {
-      mobileController.cancel();
+      closeMobile(false);
       if (desktopController.isOpen()) desktopController.close();
       else desktopController.open();
     }
     syncTriggerAria();
   }
 
-  function onTriggerKeydown(event: KeyboardEvent): void {
+  function onMobileTriggerKeydown(event: KeyboardEvent): void {
     if (
       destroyed ||
       !mediaQuery.matches ||
@@ -137,22 +142,37 @@ export function createAdaptiveSelectController({
     event.preventDefault();
     event.stopImmediatePropagation();
     desktopController.close();
-    mobileController.open();
-    syncTriggerAria();
+    openMobile();
   }
 
   function onMediaChange(): void {
     if (destroyed) return;
     if (mediaQuery.matches) desktopController.close();
-    else mobileController.cancel();
+    else closeMobile(false);
     syncTriggerAria();
   }
 
+  function openMobile(): void {
+    if (mobileLease || destroyed) return;
+    mobileLease = mobileStageHost.mount(mobileController.element);
+    syncTriggerAria();
+    mobileController.focus();
+  }
+
+  function closeMobile(returnFocus: boolean): void {
+    if (!mobileLease) return;
+    mobileLease.release();
+    mobileLease = undefined;
+    syncTriggerAria();
+    if (returnFocus && !destroyed) trigger.focus({ preventScroll: true });
+  }
+
   function commit(nextSelectedId: string): void {
+    const previousSelectedId = selectedId;
     selectedId = nextSelectedId;
     syncControllerValues();
     syncTriggerAria();
-    onChange?.(nextSelectedId);
+    if (selectedId !== previousSelectedId) onChange?.(nextSelectedId);
   }
 
   function syncControllerValues(): void {
@@ -166,12 +186,11 @@ export function createAdaptiveSelectController({
   }
 
   function syncTriggerAria(): void {
-    if (mobileController.isOpen()) {
-      trigger.setAttribute('aria-expanded', 'true');
-      trigger.setAttribute('aria-controls', `${id}-mobile-listbox`);
-      return;
-    }
-    trigger.setAttribute('aria-expanded', String(desktopController.isOpen()));
-    trigger.setAttribute('aria-controls', `${id}-desktop-listbox`);
+    const mobileOpen = mobileLease !== undefined;
+    trigger.setAttribute('aria-expanded', String(mobileOpen || desktopController.isOpen()));
+    trigger.setAttribute(
+      'aria-controls',
+      mobileOpen ? `${id}-mobile-listbox` : `${id}-desktop-listbox`,
+    );
   }
 }
