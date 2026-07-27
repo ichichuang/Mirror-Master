@@ -142,14 +142,14 @@ function renderTaskOption(
       value="${value}"
       ${checked ? 'checked' : ''}
     >
-      <label class="mode-option-content" slot="label">
+      <div class="mode-option-content" slot="label">
         <span class="mode-icon" aria-hidden="true"><i class="ph ${icon}"></i></span>
         <span>
           <strong>${title}</strong>
           <small>${description}</small>
         </span>
         <i class="ph ph-check mode-check" aria-hidden="true"></i>
-      </label>
+      </div>
     </vaadin-radio-button>
   `;
 }
@@ -340,19 +340,19 @@ function renderPrepareWorkspace(): string {
                   value="auto"
                 >
                   <vaadin-radio-button value="auto">
-                    <label slot="label">
+                    <div slot="label">
                     <span>自动推荐<small>根据图片格式和颜色给出建议</small></span>
-                    </label>
+                    </div>
                   </vaadin-radio-button>
                   <vaadin-radio-button value="photo">
-                    <label slot="label">
+                    <div slot="label">
                     <span>自然图片<small>适合照片与插画</small></span>
-                    </label>
+                    </div>
                   </vaadin-radio-button>
                   <vaadin-radio-button value="pixelArt">
-                    <label slot="label">
+                    <div slot="label">
                     <span>清晰像素<small>保留明确的像素边缘</small></span>
-                    </label>
+                    </div>
                   </vaadin-radio-button>
                 </vaadin-radio-group>
                 <p
@@ -510,7 +510,7 @@ function renderPrepareWorkspace(): string {
                       <vaadin-select
                         label="系列"
                         data-available-color-series
-                        value=""
+                        value="__all__"
                       ></vaadin-select>
                     </div>
                     <div
@@ -538,14 +538,14 @@ function renderPrepareWorkspace(): string {
                 value="average"
               >
                 <vaadin-radio-button value="average">
-                  <label slot="label">
+                  <div slot="label">
                     <span>平均取色<small>自然图片更平滑</small></span>
-                  </label>
+                  </div>
                 </vaadin-radio-button>
                 <vaadin-radio-button value="nearest">
-                  <label slot="label">
+                  <div slot="label">
                     <span>保留像素<small>清晰像素更锐利</small></span>
-                  </label>
+                  </div>
                 </vaadin-radio-button>
               </vaadin-radio-group>
 
@@ -660,10 +660,10 @@ function renderPresetCard(
       value="${value}"
       ${checked ? 'checked' : ''}
     >
-      <label class="preset-card-content" slot="label">
+      <div class="preset-card-content" slot="label">
         <span><strong>${title}</strong><small>${description}</small></span>
         <i class="ph ph-check" aria-hidden="true"></i>
-      </label>
+      </div>
     </vaadin-radio-button>
   `;
 }
@@ -963,6 +963,7 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
         id="${searchId}"
         class="palette-search"
         label="搜索色号或名称"
+        aria-label="搜索色号或名称"
         placeholder="例如 A14、海蓝"
         clear-button-visible
         data-color-search
@@ -970,6 +971,7 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
       <vaadin-radio-group
         class="palette-scope"
         label="显示颜色"
+        aria-label="显示颜色"
         data-color-filter
         value="all"
       >
@@ -982,7 +984,7 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
         label="系列"
         data-color-series-filter
         aria-label="筛选${surface === 'desktop' ? '桌面' : '移动端'}颜色系列"
-        value=""
+        value="__all__"
       ></vaadin-select>
       <p
         id="color-filter-status-${surface}"
@@ -1024,15 +1026,16 @@ function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
         value="annotated"
       >
         <vaadin-radio-button value="pure" data-export-template="pure">
-          <label slot="label">
+          <div slot="label">
           <span>纯图案<small>透明背景，只保留拼豆图案</small></span>
-          </label>
+          </div>
         </vaadin-radio-button>
         <vaadin-radio-button value="annotated" data-export-template="annotated" checked>
-          <label slot="label">
+          <div slot="label">
           <span>带标注<small>包含网格、坐标和材料图例</small></span>
-          </label>
+          </div>
         </vaadin-radio-button>
+      </vaadin-radio-group>
       <button class="primary-button export-run" type="button" data-export-run>
         下载分享图片
       </button>

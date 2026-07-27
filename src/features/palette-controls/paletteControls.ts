@@ -16,6 +16,16 @@ export interface PaletteFilterOptions {
   readonly recentColorIds?: readonly string[];
 }
 
+export const ALL_SERIES_SELECT_VALUE = '__all__';
+
+export function paletteSeriesToSelectValue(series: string): string {
+  return series || ALL_SERIES_SELECT_VALUE;
+}
+
+export function paletteSeriesFromSelectValue(selectedValue: string): string {
+  return selectedValue === ALL_SERIES_SELECT_VALUE ? '' : selectedValue;
+}
+
 export function filterPaletteColors<Color extends PaletteControlColor>(
   colors: readonly Color[],
   options: PaletteFilterOptions,

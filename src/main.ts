@@ -49,7 +49,13 @@ import {
   type SheetSnapPoints,
   type SheetState,
 } from './features/mobile-sheet/sheetMath';
-import { filterPaletteColors, pushRecentColor } from './features/palette-controls/paletteControls';
+import {
+  ALL_SERIES_SELECT_VALUE,
+  filterPaletteColors,
+  paletteSeriesFromSelectValue,
+  paletteSeriesToSelectValue,
+  pushRecentColor,
+} from './features/palette-controls/paletteControls';
 import {
   mountPatternCanvas,
   type CellSelection,
@@ -252,6 +258,7 @@ const workspacePanelControllers: readonly WorkspacePanelsController[] = Object.f
 const objectUrls = createObjectUrlStore();
 const recommendationRequests = createLatestSourceRequest();
 const firstUseHintSession = createFirstUseHintSession();
+let firstUseHintTimer: number | null = null;
 let appCapabilities: AppCapabilities = FALLBACK_APP_CAPABILITIES;
 let stage: AppStage = 'upload';
 let customerTask: CustomerTask = 'newPattern';
@@ -1125,10 +1132,10 @@ function setupPrepare(): void {
   });
   availableSeriesSelectController = createVaadinSelectController({
     element: availableColorSeries,
-    options: [{ id: '', label: '全部系列' }],
-    selectedId: '',
+    options: [{ id: ALL_SERIES_SELECT_VALUE, label: '全部系列' }],
+    selectedId: ALL_SERIES_SELECT_VALUE,
     onChange(selectedId) {
-      prepareColorSeries = selectedId;
+      prepareColorSeries = paletteSeriesFromSelectValue(selectedId);
       renderAvailableColorFilter();
     },
   });
@@ -1506,11 +1513,11 @@ function initializePrepareColorSeries(): void {
     prepareColorSeries = '';
   }
   const options = [
-    { id: '', label: '全部系列' },
+    { id: ALL_SERIES_SELECT_VALUE, label: '全部系列' },
     ...series.map((value) => ({ id: value, label: `${value} 系列` })),
   ];
   availableSeriesSelectController?.setOptions(options);
-  availableSeriesSelectController?.setValue(prepareColorSeries);
+  availableSeriesSelectController?.setValue(paletteSeriesToSelectValue(prepareColorSeries));
   if (
     availableColorDialogController &&
     availableColorDialogController.search.value !== prepareColorQuery
@@ -1668,11 +1675,11 @@ function setupPatternWorkspace(): void {
   const canvasJumpRow = required(canvasJumpForm, '[data-canvas-jump-row]', HTMLInputElement);
   const canvasJumpColumn = required(canvasJumpForm, '[data-canvas-jump-column]', HTMLInputElement);
   const sheetDragRegion = required(workspaceSheet, '[data-sheet-drag-region]', HTMLElement);
-  let suppressSheetClick = false;
   let sheetGesture: {
     readonly pointerId: number;
     readonly startY: number;
     readonly startHeight: number;
+    readonly toggleOnTap: boolean;
     currentHeight: number;
     lastY: number;
     lastTime: number;
@@ -1734,8 +1741,7 @@ function setupPatternWorkspace(): void {
       return;
     }
     if (target.closest('[data-dismiss-first-use-hint]')) {
-      firstUseHintSession.dismiss();
-      syncFirstUseHint();
+      dismissFirstUseHint();
       return;
     }
     if (target.closest('[data-sheet-open-tools]')) {
@@ -1814,33 +1820,12 @@ function setupPatternWorkspace(): void {
       nextTab.focus();
     }
   });
-  patternWorkspace.addEventListener('input', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    if (target.localName === 'vaadin-text-field' && target.matches('[data-color-search]')) {
-      const search = target as HTMLElementTagNameMap['vaadin-text-field'];
-      paletteQuery = search.value;
-      syncPaletteControls(search);
-      applyPaletteFilters();
-    }
-  });
   patternWorkspace.addEventListener('value-changed', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement) || target.localName !== 'vaadin-radio-group') {
       return;
     }
     const group = target as HTMLElementTagNameMap['vaadin-radio-group'];
-    if (group.matches('[data-color-filter]')) {
-      const nextScope =
-        group.value === 'used' || group.value === 'recent' ? group.value : 'all';
-      if (nextScope === paletteScope) return;
-      paletteScope = nextScope;
-      syncPaletteControls(group);
-      applyPaletteFilters();
-      return;
-    }
     if (group.matches('[data-export-template-options]')) {
       const template = group.value === 'pure' ? 'pure' : 'annotated';
       if (template === exportCompletionState.pngTemplate) return;
@@ -1903,9 +1888,8 @@ function setupPatternWorkspace(): void {
     });
   }
 
-  workspaceSheetHandle.addEventListener('click', () => {
-    if (suppressSheetClick) {
-      suppressSheetClick = false;
+  workspaceSheetHandle.addEventListener('click', (event) => {
+    if (event.detail !== 0) {
       return;
     }
     setSheetState(sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek');
@@ -1924,6 +1908,7 @@ function setupPatternWorkspace(): void {
       pointerId: event.pointerId,
       startY: event.clientY,
       startHeight: currentHeight,
+      toggleOnTap: target instanceof Node && workspaceSheetHandle.contains(target),
       currentHeight,
       lastY: event.clientY,
       lastTime: event.timeStamp,
@@ -1932,7 +1917,6 @@ function setupPatternWorkspace(): void {
     };
     workspaceSheet.dataset.sheetDragging = 'true';
     sheetDragRegion.setPointerCapture(event.pointerId);
-    event.preventDefault();
   });
   sheetDragRegion.addEventListener('pointermove', (event) => {
     if (!sheetGesture || sheetGesture.pointerId !== event.pointerId) {
@@ -1981,12 +1965,18 @@ function setupPatternWorkspace(): void {
         pointerVelocityY: sheetGesture.pointerVelocityY,
       },
     );
-    suppressSheetClick = sheetGesture.moved;
+    const toggleOnTap = sheetGesture.toggleOnTap && !sheetGesture.moved;
     sheetGesture = null;
     sheetMotionState = motion;
     workspaceSheet.style.removeProperty('--sheet-height');
     delete workspaceSheet.dataset.sheetDragging;
-    applySheetState(motion.stableState);
+    if (toggleOnTap) {
+      setSheetState(
+        sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek',
+      );
+    } else {
+      applySheetState(motion.stableState);
+    }
     if (sheetDragRegion.hasPointerCapture(event.pointerId)) {
       sheetDragRegion.releasePointerCapture(event.pointerId);
     }
@@ -2004,6 +1994,34 @@ function setupPatternWorkspace(): void {
     applySheetState(motion.stableState);
   });
 
+  const colorSearches = queryPatternWorkspaceElements<HTMLElementTagNameMap['vaadin-text-field']>(
+    '[data-color-search]',
+    'vaadin-text-field',
+  );
+  for (const search of colorSearches) {
+    const applySearch = (): void => {
+      paletteQuery = search.value;
+      syncPaletteControls(search);
+      applyPaletteFilters();
+    };
+    search.addEventListener('input', applySearch);
+    search.addEventListener('value-changed', applySearch);
+  }
+  const colorFilters = queryPatternWorkspaceElements<HTMLElementTagNameMap['vaadin-radio-group']>(
+    '[data-color-filter]',
+    'vaadin-radio-group',
+  );
+  for (const group of colorFilters) {
+    group.addEventListener('value-changed', () => {
+      const nextScope =
+        group.value === 'used' || group.value === 'recent' ? group.value : 'all';
+      if (nextScope === paletteScope) return;
+      paletteScope = nextScope;
+      syncPaletteControls(group);
+      applyPaletteFilters();
+    });
+  }
+
   const seriesSelects = queryPatternWorkspaceElements<HTMLElementTagNameMap['vaadin-select']>(
     '[data-color-series-filter]',
     'vaadin-select',
@@ -2013,8 +2031,8 @@ function setupPatternWorkspace(): void {
     controllers.push(
       createVaadinSelectController({
         element: select,
-        options: [{ id: '', label: '全部系列' }],
-        selectedId: '',
+        options: [{ id: ALL_SERIES_SELECT_VALUE, label: '全部系列' }],
+        selectedId: ALL_SERIES_SELECT_VALUE,
         onChange: selectEditorSeries,
       }),
     );
@@ -2022,7 +2040,7 @@ function setupPatternWorkspace(): void {
   editorSeriesSelectControllers = Object.freeze(controllers);
 
   function selectEditorSeries(selectedId: string): void {
-    paletteSeries = selectedId;
+    paletteSeries = paletteSeriesFromSelectValue(selectedId);
     syncPaletteControls();
     applyPaletteFilters();
   }
@@ -2092,7 +2110,14 @@ function openPatternEditor(project: BeadProject): void {
   sheetState = 'peek';
   setSheetState('peek');
   setCanvasJumpOpen(false);
-  firstUseHintSession.enterEditor();
+  if (firstUseHintSession.enterEditor()) {
+    clearFirstUseHintTimer();
+    firstUseHintTimer = window.setTimeout(() => {
+      firstUseHintTimer = null;
+      firstUseHintSession.dismiss();
+      syncFirstUseHint();
+    }, 4000);
+  }
   syncFirstUseHint();
   resetExportSurface();
   for (const button of queryPatternWorkspaceAll('[data-return-prepare]', HTMLButtonElement)) {
@@ -2341,7 +2366,21 @@ function setCanvasJumpOpen(open: boolean, restoreFocus = false): void {
 
 function handleSuccessfulFirstUseGesture(gesture: FirstUseGesture): void {
   if (firstUseHintSession.recordSuccessfulGesture(gesture)) {
+    clearFirstUseHintTimer();
     syncFirstUseHint();
+  }
+}
+
+function dismissFirstUseHint(): void {
+  clearFirstUseHintTimer();
+  firstUseHintSession.dismiss();
+  syncFirstUseHint();
+}
+
+function clearFirstUseHintTimer(): void {
+  if (firstUseHintTimer !== null) {
+    window.clearTimeout(firstUseHintTimer);
+    firstUseHintTimer = null;
   }
 }
 
@@ -2510,12 +2549,12 @@ function initializePaletteControls(): void {
     paletteSeries = '';
   }
   const options = [
-    { id: '', label: '全部系列' },
+    { id: ALL_SERIES_SELECT_VALUE, label: '全部系列' },
     ...series.map((value) => ({ id: value, label: `${value} 系列` })),
   ];
   for (const controller of editorSeriesSelectControllers) {
     controller.setOptions(options);
-    controller.setValue(paletteSeries);
+    controller.setValue(paletteSeriesToSelectValue(paletteSeries));
   }
   syncPaletteControls();
   applyPaletteFilters();
@@ -2541,7 +2580,7 @@ function syncPaletteControls(
     }
   }
   for (const controller of editorSeriesSelectControllers) {
-    controller.setValue(paletteSeries);
+    controller.setValue(paletteSeriesToSelectValue(paletteSeries));
   }
 }
 
@@ -2963,8 +3002,7 @@ function showStage(nextStage: AppStage): void {
   }
   if (stage === 'editor' && nextStage !== 'editor') {
     for (const controller of editorSeriesSelectControllers) controller.close();
-    firstUseHintSession.dismiss();
-    syncFirstUseHint();
+    dismissFirstUseHint();
     setCanvasJumpOpen(false);
     resetExportSurface();
   }
@@ -3200,15 +3238,12 @@ function sheetSnapPoints(): SheetSnapPoints {
     ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
     : 0;
   const keyboardHeight = Math.min(viewportHeight - 160, rawKeyboardHeight);
-  const header = required(workspaceSheet, '[data-sheet-drag-region]', HTMLElement);
-  const primary = required(workspaceSheet, '.sheet-primary', HTMLElement);
-  const peekContentHeight = Math.max(112, header.scrollHeight + primary.scrollHeight);
   return calculateSheetSnapPoints({
     viewportHeight,
-    peekContentHeight,
+    peekContentHeight: 144,
     keyboardHeight,
     topGap: 8,
-    halfRatio: 0.48,
+    halfRatio: 0.46,
   });
 }
 

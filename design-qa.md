@@ -43,32 +43,54 @@ These are approved direction changes, not fidelity defects.
 
 Dynamic pattern content differs from the reference because the implementation renders the actual uploaded image through the real palette conversion pipeline. The spatial hierarchy and interaction model are the fidelity surface under comparison.
 
-## Selector architecture QA — 2026-07-26
+## Vaadin layout integration QA — 2026-07-26
 
 ### Evidence
 
-- Authoritative failure evidence: the supplied mobile screenshots and task description showing the selector mounted inside `.prepare-settings`, a collapsed listbox, an empty scrollbar line, off-screen options, default-gray controls, and a selection surface beginning below the crop workspace.
-- Existing product styling baseline: `artifacts/qa/mobile-prepare.png`.
-- Updated short-choice capture: `artifacts/qa/mobile-short-choices-portrait.png`, 390 × 844.
-- Updated preparation multi-select captures: `artifacts/qa/mobile-available-colors-portrait.png`, 390 × 844, and `artifacts/qa/mobile-available-colors-landscape.png`, 740 × 390.
-- Updated editor sheet capture: `artifacts/qa/mobile-editor-sheet-selection.png`, 390 × 844.
-- Updated desktop popover capture: `artifacts/qa/desktop-floating-series.png`, 1200 × 800.
+- Accepted visual target: `/Users/cc/.codex/generated_images/019f9387-a181-7d62-992c-9c97969a12dd/call_hqcTe6dudcrwvwUmWpZPix8K.png`.
+- Preparation captures: `artifacts/qa/mobile-prepare.png` and `artifacts/qa/mobile-short-choices-portrait.png`, both 390 × 844.
+- Available-color captures: `artifacts/qa/mobile-available-colors-portrait.png`, 390 × 844; `artifacts/qa/mobile-available-colors-landscape.png`, 740 × 390; and `artifacts/qa/desktop-floating-series.png`, 1440 × 900.
+- Editor captures: `artifacts/qa/mobile-editor-peek.png`, `artifacts/qa/mobile-editor-sheet-selection.png`, both 390 × 844, and `artifacts/qa/desktop-editor.png`, 1440 × 900.
+- The in-app browser file chooser did not accept the local fixture. The same real local build was therefore exercised in system Chrome through Playwright; no mocked DOM or synthetic screenshot was used.
 
-### Comparison passes
+### Root-cause repairs
 
-#### Pass 1
+- Vaadin radio-group hosts, public group-field parts, radio-button hosts, and public label parts now own explicit inline sizing. Three-choice groups use a container query: two rows at 320/375 px and one row at 390/430 px, with the constrained desktop settings column remaining two rows.
+- Radio-card visual states and Vaadin control geometry live in `vaadin-theme.css`; page, dialog, canvas, sheet, and product-grid geometry live in `page.css`.
+- All-series values use the visible `__all__` sentinel inside Vaadin selects and convert to the domain empty string only at the controller boundary. The visible default is always `全部系列`.
+- The generate-action row is one column when the return action is hidden and `auto + 1fr` when it is visible.
+- Mobile sheet geometry uses explicit peek, half, and full snap inputs instead of content `scrollHeight`. Handle taps and pointer drags share the same public state machine.
 
-- Replaced two-option palette and processing pickers plus three-option board presets with visible radio cards. A palette tap commits directly; the 390 × 844 capture contains two palette options, no mobile selection surface, no visible search field, and no confirmation action.
-- Moved mobile preparation selection into the root-level host below the 56 px app header. At 390 × 844, the host and selection page both measured 788 px high, from y=56 through y=844.
-- Verified the available-color listbox has a nonzero 381.6 px viewport with 684 px scroll content and 39 visible options. The preparation settings panel remains connected and is not hidden while the page is open.
+### Responsive and interaction results
 
-#### Pass 2
+| Viewport | Radio group | Card minimum | Rows | Action width | Page overflow |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 320 × 700 | 288 px | 140 px | 2 | 100% | 0 px |
+| 375 × 812 | 343 px | 168 px | 2 | 100% | 0 px |
+| 390 × 844 | 358 px | 114 px | 1 | 100% | 0 px |
+| 430 × 932 | 398 px | 127 px | 1 | 100% | 0 px |
+| 768 × 1024 | 287 px | 140 px | 2 | 100% | 0 px |
+| 1024 × 768 | 287 px | 140 px | 2 | 100% | 0 px |
+| 1440 × 900 | 287 px | 140 px | 2 | 100% | 0 px |
 
-- The first 740 × 390 layout kept the listbox at only 80 px and pushed it behind the footer. Reflowed the multi-select page into two columns for compact landscape.
-- Final 740 × 390 measurements: the page spans y=56–390; the color list spans y=112–323.6 at 211.6 px high; the series trigger ends at y=326.4; the completion footer begins at y=331.6. Title, return action, options, filters, and completion action remain visible without horizontal overflow.
-- In the pattern editor, the selector reuses the one existing bottom sheet. The capture measured one workspace sheet, one temporary selection content surface, a 142 px listbox, hidden search for three options, and unchanged sheet top at y=470 before and after selection. Selection closes immediately and returns focus to the series trigger.
-- The desktop series listbox uses fixed positioning below its trigger. At 1200 × 800 it measured y=458.2–788 with a 329.8 px Floating UI size constraint and `bottom-start` placement.
-- Dynamic buttons resolve through the project text, primary, secondary, option, selected, active, disabled, and focus-visible contracts. No browser-default gray button appears in the updated captures.
+- All tested cards had zero internal horizontal overflow.
+- The 390 × 844 color dialog measured a 462 px scrollable grid and a fully visible 57 px footer. The 740 × 390 layout reflowed to two columns, kept the series control and completion action visible, and retained a scrollable 225 px color grid with zero horizontal overflow.
+- Series options displayed `全部系列`, `A 系列`, `B 系列`, and subsequent groups. Selecting B produced controller value `B`; restoring all produced `__all__`.
+- At 390 × 844 the sheet settled at 144 px peek, 359 px half, and 780 px full with an 8 px workspace top gap. At 390 × 640, full recomputed to 576 px with the same 8 px gap. At 768 × 1024 it settled at 144 px peek, 442 px half, and 960 px full.
+- The half sheet kept controls at 123 px, scroll content at 79 px, and the fixed action at 67 px without overlap. Searching `A14` returned `显示 1 / 221 色`; selecting `已使用` returned `显示 24 / 221 色`.
+- At 1024 × 768 and 1440 × 900 the mobile sheet was absent and the persistent inspector remained visible. No page overflow or browser-console error occurred in the final flows.
+
+### Fidelity check
+
+- Customer copy, task order, palette data, MARD color rendering, and the existing warm off-white/charcoal/teal visual direction are unchanged.
+- The repaired cards now preserve the accepted hierarchy and selected-state treatment instead of collapsing Vaadin labels.
+- The canvas remains the dominant editor surface; the mobile sheet and desktop inspector remain the only editing control surfaces.
+- No new assets, marketing copy, decorative effects, UI library, or framework were introduced.
+- No above-the-fold copy changed.
+
+### Residual device-only checks
+
+- Physical iOS Safari safe-area inset changes and the native soft-keyboard animation remain device-only validation items. Browser viewport resizing verified the same usable-height recomputation path, but it is not a substitute for a physical-device pass.
 
 ## Final result
 
