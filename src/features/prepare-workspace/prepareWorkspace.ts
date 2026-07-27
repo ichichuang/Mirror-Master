@@ -1,8 +1,8 @@
 import type { ProjectMode } from '../../domain/project';
 import type { Checkbox } from '@vaadin/checkbox';
-import type { RadioGroup } from '@vaadin/radio-group';
 import type { CropPercent } from '../crop-controls/cropControls';
 import type { ModePreference, NewPatternMode } from '../customer-flow/modeRecommendation';
+import type { VaadinRadioGroupController } from '../vaadin-controls/vaadinControls';
 import {
   beadDimensionsForPreset,
   dimensionsForLongEdge,
@@ -312,6 +312,14 @@ export function resolveSupportedNewPatternMode(
 export interface MountPreparePresetControlsOptions {
   readonly initialState: CreatePrepareWorkspaceStateInput;
   readonly onChange?: (state: PrepareWorkspaceState) => void;
+  readonly radioGroups: PreparePresetRadioGroupControllers;
+}
+
+export interface PreparePresetRadioGroupControllers {
+  readonly patternSize: VaadinRadioGroupController;
+  readonly beadSize: VaadinRadioGroupController;
+  readonly colorCount: VaadinRadioGroupController;
+  readonly processing: VaadinRadioGroupController;
 }
 
 export interface PreparePresetControlsController {
@@ -331,7 +339,12 @@ export function mountPreparePresetControls(
   let state = createPrepareWorkspaceState(options.initialState);
   let destroyed = false;
   let syncingPresetGroups = false;
-  root.addEventListener('value-changed', onPresetChange);
+  const radioGroupSubscriptions = [
+    options.radioGroups.patternSize.subscribe(selectPatternSize),
+    options.radioGroups.beadSize.subscribe(selectBeadSize),
+    options.radioGroups.colorCount.subscribe(selectColorCount),
+    options.radioGroups.processing.subscribe(selectProcessing),
+  ];
   root.addEventListener('input', onInput);
   render();
 
@@ -355,63 +368,42 @@ export function mountPreparePresetControls(
     destroy() {
       if (destroyed) return;
       destroyed = true;
-      root.removeEventListener('value-changed', onPresetChange);
+      for (const unsubscribe of radioGroupSubscriptions) unsubscribe();
       root.removeEventListener('input', onInput);
     },
   });
 
-  function onPresetChange(event: Event): void {
+  function selectPatternSize(value: string): void {
     if (syncingPresetGroups) return;
-    const target = event.target;
-    if (!(target instanceof HTMLElement) || target.localName !== 'vaadin-radio-group') {
-      return;
+    const preset = Number(value);
+    if ((preset === 29 || preset === 48 || preset === 72) && preset !== state.patternSizePreset) {
+      update({ type: 'selectPatternSize', preset });
     }
-    const group = target as RadioGroup;
-    if (group.matches('[data-pattern-size-preset]')) {
-      const preset = Number(group.value);
-      if (
-        (preset === 29 || preset === 48 || preset === 72) &&
-        preset !== state.patternSizePreset
-      ) {
-        update({ type: 'selectPatternSize', preset });
-      }
-      return;
+  }
+
+  function selectBeadSize(value: string): void {
+    if (syncingPresetGroups) return;
+    const preset = value === 'custom' ? 'custom' : value === '2.6' ? 2.6 : value === '5' ? 5 : null;
+    if (preset === null || preset === state.beadSizePreset) return;
+    update({ type: 'selectBeadSize', preset });
+    if (preset === 'custom') {
+      const details = root.querySelector<HTMLDetailsElement>('[data-professional-settings]');
+      if (details) details.open = true;
     }
-    if (group.matches('[data-bead-size-preset]')) {
-      const preset =
-        group.value === 'custom'
-          ? 'custom'
-          : group.value === '2.6'
-            ? 2.6
-            : group.value === '5'
-              ? 5
-              : null;
-      if (preset === null) return;
-      if (preset === state.beadSizePreset) return;
-      update({ type: 'selectBeadSize', preset });
-      if (preset === 'custom') {
-        const details = root.querySelector<HTMLDetailsElement>('[data-professional-settings]');
-        if (details) details.open = true;
-      }
-      return;
+  }
+
+  function selectColorCount(value: string): void {
+    if (syncingPresetGroups) return;
+    const preset = Number(value);
+    if ((preset === 12 || preset === 24 || preset === 48) && preset !== state.colorCountPreset) {
+      update({ type: 'selectColorCount', preset });
     }
-    if (group.matches('[data-color-count-preset]')) {
-      const preset = Number(group.value);
-      if (
-        (preset === 12 || preset === 24 || preset === 48) &&
-        preset !== state.colorCountPreset
-      ) {
-        update({ type: 'selectColorCount', preset });
-      }
-      return;
-    }
-    if (group.matches('[data-processing-preset]')) {
-      if (
-        (group.value === 'easy' || group.value === 'gradient') &&
-        group.value !== state.processingPreset
-      ) {
-        update({ type: 'selectProcessing', preset: group.value });
-      }
+  }
+
+  function selectProcessing(value: string): void {
+    if (syncingPresetGroups) return;
+    if ((value === 'easy' || value === 'gradient') && value !== state.processingPreset) {
+      update({ type: 'selectProcessing', preset: value });
     }
   }
 
@@ -476,10 +468,10 @@ export function mountPreparePresetControls(
     setInputValue(root, '[data-bead-pitch]', state.beadPitchMm);
     setInputValue(root, '[data-maximum-colors]', state.maximumColors);
     syncingPresetGroups = true;
-    setPresetValue(root, '[data-pattern-size-preset]', state.patternSizePreset);
-    setPresetValue(root, '[data-bead-size-preset]', state.beadSizePreset);
-    setPresetValue(root, '[data-color-count-preset]', state.colorCountPreset);
-    setPresetValue(root, '[data-processing-preset]', state.processingPreset);
+    setPresetValue(options.radioGroups.patternSize, state.patternSizePreset);
+    setPresetValue(options.radioGroups.beadSize, state.beadSizePreset);
+    setPresetValue(options.radioGroups.colorCount, state.colorCountPreset);
+    setPresetValue(options.radioGroups.processing, state.processingPreset);
     syncingPresetGroups = false;
     for (const element of root.querySelectorAll<HTMLElement>('[data-physical-size]')) {
       const nextText =
@@ -723,13 +715,8 @@ function setInputValue(root: ParentNode, selector: string, value: number): void 
 }
 
 function setPresetValue(
-  root: ParentNode,
-  selector: string,
+  controller: VaadinRadioGroupController,
   value: PatternSizePreset | BeadSizePreset | ColorCountPreset | ProcessingPreset,
 ): void {
-  const group = root.querySelector<RadioGroup>(selector);
-  const nextValue = String(value);
-  if (group && group.value !== nextValue) {
-    group.value = nextValue;
-  }
+  controller.setValue(String(value));
 }

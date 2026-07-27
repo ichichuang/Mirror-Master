@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Window } from 'happy-dom';
 
-import { renderApp } from '../src/app';
 import {
   beginUploadedImage,
   chooseSampling,
@@ -13,6 +11,7 @@ import {
   syncSamplingControls,
   syncUploadPrepareControls,
 } from '../src/features/prepare-workspace/prepareSession';
+import type { VaadinRadioGroupController } from '../src/features/vaadin-controls/vaadinControls';
 
 test('project import, replacement, and a new upload keep task radios synchronized without leaking mode preference', () => {
   for (const fixture of [
@@ -20,69 +19,68 @@ test('project import, replacement, and a new upload keep task radios synchronize
     { mode: 'pixelArt' as const, task: 'newPattern' as const },
     { mode: 'existingChart' as const, task: 'mirrorExistingChart' as const },
   ]) {
-    const window = new Window();
-    const document = window.document;
-    document.body.innerHTML = renderApp();
+    const customerTask = createTestRadioController('newPattern');
+    const modePreference = createTestRadioController('auto');
+    const controllers = { customerTask, modePreference };
 
     const imported = flowFromImportedProject(fixture.mode);
-    syncUploadPrepareControls(document, imported);
-    assert.equal(checkedValue(document, 'customer-task'), fixture.task);
+    syncUploadPrepareControls(controllers, imported);
+    assert.equal(customerTask.selectedValue(), fixture.task);
     if (fixture.task === 'newPattern') {
-      assert.equal(checkedValue(document, 'mode-preference'), fixture.mode);
+      assert.equal(modePreference.selectedValue(), fixture.mode);
     }
 
     const reset = resetFlowForReplacement(imported);
-    syncUploadPrepareControls(document, reset);
-    assert.equal(checkedValue(document, 'customer-task'), fixture.task);
-    assert.equal(checkedValue(document, 'mode-preference'), 'auto');
+    syncUploadPrepareControls(controllers, reset);
+    assert.equal(customerTask.selectedValue(), fixture.task);
+    assert.equal(modePreference.selectedValue(), 'auto');
 
     const uploaded = beginUploadedImage(reset, 41);
-    syncUploadPrepareControls(document, uploaded);
-    assert.equal(checkedValue(document, 'customer-task'), fixture.task);
+    syncUploadPrepareControls(controllers, uploaded);
+    assert.equal(customerTask.selectedValue(), fixture.task);
     if (fixture.task === 'newPattern') {
       assert.equal(uploaded.prepareState?.preference, 'auto');
-      assert.equal(checkedValue(document, 'mode-preference'), 'auto');
+      assert.equal(modePreference.selectedValue(), 'auto');
     } else {
       assert.equal(uploaded.prepareState, null);
     }
-
-    window.close();
   }
 });
 
 test('late mode recommendations update only automatic sampling and preserve user or project choices', () => {
-  const window = new Window();
-  const document = window.document;
-  document.body.innerHTML = renderApp();
+  const sampling = createTestRadioController('average');
   const supported = ['average', 'nearest'] as const;
 
   let automatic = createAutomaticSampling('photo', supported);
-  syncSamplingControls(document, automatic);
-  assert.equal(checkedValue(document, 'sampling'), 'average');
+  syncSamplingControls(sampling, automatic);
+  assert.equal(sampling.selectedValue(), 'average');
   automatic = recommendSampling(automatic, 'pixelArt', supported);
-  syncSamplingControls(document, automatic);
-  assert.equal(checkedValue(document, 'sampling'), 'nearest');
+  syncSamplingControls(sampling, automatic);
+  assert.equal(sampling.selectedValue(), 'nearest');
 
   let userChoice = createAutomaticSampling('photo', supported);
   userChoice = chooseSampling(userChoice, 'nearest', 'user');
   userChoice = recommendSampling(userChoice, 'photo', supported);
-  syncSamplingControls(document, userChoice);
+  syncSamplingControls(sampling, userChoice);
   assert.deepEqual(userChoice, { value: 'nearest', source: 'user' });
-  assert.equal(checkedValue(document, 'sampling'), 'nearest');
+  assert.equal(sampling.selectedValue(), 'nearest');
 
   let projectChoice = chooseSampling(automatic, 'average', 'project');
   projectChoice = recommendSampling(projectChoice, 'pixelArt', supported);
-  syncSamplingControls(document, projectChoice);
+  syncSamplingControls(sampling, projectChoice);
   assert.deepEqual(projectChoice, { value: 'average', source: 'project' });
-  assert.equal(checkedValue(document, 'sampling'), 'average');
-
-  window.close();
+  assert.equal(sampling.selectedValue(), 'average');
 });
 
-function checkedValue(root: ParentNode, name: string): string | undefined {
-  return (
-    root.querySelector<HTMLElement>(`[data-${name}]`) as
-      | (HTMLElement & { value?: string })
-      | null
-  )?.value;
+function createTestRadioController(initialValue: string): VaadinRadioGroupController {
+  let value = initialValue;
+  return {
+    destroy() {},
+    selectedValue: () => value,
+    setValue(nextValue) {
+      value = nextValue;
+      return value;
+    },
+    subscribe: () => () => {},
+  };
 }

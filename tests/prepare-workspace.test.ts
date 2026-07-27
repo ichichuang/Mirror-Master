@@ -14,7 +14,12 @@ import {
   resolveSupportedNewPatternMode,
   syncCropNumericInputValues,
   type PrepareColor,
+  type PreparePresetRadioGroupControllers,
 } from '../src/features/prepare-workspace/prepareWorkspace';
+import type {
+  VaadinRadioGroupController,
+  VaadinRadioGroupValueChangedListener,
+} from '../src/features/vaadin-controls/vaadinControls';
 test('mounted customer cards update real prepare controls and live physical size', () => {
   const window = new Window();
   const document = window.document;
@@ -22,6 +27,7 @@ test('mounted customer cards update real prepare controls and live physical size
   const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
   assert.ok(prepare);
   const controller = mountPreparePresetControls(prepare, {
+    radioGroups: createTestPrepareRadioGroups(prepare),
     initialState: {
       croppedColumns: 160,
       croppedRows: 90,
@@ -67,6 +73,7 @@ test('mounted manual controls reverse-sync cards and custom bead size opens the 
   const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
   assert.ok(prepare);
   const controller = mountPreparePresetControls(prepare, {
+    radioGroups: createTestPrepareRadioGroups(prepare),
     initialState: {
       croppedColumns: 4,
       croppedRows: 3,
@@ -295,7 +302,10 @@ test('replacement defaults preserve a cleared palette as coherent zero state and
   document.body.innerHTML = renderApp();
   const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
   assert.ok(prepare);
-  const controller = mountPreparePresetControls(prepare, { initialState: defaults });
+  const controller = mountPreparePresetControls(prepare, {
+    initialState: defaults,
+    radioGroups: createTestPrepareRadioGroups(prepare),
+  });
   const maximum = prepare.querySelector<HTMLInputElement>('[data-maximum-colors]');
   assert.ok(maximum);
   assert.equal(maximum.value, '0');
@@ -444,6 +454,7 @@ test('external preset synchronization preserves a focused numeric caret', () => 
   const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
   assert.ok(prepare);
   const controller = mountPreparePresetControls(prepare, {
+    radioGroups: createTestPrepareRadioGroups(prepare),
     initialState: {
       croppedColumns: 4,
       croppedRows: 3,
@@ -473,17 +484,52 @@ test('external preset synchronization preserves a focused numeric caret', () => 
 
 function changeRadio(window: Window, root: ParentNode, name: string, value: string): void {
   const group = root.querySelector<HTMLElement>(`[data-${name}]`) as
-    | (HTMLElement & { value: string })
-    | null;
+    (HTMLElement & { value: string }) | null;
   assert.ok(group);
   group.value = value;
-  group.dispatchEvent(new window.CustomEvent('value-changed', { bubbles: true }));
+  group.dispatchEvent(
+    new window.CustomEvent('value-changed', {
+      bubbles: true,
+      detail: { value },
+    }),
+  );
 }
 
 function radioGroupValue(root: ParentNode, name: string): string | undefined {
   return (
-    root.querySelector<HTMLElement>(`[data-${name}]`) as
-      | (HTMLElement & { value?: string })
-      | null
+    root.querySelector<HTMLElement>(`[data-${name}]`) as (HTMLElement & { value?: string }) | null
   )?.value;
+}
+
+function createTestPrepareRadioGroups(root: ParentNode): PreparePresetRadioGroupControllers {
+  return {
+    patternSize: createTestRadioGroup(root, 'pattern-size-preset'),
+    beadSize: createTestRadioGroup(root, 'bead-size-preset'),
+    colorCount: createTestRadioGroup(root, 'color-count-preset'),
+    processing: createTestRadioGroup(root, 'processing-preset'),
+  };
+}
+
+function createTestRadioGroup(root: ParentNode, name: string): VaadinRadioGroupController {
+  const group = root.querySelector<HTMLElement>(`[data-${name}]`) as
+    (HTMLElement & { value: string }) | null;
+  assert.ok(group);
+  return {
+    destroy() {},
+    selectedValue: () => group.value ?? '',
+    setValue(value) {
+      group.value = value;
+      return value;
+    },
+    subscribe(listener: VaadinRadioGroupValueChangedListener) {
+      const handleValueChanged = (event: Event): void => {
+        const value = (event as CustomEvent<{ value?: string }>).detail?.value ?? group.value;
+        listener(value, event as Parameters<VaadinRadioGroupValueChangedListener>[1]);
+      };
+      group.addEventListener('value-changed', handleValueChanged);
+      return () => {
+        group.removeEventListener('value-changed', handleValueChanged);
+      };
+    },
+  };
 }

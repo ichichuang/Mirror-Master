@@ -70,7 +70,6 @@ function renderUploadWorkspace(): string {
         class="mode-selector task-selector"
         aria-label="制作任务"
         data-customer-task
-        value="newPattern"
       >
         ${renderTaskOption(
           'newPattern',
@@ -142,14 +141,14 @@ function renderTaskOption(
       value="${value}"
       ${checked ? 'checked' : ''}
     >
-      <div class="mode-option-content" slot="label">
+      <label class="mode-option-content" slot="label">
         <span class="mode-icon" aria-hidden="true"><i class="ph ${icon}"></i></span>
         <span>
           <strong>${title}</strong>
           <small>${description}</small>
         </span>
         <i class="ph ph-check mode-check" aria-hidden="true"></i>
-      </div>
+      </label>
     </vaadin-radio-button>
   `;
 }
@@ -215,7 +214,6 @@ function renderPrepareWorkspace(): string {
                 class="preset-cards preset-cards-three"
                 aria-label="选择图案大小"
                 data-pattern-size-preset
-                value="48"
               >
                 ${renderPresetCard('pattern-size-preset', '29', '小巧', '长边 29 颗', false)}
                 ${renderPresetCard('pattern-size-preset', '48', '推荐', '长边 48 颗', true)}
@@ -261,7 +259,6 @@ function renderPrepareWorkspace(): string {
                 class="preset-cards preset-cards-three"
                 aria-label="选择拼豆规格"
                 data-bead-size-preset
-                value="5"
               >
                 ${renderPresetCard('bead-size-preset', '5', '常规', '5 mm', true)}
                 ${renderPresetCard('bead-size-preset', '2.6', '迷你', '2.6 mm', false)}
@@ -292,7 +289,6 @@ function renderPrepareWorkspace(): string {
                 class="preset-cards preset-cards-three"
                 aria-label="选择颜色细节"
                 data-color-count-preset
-                value="24"
               >
                 ${renderPresetCard('color-count-preset', '12', '简单', '最多 12 色', false)}
                 ${renderPresetCard('color-count-preset', '24', '推荐', '最多 24 色', true)}
@@ -311,7 +307,6 @@ function renderPrepareWorkspace(): string {
                 class="preset-cards preset-cards-two processing-cards"
                 aria-label="选择制作方式"
                 data-processing-preset
-                value="easy"
               >
                 ${renderPresetCard('processing-preset', 'easy', '容易制作', '色块清楚，备料更直接', true)}
                 ${renderPresetCard(
@@ -337,22 +332,21 @@ function renderPrepareWorkspace(): string {
                   class="mode-preference"
                   label="图片处理方式"
                   data-mode-preference
-                  value="auto"
                 >
-                  <vaadin-radio-button value="auto">
-                    <div slot="label">
+                  <vaadin-radio-button value="auto" checked>
+                    <label slot="label">
                     <span>自动推荐<small>根据图片格式和颜色给出建议</small></span>
-                    </div>
+                    </label>
                   </vaadin-radio-button>
                   <vaadin-radio-button value="photo">
-                    <div slot="label">
+                    <label slot="label">
                     <span>自然图片<small>适合照片与插画</small></span>
-                    </div>
+                    </label>
                   </vaadin-radio-button>
                   <vaadin-radio-button value="pixelArt">
-                    <div slot="label">
+                    <label slot="label">
                     <span>清晰像素<small>保留明确的像素边缘</small></span>
-                    </div>
+                    </label>
                   </vaadin-radio-button>
                 </vaadin-radio-group>
                 <p
@@ -535,17 +529,16 @@ function renderPrepareWorkspace(): string {
                 class="sampling-options"
                 label="格子取色方式"
                 data-sampling
-                value="average"
               >
-                <vaadin-radio-button value="average">
-                  <div slot="label">
+                <vaadin-radio-button value="average" checked>
+                  <label slot="label">
                     <span>平均取色<small>自然图片更平滑</small></span>
-                  </div>
+                  </label>
                 </vaadin-radio-button>
                 <vaadin-radio-button value="nearest">
-                  <div slot="label">
+                  <label slot="label">
                     <span>保留像素<small>清晰像素更锐利</small></span>
-                  </div>
+                  </label>
                 </vaadin-radio-button>
               </vaadin-radio-group>
 
@@ -660,10 +653,10 @@ function renderPresetCard(
       value="${value}"
       ${checked ? 'checked' : ''}
     >
-      <div class="preset-card-content" slot="label">
+      <label class="preset-card-content" slot="label">
         <span><strong>${title}</strong><small>${description}</small></span>
         <i class="ph ph-check" aria-hidden="true"></i>
-      </div>
+      </label>
     </vaadin-radio-button>
   `;
 }
@@ -973,9 +966,8 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
         label="显示颜色"
         aria-label="显示颜色"
         data-color-filter
-        value="all"
       >
-        <vaadin-radio-button value="all" label="全部"></vaadin-radio-button>
+        <vaadin-radio-button value="all" label="全部" checked></vaadin-radio-button>
         <vaadin-radio-button value="used" label="已使用"></vaadin-radio-button>
         <vaadin-radio-button value="recent" label="最近"></vaadin-radio-button>
       </vaadin-radio-group>
@@ -1023,17 +1015,16 @@ function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
         class="export-template-options"
         data-export-template-options
         label="分享图片样式"
-        value="annotated"
       >
         <vaadin-radio-button value="pure" data-export-template="pure">
-          <div slot="label">
+          <label slot="label">
           <span>纯图案<small>透明背景，只保留拼豆图案</small></span>
-          </div>
+          </label>
         </vaadin-radio-button>
         <vaadin-radio-button value="annotated" data-export-template="annotated" checked>
-          <div slot="label">
+          <label slot="label">
           <span>带标注<small>包含网格、坐标和材料图例</small></span>
-          </div>
+          </label>
         </vaadin-radio-button>
       </vaadin-radio-group>
       <button class="primary-button export-run" type="button" data-export-run>

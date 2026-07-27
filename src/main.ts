@@ -121,6 +121,7 @@ import {
   syncCropNumericInputValues,
   type AvailableColorGridRenderer,
   type PreparePresetControlsController,
+  type PreparePresetRadioGroupControllers,
 } from './features/prepare-workspace/prepareWorkspace';
 import {
   beginUploadedImage,
@@ -134,6 +135,7 @@ import {
   type SamplingSelection,
   type SamplingValue,
   type UploadPrepareFlow,
+  type UploadPrepareRadioControllers,
 } from './features/prepare-workspace/prepareSession';
 import {
   exportPattern,
@@ -147,9 +149,11 @@ import {
   ProjectImportError,
 } from './features/project-import/projectImport';
 import {
+  createVaadinRadioGroupController,
   createVaadinSelectController,
   requiredVaadinElement,
   type VaadinChoiceOption,
+  type VaadinRadioGroupController,
   type VaadinSelectController,
 } from './features/vaadin-controls/vaadinControls';
 import {
@@ -250,10 +254,7 @@ const selectionDescription = required(
 );
 const firstUseHint = required(patternWorkspace, '[data-first-use-hint]', HTMLElement);
 const workspaceSurfaceRoots = Object.freeze([workspaceInspector, workspaceSheet]);
-const workspacePanelControllers: readonly WorkspacePanelsController[] = Object.freeze([
-  createWorkspacePanels(desktopInspectorContent),
-  createWorkspacePanels(mobileSheetContent),
-]);
+let workspacePanelControllers: readonly WorkspacePanelsController[] = Object.freeze([]);
 
 const objectUrls = createObjectUrlStore();
 const recommendationRequests = createLatestSourceRequest();
@@ -313,6 +314,13 @@ let syncingPreparePresetCrop = false;
 let confirmationRequest: ConfirmationRequest | null = null;
 let confirmationSaving = false;
 let confirmationDialogController: ConfirmationDialogController | null = null;
+let uploadPrepareRadioControllers: UploadPrepareRadioControllers;
+let preparePresetRadioGroupControllers: PreparePresetRadioGroupControllers;
+let samplingRadioController: VaadinRadioGroupController;
+let paletteScopeRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
+let exportTemplateRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
+let responsiveWorkspaceMount: ResponsiveWorkspaceMount;
+let gridController: GridEditorController;
 
 const exportCoordinator = createExportCoordinator({
   requestPatternExport: ({ project, format, template, signal }) =>
@@ -330,25 +338,165 @@ const exportCoordinator = createExportCoordinator({
   onEvent: handleExportEvent,
 });
 
-setupUpload();
-setupPrepare();
-setupPatternWorkspace();
-const responsiveWorkspaceMount: ResponsiveWorkspaceMount = createResponsiveWorkspaceMount({
-  root: patternWorkspace,
-  inspector: workspaceInspector,
-  sheet: workspaceSheet,
-});
-updateWorkspaceLayout();
-const gridController: GridEditorController = setupChartWorkspace();
-setupReplacementActions();
-setupConfirmationSurface();
-window.addEventListener('resize', updateWorkspaceLayout);
-window.addEventListener('orientationchange', updateWorkspaceLayout);
-window.visualViewport?.addEventListener('resize', handleVisualViewportChange);
-window.visualViewport?.addEventListener('scroll', handleVisualViewportChange);
-window.addEventListener('beforeunload', cleanup);
-showStage('upload');
-void initializeCapabilities();
+void bootstrap();
+
+async function bootstrap(): Promise<void> {
+  await waitForVaadinDefinitions();
+  await initializeRadioGroupControllers();
+  workspacePanelControllers = Object.freeze([
+    createWorkspacePanels(desktopInspectorContent),
+    createWorkspacePanels(mobileSheetContent),
+  ]);
+  setupUpload();
+  setupPrepare();
+  setupPatternWorkspace();
+  responsiveWorkspaceMount = createResponsiveWorkspaceMount({
+    root: patternWorkspace,
+    inspector: workspaceInspector,
+    sheet: workspaceSheet,
+  });
+  updateWorkspaceLayout();
+  gridController = setupChartWorkspace();
+  setupReplacementActions();
+  setupConfirmationSurface();
+  window.addEventListener('resize', updateWorkspaceLayout);
+  window.addEventListener('orientationchange', updateWorkspaceLayout);
+  window.visualViewport?.addEventListener('resize', handleVisualViewportChange);
+  window.visualViewport?.addEventListener('scroll', handleVisualViewportChange);
+  window.addEventListener('beforeunload', cleanup);
+  syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
+  syncSamplingControls(samplingRadioController, samplingSelection);
+  showStage('upload');
+  await initializeCapabilities();
+}
+
+async function waitForVaadinDefinitions(): Promise<void> {
+  await Promise.all(
+    [
+      'vaadin-button',
+      'vaadin-checkbox',
+      'vaadin-confirm-dialog',
+      'vaadin-dialog',
+      'vaadin-radio-button',
+      'vaadin-radio-group',
+      'vaadin-select',
+      'vaadin-text-field',
+    ].map((tagName) => customElements.whenDefined(tagName)),
+  );
+}
+
+async function initializeRadioGroupControllers(): Promise<void> {
+  const customerTaskGroup = requiredVaadinElement(
+    app,
+    '[data-customer-task]',
+    'vaadin-radio-group',
+  );
+  const modePreferenceGroup = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-mode-preference]',
+    'vaadin-radio-group',
+  );
+  const samplingGroup = requiredVaadinElement(
+    prepareWorkspace,
+    '[data-sampling]',
+    'vaadin-radio-group',
+  );
+  const presetGroups = {
+    patternSize: requiredVaadinElement(
+      prepareWorkspace,
+      '[data-pattern-size-preset]',
+      'vaadin-radio-group',
+    ),
+    beadSize: requiredVaadinElement(
+      prepareWorkspace,
+      '[data-bead-size-preset]',
+      'vaadin-radio-group',
+    ),
+    colorCount: requiredVaadinElement(
+      prepareWorkspace,
+      '[data-color-count-preset]',
+      'vaadin-radio-group',
+    ),
+    processing: requiredVaadinElement(
+      prepareWorkspace,
+      '[data-processing-preset]',
+      'vaadin-radio-group',
+    ),
+  };
+  const paletteGroups = queryPatternWorkspaceElements('[data-color-filter]', 'vaadin-radio-group');
+  const exportGroups = queryPatternWorkspaceElements(
+    '[data-export-template-options]',
+    'vaadin-radio-group',
+  );
+
+  const [
+    customerTaskController,
+    modePreferenceController,
+    nextSamplingController,
+    patternSizeController,
+    beadSizeController,
+    colorCountController,
+    processingController,
+    nextPaletteControllers,
+    nextExportControllers,
+  ] = await Promise.all([
+    createVaadinRadioGroupController({
+      element: customerTaskGroup,
+      initialValue: customerTask,
+    }),
+    createVaadinRadioGroupController({
+      element: modePreferenceGroup,
+      initialValue: 'auto',
+    }),
+    createVaadinRadioGroupController({
+      element: samplingGroup,
+      initialValue: samplingSelection.value,
+    }),
+    createVaadinRadioGroupController({
+      element: presetGroups.patternSize,
+      initialValue: '48',
+    }),
+    createVaadinRadioGroupController({
+      element: presetGroups.beadSize,
+      initialValue: '5',
+    }),
+    createVaadinRadioGroupController({
+      element: presetGroups.colorCount,
+      initialValue: '24',
+    }),
+    createVaadinRadioGroupController({
+      element: presetGroups.processing,
+      initialValue: 'easy',
+    }),
+    Promise.all(
+      paletteGroups.map((element) =>
+        createVaadinRadioGroupController({ element, initialValue: paletteScope }),
+      ),
+    ),
+    Promise.all(
+      exportGroups.map((element) =>
+        createVaadinRadioGroupController({
+          element,
+          initialValue: exportCompletionState.pngTemplate,
+        }),
+      ),
+    ),
+  ]);
+
+  uploadPrepareRadioControllers = Object.freeze({
+    customerTask: customerTaskController,
+    modePreference: modePreferenceController,
+  });
+  samplingRadioController = nextSamplingController;
+  preparePresetRadioGroupControllers = Object.freeze({
+    patternSize: patternSizeController,
+    beadSize: beadSizeController,
+    colorCount: colorCountController,
+    processing: processingController,
+  });
+  paletteScopeRadioControllers = Object.freeze(nextPaletteControllers);
+  exportTemplateRadioControllers = Object.freeze(nextExportControllers);
+}
 
 async function initializeCapabilities(): Promise<void> {
   const resolution = await loadAppCapabilities();
@@ -396,7 +544,7 @@ function applyCapabilitiesToInterface(): void {
       prepareState = null;
     }
   }
-  syncUploadPrepareControls(app, currentUploadPrepareFlow());
+  syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
 
   applyIntegerLimits(
     required(prepareWorkspace, '[data-columns]', HTMLInputElement),
@@ -459,12 +607,10 @@ function applyCapabilitiesToInterface(): void {
     '[data-sampling]',
     'vaadin-radio-group',
   );
-  for (const option of samplingGroup.querySelectorAll<
-    HTMLElementTagNameMap['vaadin-radio-button']
-  >('vaadin-radio-button')) {
-    option.disabled = !appCapabilities.sampling.includes(
-      option.value as 'average' | 'nearest',
-    );
+  for (const option of samplingGroup.querySelectorAll<HTMLElementTagNameMap['vaadin-radio-button']>(
+    'vaadin-radio-button',
+  )) {
+    option.disabled = !appCapabilities.sampling.includes(option.value as 'average' | 'nearest');
   }
   if (!appCapabilities.sampling.includes(samplingSelection.value)) {
     samplingSelection = createAutomaticSampling(
@@ -472,7 +618,7 @@ function applyCapabilitiesToInterface(): void {
       appCapabilities.sampling,
     );
   }
-  syncSamplingControls(prepareWorkspace, samplingSelection);
+  syncSamplingControls(samplingRadioController, samplingSelection);
   const ditheringOptions = ditheringSelectOptions().map((option) =>
     Object.freeze({
       ...option,
@@ -503,9 +649,10 @@ function applyCapabilitiesToInterface(): void {
       format as 'png' | 'pdf' | 'csv' | 'projectJson',
     );
   }
-  for (const option of queryPatternWorkspaceElements<
-    HTMLElementTagNameMap['vaadin-radio-button']
-  >('[data-export-template]', 'vaadin-radio-button')) {
+  for (const option of queryPatternWorkspaceElements(
+    '[data-export-template]',
+    'vaadin-radio-button',
+  )) {
     option.disabled = !appCapabilities.pngTemplates.includes(option.value as ExportPngTemplate);
   }
   const supportedTemplate = appCapabilities.pngTemplates.includes('annotated')
@@ -514,13 +661,8 @@ function applyCapabilitiesToInterface(): void {
   if (!appCapabilities.pngTemplates.includes(exportCompletionState.pngTemplate)) {
     exportCompletionState = setExportPngTemplate(exportCompletionState, supportedTemplate);
   }
-  for (const panel of queryPatternWorkspaceAll('[data-export-completion]', HTMLElement)) {
-    const group = requiredVaadinElement(
-      panel,
-      '[data-export-template-options]',
-      'vaadin-radio-group',
-    );
-    group.value = exportCompletionState.pngTemplate;
+  for (const controller of exportTemplateRadioControllers) {
+    controller.setValue(exportCompletionState.pngTemplate);
   }
   syncExportCompletionUi();
   for (const button of chartWorkspace.querySelectorAll<HTMLButtonElement>('[data-chart-axis]')) {
@@ -534,17 +676,15 @@ function applyCapabilitiesToInterface(): void {
 }
 
 function setupUpload(): void {
-  const taskGroup = requiredVaadinElement(app, '[data-customer-task]', 'vaadin-radio-group');
-  taskGroup.addEventListener('value-changed', () => {
-    const selectedTask = taskGroup.value ?? '';
+  uploadPrepareRadioControllers.customerTask.subscribe((selectedTask) => {
     if (!isCustomerTask(selectedTask) || selectedTask === customerTask) return;
     customerTask = selectedTask;
     recommendationRequests.cancel();
     prepareState = null;
     mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
     samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
-    syncUploadPrepareControls(app, currentUploadPrepareFlow());
-    syncSamplingControls(prepareWorkspace, samplingSelection);
+    syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
+    syncSamplingControls(samplingRadioController, samplingSelection);
   });
 
   fileInput.addEventListener('change', () => {
@@ -630,7 +770,7 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     if (customerTask === 'mirrorExistingChart') {
       mode = 'existingChart';
       prepareState = null;
-      syncUploadPrepareControls(app, currentUploadPrepareFlow());
+      syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
       openChartWorkspace();
     } else {
       const recommendationRequest = recommendationRequests.begin();
@@ -639,7 +779,7 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
       );
       mode = firstSupportedNewPatternMode();
       samplingSelection = createAutomaticSampling(mode, appCapabilities.sampling);
-      syncSamplingControls(prepareWorkspace, samplingSelection);
+      syncSamplingControls(samplingRadioController, samplingSelection);
       openPrepareWorkspace();
       void completeImageRecommendation(
         resource.image,
@@ -695,7 +835,7 @@ async function completeImageRecommendation(
 function applyPrepareModeState(): void {
   const state = prepareState;
   if (!state) return;
-  syncUploadPrepareControls(app, currentUploadPrepareFlow());
+  syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
   const status = required(prepareWorkspace, '[data-mode-recommendation]', HTMLElement);
   const generateButton = required(prepareWorkspace, '[data-generate-pattern]', HTMLButtonElement);
   if (state.recommendationStatus === 'analyzing' && state.resolvedMode === null) {
@@ -773,7 +913,7 @@ async function openProjectFile(file: File): Promise<void> {
       project.generation.sampling,
       'project',
     );
-    syncSamplingControls(prepareWorkspace, samplingSelection);
+    syncSamplingControls(samplingRadioController, samplingSelection);
     currentProject = project;
     sourceGenerationRevision = null;
     availableColorIds = new Set(project.palette.availableColorIds);
@@ -1166,6 +1306,7 @@ function setupPrepare(): void {
       availableColorCount: availableColorIds.size,
       dithering: 'none',
     },
+    radioGroups: preparePresetRadioGroupControllers,
     onChange() {
       if (!syncingPreparePresetCrop) {
         ditheringSelectController?.setValue(preparePresetControls?.getState().dithering ?? 'none');
@@ -1173,13 +1314,7 @@ function setupPrepare(): void {
       }
     },
   });
-  const modePreferenceGroup = requiredVaadinElement(
-    prepareWorkspace,
-    '[data-mode-preference]',
-    'vaadin-radio-group',
-  );
-  modePreferenceGroup.addEventListener('value-changed', () => {
-    const preference = modePreferenceGroup.value ?? '';
+  uploadPrepareRadioControllers.modePreference.subscribe((preference) => {
     if (
       !isModePreference(preference) ||
       preference === prepareState?.preference ||
@@ -1190,16 +1325,10 @@ function setupPrepare(): void {
     prepareState = setModePreference(prepareState, preference);
     applyPrepareModeState();
   });
-  const samplingControl = requiredVaadinElement(
-    prepareWorkspace,
-    '[data-sampling]',
-    'vaadin-radio-group',
-  );
-  samplingControl.addEventListener('value-changed', () => {
-    const value = samplingControl.value ?? '';
+  samplingRadioController.subscribe((value) => {
     if (!isSamplingValue(value) || value === samplingSelection.value) return;
     samplingSelection = chooseSampling(samplingSelection, value, 'user');
-    syncSamplingControls(prepareWorkspace, samplingSelection);
+    syncSamplingControls(samplingRadioController, samplingSelection);
   });
   updateCustomBoardVisibility();
   initializePrepareColorSeries();
@@ -1309,7 +1438,7 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
       project.generation.sampling,
       'project',
     );
-    syncSamplingControls(prepareWorkspace, samplingSelection);
+    syncSamplingControls(samplingRadioController, samplingSelection);
     const cropDimensions = croppedImageDimensions();
     preparePresetControls?.hydrate({
       croppedColumns: cropDimensions.width,
@@ -1820,19 +1949,14 @@ function setupPatternWorkspace(): void {
       nextTab.focus();
     }
   });
-  patternWorkspace.addEventListener('value-changed', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement) || target.localName !== 'vaadin-radio-group') {
-      return;
-    }
-    const group = target as HTMLElementTagNameMap['vaadin-radio-group'];
-    if (group.matches('[data-export-template-options]')) {
-      const template = group.value === 'pure' ? 'pure' : 'annotated';
+  for (const controller of exportTemplateRadioControllers) {
+    controller.subscribe((value) => {
+      const template = value === 'pure' ? 'pure' : 'annotated';
       if (template === exportCompletionState.pngTemplate) return;
       exportCompletionState = setExportPngTemplate(exportCompletionState, template);
       syncExportCompletionUi();
-    }
-  });
+    });
+  }
 
   frontButton.addEventListener('click', () => {
     frontButton.classList.add('is-active');
@@ -1971,9 +2095,7 @@ function setupPatternWorkspace(): void {
     workspaceSheet.style.removeProperty('--sheet-height');
     delete workspaceSheet.dataset.sheetDragging;
     if (toggleOnTap) {
-      setSheetState(
-        sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek',
-      );
+      setSheetState(sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek');
     } else {
       applySheetState(motion.stableState);
     }
@@ -1994,10 +2116,7 @@ function setupPatternWorkspace(): void {
     applySheetState(motion.stableState);
   });
 
-  const colorSearches = queryPatternWorkspaceElements<HTMLElementTagNameMap['vaadin-text-field']>(
-    '[data-color-search]',
-    'vaadin-text-field',
-  );
+  const colorSearches = queryPatternWorkspaceElements('[data-color-search]', 'vaadin-text-field');
   for (const search of colorSearches) {
     const applySearch = (): void => {
       paletteQuery = search.value;
@@ -2007,22 +2126,17 @@ function setupPatternWorkspace(): void {
     search.addEventListener('input', applySearch);
     search.addEventListener('value-changed', applySearch);
   }
-  const colorFilters = queryPatternWorkspaceElements<HTMLElementTagNameMap['vaadin-radio-group']>(
-    '[data-color-filter]',
-    'vaadin-radio-group',
-  );
-  for (const group of colorFilters) {
-    group.addEventListener('value-changed', () => {
-      const nextScope =
-        group.value === 'used' || group.value === 'recent' ? group.value : 'all';
+  for (const controller of paletteScopeRadioControllers) {
+    controller.subscribe((value) => {
+      const nextScope = value === 'used' || value === 'recent' ? value : 'all';
       if (nextScope === paletteScope) return;
       paletteScope = nextScope;
-      syncPaletteControls(group);
+      syncPaletteControls(controller);
       applyPaletteFilters();
     });
   }
 
-  const seriesSelects = queryPatternWorkspaceElements<HTMLElementTagNameMap['vaadin-select']>(
+  const seriesSelects = queryPatternWorkspaceElements(
     '[data-color-series-filter]',
     'vaadin-select',
   );
@@ -2561,23 +2675,15 @@ function initializePaletteControls(): void {
 }
 
 function syncPaletteControls(
-  source?:
-    | HTMLElementTagNameMap['vaadin-text-field']
-    | HTMLElementTagNameMap['vaadin-radio-group'],
+  source?: HTMLElementTagNameMap['vaadin-text-field'] | VaadinRadioGroupController,
 ): void {
-  for (const search of queryPatternWorkspaceElements<
-    HTMLElementTagNameMap['vaadin-text-field']
-  >('[data-color-search]', 'vaadin-text-field')) {
+  for (const search of queryPatternWorkspaceElements('[data-color-search]', 'vaadin-text-field')) {
     if (search !== source && search.value !== paletteQuery) {
       search.value = paletteQuery;
     }
   }
-  for (const group of queryPatternWorkspaceElements<
-    HTMLElementTagNameMap['vaadin-radio-group']
-  >('[data-color-filter]', 'vaadin-radio-group')) {
-    if (group !== source && group.value !== paletteScope) {
-      group.value = paletteScope;
-    }
+  for (const controller of paletteScopeRadioControllers) {
+    if (controller !== source) controller.setValue(paletteScope);
   }
   for (const controller of editorSeriesSelectControllers) {
     controller.setValue(paletteSeriesToSelectValue(paletteSeries));
@@ -2711,7 +2817,8 @@ function syncExportCompletionUi(): void {
   const definition = exportTaskDefinition(exportCompletionState.selectedTask);
   const project = currentProject;
   const statistics = project ? calculateStatistics(project.cells) : null;
-  for (const panel of queryPatternWorkspaceAll('[data-export-completion]', HTMLElement)) {
+  const panels = queryPatternWorkspaceAll('[data-export-completion]', HTMLElement);
+  for (const [index, panel] of panels.entries()) {
     for (const button of panel.querySelectorAll<HTMLButtonElement>('[data-export-task]')) {
       const selected = button.dataset.exportTask === exportCompletionState.selectedTask;
       button.classList.toggle('is-active', selected);
@@ -2723,9 +2830,7 @@ function syncExportCompletionUi(): void {
       'vaadin-radio-group',
     );
     templates.hidden = exportCompletionState.selectedTask !== 'shareImage';
-    if (templates.value !== exportCompletionState.pngTemplate) {
-      templates.value = exportCompletionState.pngTemplate;
-    }
+    exportTemplateRadioControllers[index]?.setValue(exportCompletionState.pngTemplate);
     const runButton = required(panel, '[data-export-run]', HTMLButtonElement);
     runButton.textContent =
       exportCompletionState.selectedTask === 'saveProject'
@@ -2984,7 +3089,7 @@ function resetToUpload(): void {
   applyUploadPrepareFlow(resetFlowForReplacement(currentUploadPrepareFlow()));
   mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
   samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
-  syncSamplingControls(prepareWorkspace, samplingSelection);
+  syncSamplingControls(samplingRadioController, samplingSelection);
   clearChartResult();
   objectUrls.revokeAll();
   fileInput.value = '';
@@ -3137,7 +3242,7 @@ function applySheetSnapPointVariables(snapPoints: SheetSnapPoints): void {
 function updateSamplingDefault(): void {
   if (mode === 'existingChart') return;
   samplingSelection = recommendSampling(samplingSelection, mode, appCapabilities.sampling);
-  syncSamplingControls(prepareWorkspace, samplingSelection);
+  syncSamplingControls(samplingRadioController, samplingSelection);
 }
 
 function setFileStatus(message: string, state: 'ready' | 'loading' | 'error'): void {
@@ -3365,7 +3470,7 @@ function currentUploadPrepareFlow(): UploadPrepareFlow {
 function applyUploadPrepareFlow(flow: UploadPrepareFlow): void {
   customerTask = flow.customerTask;
   prepareState = flow.prepareState;
-  syncUploadPrepareControls(app, flow);
+  syncUploadPrepareControls(uploadPrepareRadioControllers, flow);
 }
 
 function isCropArrowKey(value: string): value is CropArrowKey {
@@ -3433,6 +3538,19 @@ function cleanup(): void {
   paletteSelectController?.destroy();
   availableSeriesSelectController?.destroy();
   ditheringSelectController?.destroy();
+  uploadPrepareRadioControllers.customerTask.destroy();
+  uploadPrepareRadioControllers.modePreference.destroy();
+  samplingRadioController.destroy();
+  for (const controller of [
+    preparePresetRadioGroupControllers.patternSize,
+    preparePresetRadioGroupControllers.beadSize,
+    preparePresetRadioGroupControllers.colorCount,
+    preparePresetRadioGroupControllers.processing,
+  ]) {
+    controller.destroy();
+  }
+  for (const controller of paletteScopeRadioControllers) controller.destroy();
+  for (const controller of exportTemplateRadioControllers) controller.destroy();
   for (const controller of editorSeriesSelectControllers) controller.destroy();
   confirmationDialogController?.destroy();
   responsiveWorkspaceMount.destroy();
@@ -3464,18 +3582,18 @@ function queryPatternWorkspaceAll<ElementType extends Element>(
   return [...matches];
 }
 
-function queryPatternWorkspaceElements<ElementType extends Element>(
+function queryPatternWorkspaceElements<TagName extends keyof HTMLElementTagNameMap>(
   selector: string,
-  tagName: string,
-): readonly ElementType[] {
-  const matches = new Set<ElementType>();
+  tagName: TagName,
+): readonly HTMLElementTagNameMap[TagName][] {
+  const matches = new Set<HTMLElementTagNameMap[TagName]>();
   for (const root of [patternWorkspace, ...workspaceSurfaceRoots]) {
     if (root.matches(selector) && root.localName === tagName) {
-      matches.add(root as unknown as ElementType);
+      matches.add(root as HTMLElementTagNameMap[TagName]);
     }
     for (const element of root.querySelectorAll(selector)) {
       if (element.localName === tagName) {
-        matches.add(element as unknown as ElementType);
+        matches.add(element as HTMLElementTagNameMap[TagName]);
       }
     }
   }

@@ -19,10 +19,10 @@ test('upload starts with exactly two customer tasks and keeps project JSON secon
   assert.match(markup, /data-upload-constraints/u);
 
   const upload = sectionMarkup('data-upload-workspace', 'data-prepare-workspace');
-  assert.deepEqual(
-    valuesInVaadinGroup(upload, 'data-customer-task'),
-    ['newPattern', 'mirrorExistingChart'],
-  );
+  assert.deepEqual(valuesInVaadinGroup(upload, 'data-customer-task'), [
+    'newPattern',
+    'mirrorExistingChart',
+  ]);
   assert.match(upload, /data-customer-task[\s\S]*value="newPattern"/u);
   assert.match(upload, /制作新图纸/u);
   assert.match(upload, /镜像已有图纸/u);
@@ -156,8 +156,8 @@ test('desktop and mobile inspector tabs are roving-ready and control tabpanels',
 
 test('editor exposes palette filters, same-layer export, and flow action hooks', () => {
   assert.equal(countMatches(markup, /data-color-search/g), 2);
-  assert.equal(countMatches(markup, /data-color-filter="used"/g), 2);
-  assert.equal(countMatches(markup, /data-color-filter="recent"/g), 2);
+  assert.equal(countMatches(markup, /<vaadin-radio-button value="used"/g), 2);
+  assert.equal(countMatches(markup, /<vaadin-radio-button value="recent"/g), 2);
   assert.equal(countMatches(markup, /data-color-series-filter/g), 2);
   assert.equal(countMatches(markup, /role="search"/g), 3);
   assert.equal(countMatches(markup, /data-export-template="pure"/g), 2);
@@ -177,6 +177,18 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.match(markup, /data-selection-action="move"[\s\S]*移动/u);
   assert.match(markup, /data-selection-action="copy"[\s\S]*复制/u);
   assert.doesNotMatch(markup, /data-selection-actions/u);
+});
+
+test('RadioGroups use one checked child default without a static group value', () => {
+  const groups = [
+    ...markup.matchAll(/<vaadin-radio-group\b([^>]*)>([\s\S]*?)<\/vaadin-radio-group>/gu),
+  ];
+  assert.equal(groups.length, 11);
+  for (const [, attributes = '', children = ''] of groups) {
+    assert.doesNotMatch(attributes, /\bvalue=/u);
+    assert.equal(countMatches(children, /<vaadin-radio-button\b[^>]*\bchecked\b/gu), 1);
+  }
+  assert.doesNotMatch(markup, /<div\b[^>]*\bslot="label"/u);
 });
 
 test('editor exposes one-session first-use guidance and a useful sheet peek summary', () => {
@@ -280,17 +292,16 @@ function sectionMarkup(startHook: string, endHook: string): string {
 
 function valuesForRadioGroup(value: string, name: string): string[] {
   return [
-    ...value.matchAll(
-      new RegExp(`data-choice-group="${name}"[\\s\\S]*?value="([^"]+)"`, 'gu'),
-    ),
-  ].map(
-    (match) => match[1] ?? '',
-  );
+    ...value.matchAll(new RegExp(`data-choice-group="${name}"[\\s\\S]*?value="([^"]+)"`, 'gu')),
+  ].map((match) => match[1] ?? '');
 }
 
 function valuesInVaadinGroup(value: string, hook: string): string[] {
   const group = value.match(
-    new RegExp(`<vaadin-radio-group[\\s\\S]*?${hook}[\\s\\S]*?>([\\s\\S]*?)<\\/vaadin-radio-group>`, 'u'),
+    new RegExp(
+      `<vaadin-radio-group[\\s\\S]*?${hook}[\\s\\S]*?>([\\s\\S]*?)<\\/vaadin-radio-group>`,
+      'u',
+    ),
   )?.[1];
   assert.ok(group);
   return [...group.matchAll(/<vaadin-radio-button[\s\S]*?value="([^"]+)"/gu)].map(
