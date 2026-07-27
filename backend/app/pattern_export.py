@@ -4,14 +4,16 @@ import csv
 import io
 import math
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 from app import limits
-from .generated_brand import PRODUCT_NAME
 from app.errors import ApiError
+from app.generated_brand import PRODUCT_NAME
 from app.generated_design_tokens import EXPORT_COLORS
-from app.generated_palettes import PALETTE_COLORS
+from app.generated_palettes import PALETTE_COLORS, PALETTES
 from app.models import (
     BeadProject,
     FilledBeadCell,
@@ -19,17 +21,86 @@ from app.models import (
 )
 
 COLOR_BY_ID = {color["id"]: color for color in PALETTE_COLORS}
+PALETTE_LABEL_BY_ID = {
+    palette["id"]: palette["label"] for palette in PALETTES
+}
 CELL_SIZE = 24
-LABEL_MARGIN = 32
-LEGEND_WIDTH = 220
+LABEL_MARGIN = 76
+LEGEND_WIDTH = 320
 PDF_DPI = 150
+PDF_SUMMARY_HEADING_FONT_SIZE = 32
+PDF_SUMMARY_BODY_FONT_SIZE = 20
+PDF_BOARD_HEADING_FONT_SIZE = 26
+PDF_BOARD_BODY_FONT_SIZE = 17
+PDF_COORDINATE_FONT_SIZE = 14
 PDF_PAGE_WIDTH_MM = 210.0
 PDF_PAGE_HEIGHT_MM = 297.0
 PDF_MARGIN_MM = 8.0
 PDF_HEADER_MM = 25.0
 PDF_FOOTER_MM = 8.0
 PDF_LEGEND_WIDTH_MM = 42.0
-PDF_COORDINATE_GUTTER_MM = 5.0
+PDF_COORDINATE_GUTTER_MM = 10.0
+PDF_LEGEND_SWATCH_SIZE = 10
+PDF_LEGEND_TEXT_GAP = 4
+PDF_LEGEND_COLUMN_GAP = 12
+PDF_LEGEND_ROW_GAP = 4
+PDF_SUMMARY_LEGEND_DESCRIPTION_OFFSET = 42
+PDF_SUMMARY_LEGEND_ITEMS_OFFSET = 70
+PDF_BOARD_LEGEND_DESCRIPTION_OFFSET = 38
+PDF_BOARD_LEGEND_ITEMS_OFFSET = 64
+COORDINATE_LABEL_GAP = 4
+
+
+@dataclass(frozen=True)
+class CjkFontCandidate:
+    path: str
+    face_index: int
+
+
+_CJK_FONT_CANDIDATES = (
+    CjkFontCandidate("/System/Library/Fonts/STHeiti Light.ttc", 1),
+    CjkFontCandidate("/System/Library/Fonts/STHeiti Medium.ttc", 1),
+    CjkFontCandidate(
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        0,
+    ),
+    CjkFontCandidate("/Library/Fonts/Arial Unicode.ttf", 0),
+    CjkFontCandidate(
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        0,
+    ),
+    CjkFontCandidate(
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        2,
+    ),
+)
+
+
+@dataclass(frozen=True)
+class AnnotatedPngText:
+    title: str
+    dimensions: str
+    bead_count: str
+    blank_count: str
+    color_count: str
+    legend_heading: str
+    column_labels: tuple[str, ...]
+    row_labels: tuple[str, ...]
+    legend_lines: tuple[str, ...]
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        return (
+            self.title,
+            self.dimensions,
+            self.bead_count,
+            self.blank_count,
+            self.color_count,
+            self.legend_heading,
+            *self.column_labels,
+            *self.row_labels,
+            *self.legend_lines,
+        )
 
 
 @dataclass(frozen=True)
@@ -54,12 +125,31 @@ class PdfSummary:
 @dataclass(frozen=True)
 class PdfBoardPage:
     board_id: str
+    board_row: int
+    board_column: int
     page_number: int
     row_start: int
     row_end: int
     column_start: int
     column_end: int
     scale: float
+    width_mm: float
+    height_mm: float
+    non_empty_bead_count: int
+    blank_count: int
+    per_color_counts: tuple[tuple[str, int], ...]
+    legend_width_mm: float
+
+
+@dataclass(frozen=True)
+class _PdfBoardDraft:
+    board_id: str
+    board_row: int
+    board_column: int
+    row_start: int
+    row_end: int
+    column_start: int
+    column_end: int
     width_mm: float
     height_mm: float
     non_empty_bead_count: int
@@ -75,6 +165,329 @@ class PdfDocumentPlan:
     @property
     def page_count(self) -> int:
         return 1 + len(self.boards)
+
+
+@dataclass(frozen=True)
+class PdfSummaryText:
+    title: str
+    details: tuple[str, ...]
+    legend_heading: str
+    legend_columns: str
+    legend_lines: tuple[str, ...]
+    footer: str
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        return (
+            self.title,
+            *self.details,
+            self.legend_heading,
+            self.legend_columns,
+            *self.legend_lines,
+            self.footer,
+        )
+
+
+@dataclass(frozen=True)
+class PdfBoardText:
+    heading: str
+    page_and_scale: str
+    dimensions_and_counts: str
+    legend_heading: str
+    legend_columns: str
+    legend_lines: tuple[str, ...]
+    footer: str
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        return (
+            self.heading,
+            self.page_and_scale,
+            self.dimensions_and_counts,
+            self.legend_heading,
+            self.legend_columns,
+            *self.legend_lines,
+            self.footer,
+        )
+
+
+@dataclass(frozen=True)
+class PdfLegendItemLayout:
+    color_id: str
+    count: int
+    label: str
+    swatch_box: tuple[int, int, int, int]
+    text_position: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class PdfLegendLayout:
+    items: tuple[PdfLegendItemLayout, ...]
+    required_width: int
+    required_height: int
+    column_count: int
+    rows_per_column: int
+
+
+@dataclass(frozen=True)
+class CoordinateLabelPlacement:
+    axis: str
+    index: int
+    label: str
+    position: tuple[float, float]
+    anchor: str
+
+
+@dataclass(frozen=True)
+class _CoordinateLabelCandidate:
+    axis: str
+    index: int
+    label: str
+    positions: tuple[tuple[float, float], ...]
+    anchor: str
+    boundary: bool
+
+
+@dataclass(frozen=True)
+class _PdfLegendMeasurement:
+    entries: tuple[tuple[str, int, str, int, int], ...]
+    column_widths: tuple[int, ...]
+    required_width: int
+    required_height: int
+    row_height: int
+    rows_per_column: int
+
+
+@lru_cache(maxsize=1)
+def _resolve_cjk_font_path() -> CjkFontCandidate:
+    for candidate in _CJK_FONT_CANDIDATES:
+        path = Path(candidate.path)
+        if not path.is_file():
+            continue
+        try:
+            ImageFont.truetype(
+                str(path),
+                size=12,
+                index=candidate.face_index,
+            )
+        except OSError:
+            continue
+        return candidate
+    raise ApiError(
+        500,
+        "EXPORT_CJK_FONT_UNAVAILABLE",
+        "未找到可用的中文字体，无法生成带文字的导出文件。",
+    )
+
+
+def _load_cjk_font(size: int) -> ImageFont.FreeTypeFont:
+    candidate = _resolve_cjk_font_path()
+    try:
+        return ImageFont.truetype(
+            candidate.path,
+            size=size,
+            index=candidate.face_index,
+        )
+    except OSError as error:
+        raise ApiError(
+            500,
+            "EXPORT_CJK_FONT_UNAVAILABLE",
+            "未找到可用的中文字体，无法生成带文字的导出文件。",
+        ) from error
+
+
+def _palette_label(palette_id: str) -> str:
+    label = PALETTE_LABEL_BY_ID.get(palette_id)
+    if label is None:
+        raise ApiError(
+            422,
+            "PROJECT_PALETTE_INVALID",
+            "项目包含当前应用无法识别的色板。",
+        )
+    return label
+
+
+def _column_coordinate_label(column: int) -> str:
+    return f"第{column}列"
+
+
+def _row_coordinate_label(row: int) -> str:
+    return f"第{row}行"
+
+
+def _material_legend_label(
+    color_id: str,
+    count: int,
+    *,
+    include_palette: bool,
+) -> str:
+    color = COLOR_BY_ID[color_id]
+    parts = []
+    if include_palette:
+        parts.append(_palette_label(color["paletteId"]))
+    parts.extend(
+        (
+            f"{color['series']} 系列",
+            f"色号 {color['code']}",
+            f"{count} 颗",
+        )
+    )
+    return " · ".join(parts)
+
+
+def _pdf_material_legend_label(
+    color_id: str,
+    count: int,
+    *,
+    include_palette: bool,
+) -> str:
+    color = COLOR_BY_ID[color_id]
+    parts = []
+    if include_palette:
+        parts.append(_palette_label(color["paletteId"]))
+    parts.extend(
+        (
+            str(color["series"]),
+            str(color["code"]),
+            str(count),
+        )
+    )
+    return "｜".join(parts)
+
+
+def _should_label_png_coordinate(index: int, count: int) -> bool:
+    return (
+        index == 0
+        or index == count - 1
+        or (index + 1) % 5 == 0
+    )
+
+
+def _annotated_png_text(project: BeadProject) -> AnnotatedPngText:
+    statistics = _statistics(project)
+    return AnnotatedPngText(
+        title=f"{PRODUCT_NAME}图纸",
+        dimensions=(
+            f"图案：{project.grid.columns} 列 × "
+            f"{project.grid.rows} 行"
+        ),
+        bead_count=f"拼豆总数：{statistics['nonEmptyBeadCount']} 颗",
+        blank_count=f"空格数：{statistics['blankCount']} 个",
+        color_count=(
+            f"使用颜色：{len(statistics['perColorCounts'])} 种"
+        ),
+        legend_heading="材料清单",
+        column_labels=tuple(
+            _column_coordinate_label(column + 1)
+            for column in range(project.grid.columns)
+            if _should_label_png_coordinate(
+                column,
+                project.grid.columns,
+            )
+        ),
+        row_labels=tuple(
+            _row_coordinate_label(row + 1)
+            for row in range(project.grid.rows)
+            if _should_label_png_coordinate(row, project.grid.rows)
+        ),
+        legend_lines=tuple(
+            _material_legend_label(
+                color_id,
+                int(count),
+                include_palette=True,
+            )
+            for color_id, count in statistics["perColorCounts"].items()
+        ),
+    )
+
+
+def _pdf_summary_text(plan: PdfDocumentPlan) -> PdfSummaryText:
+    summary = plan.summary
+    return PdfSummaryText(
+        title=f"{PRODUCT_NAME}打印制作摘要",
+        details=(
+            f"图案尺寸：{summary.columns} 列 × {summary.rows} 行",
+            (
+                f"材料统计：{summary.non_empty_bead_count} 颗拼豆，"
+                f"{summary.blank_count} 个空格，"
+                f"{summary.used_color_count} 种颜色"
+            ),
+            (
+                f"预计成品尺寸：{_format_millimeters(summary.width_mm)} × "
+                f"{_format_millimeters(summary.height_mm)} 毫米"
+            ),
+            (
+                "拼豆直径与间距："
+                f"{_format_millimeters(summary.bead_diameter_mm)} / "
+                f"{_format_millimeters(summary.bead_pitch_mm)} 毫米"
+            ),
+            (
+                f"拼板规格：{summary.board_rows} 行 × "
+                f"{summary.board_columns} 列"
+            ),
+            (
+                f"拼板布局：{summary.board_layout_rows} 行 × "
+                f"{summary.board_layout_columns} 列"
+            ),
+            f"文档页数：{plan.page_count} 页",
+        ),
+        legend_heading="全部材料清单",
+        legend_columns="色板｜系列｜色号｜数量",
+        legend_lines=tuple(
+            _pdf_material_legend_label(
+                color_id,
+                count,
+                include_palette=True,
+            )
+            for color_id, count in summary.per_color_counts
+        ),
+        footer=f"第 1 页，共 {plan.page_count} 页",
+    )
+
+
+def _pdf_board_text(
+    project: BeadProject,
+    plan: PdfDocumentPlan,
+    board: PdfBoardPage,
+) -> PdfBoardText:
+    scale_label = (
+        "1:1"
+        if math.isclose(board.scale, 1.0)
+        else f"{board.scale * 100:.1f}%"
+    )
+    return PdfBoardText(
+        heading=(
+            f"第 {board.board_row} 行第 {board.board_column} 块拼板"
+            f"｜原图第 {board.row_start}–{board.row_end} 行，"
+            f"第 {board.column_start}–{board.column_end} 列"
+        ),
+        page_and_scale=(
+            f"第 {board.page_number} 页，共 {plan.page_count} 页"
+            f"｜打印比例：{scale_label}"
+        ),
+        dimensions_and_counts=(
+            f"拼板尺寸：{_format_millimeters(board.width_mm)} × "
+            f"{_format_millimeters(board.height_mm)} 毫米"
+            f"｜拼豆间距："
+            f"{_format_millimeters(project.grid.bead_pitch_mm)} 毫米"
+            f"｜{board.non_empty_bead_count} 颗拼豆，"
+            f"{board.blank_count} 个空格，"
+            f"{len(board.per_color_counts)} 种颜色"
+        ),
+        legend_heading="本板材料",
+        legend_columns="系列｜色号｜数量",
+        legend_lines=tuple(
+            _pdf_material_legend_label(
+                color_id,
+                count,
+                include_palette=False,
+            )
+            for color_id, count in board.per_color_counts
+        ),
+        footer=(
+            f"第 {board.page_number} 页，共 {plan.page_count} 页"
+        ),
+    )
 
 
 def create_pattern_export(
@@ -140,11 +553,14 @@ def _render_annotated_pattern_image(project: BeadProject) -> Image.Image:
     width = offset + project.grid.columns * CELL_SIZE + LEGEND_WIDTH
     height = max(
         offset + project.grid.rows * CELL_SIZE,
-        200 + _used_color_count(project) * 26,
+        230 + _used_color_count(project) * 30,
     )
     canvas = Image.new("RGBA", (width, height), EXPORT_COLORS["background"])
     draw = ImageDraw.Draw(canvas)
-    font = ImageFont.load_default()
+    heading_font = _load_cjk_font(18)
+    body_font = _load_cjk_font(13)
+    coordinate_font = _load_cjk_font(11)
+    text = _annotated_png_text(project)
     grid_left = offset
     grid_top = offset
 
@@ -169,72 +585,159 @@ def _render_annotated_pattern_image(project: BeadProject) -> Image.Image:
                     hole_fill=EXPORT_COLORS["background"],
                 )
 
-    for column in range(project.grid.columns):
-        if column == 0 or (column + 1) % 5 == 0:
-            draw.text(
-                (
-                    grid_left + column * CELL_SIZE + 7,
-                    9,
-                ),
-                str(column + 1),
-                fill=EXPORT_COLORS["textSecondary"],
-                font=font,
-            )
-    for row in range(project.grid.rows):
-        if row == 0 or (row + 1) % 5 == 0:
-            draw.text(
-                (
-                    7,
-                    grid_top + row * CELL_SIZE + 7,
-                ),
-                str(row + 1),
-                fill=EXPORT_COLORS["textSecondary"],
-                font=font,
-            )
+    for coordinate in _layout_annotated_png_coordinates(
+        project,
+        coordinate_font,
+        canvas.size,
+    ):
+        draw.text(
+            coordinate.position,
+            coordinate.label,
+            anchor=coordinate.anchor,
+            fill=EXPORT_COLORS["textSecondary"],
+            font=coordinate_font,
+        )
 
     legend_left = offset + project.grid.columns * CELL_SIZE + 24
+    draw.text(
+        (legend_left, 18),
+        text.title,
+        fill=EXPORT_COLORS["textPrimary"],
+        font=heading_font,
+    )
+    draw.text(
+        (legend_left, 50),
+        text.dimensions,
+        fill=EXPORT_COLORS["textPrimary"],
+        font=body_font,
+    )
+    draw.text(
+        (legend_left, 78),
+        text.bead_count,
+        fill=EXPORT_COLORS["textPrimary"],
+        font=body_font,
+    )
+    draw.text(
+        (legend_left, 106),
+        text.blank_count,
+        fill=EXPORT_COLORS["textSecondary"],
+        font=body_font,
+    )
+    draw.text(
+        (legend_left, 134),
+        text.color_count,
+        fill=EXPORT_COLORS["textSecondary"],
+        font=body_font,
+    )
+    draw.text(
+        (legend_left, 166),
+        text.legend_heading,
+        fill=EXPORT_COLORS["textPrimary"],
+        font=heading_font,
+    )
+    legend_top = 198
     statistics = _statistics(project)
-    draw.text(
-        (legend_left, 24),
-        f"{project.grid.columns} x {project.grid.rows}",
-        fill=EXPORT_COLORS["textPrimary"],
-        font=font,
-    )
-    draw.text(
-        (legend_left, 44),
-        f"Beads: {statistics['nonEmptyBeadCount']}",
-        fill=EXPORT_COLORS["textPrimary"],
-        font=font,
-    )
-    draw.text(
-        (legend_left, 64),
-        f"Blank: {statistics['blankCount']}",
-        fill=EXPORT_COLORS["textSecondary"],
-        font=font,
-    )
-    draw.text(
-        (legend_left, 84),
-        f"Revision: {project.revision}",
-        fill=EXPORT_COLORS["textSecondary"],
-        font=font,
-    )
-    legend_top = 98
-    for color_id, count in statistics["perColorCounts"].items():
+    for index, (color_id, count) in enumerate(
+        statistics["perColorCounts"].items()
+    ):
         color = COLOR_BY_ID[color_id]
         draw.rectangle(
             (legend_left, legend_top, legend_left + 14, legend_top + 14),
             fill=color["displayHex"],
             outline=EXPORT_COLORS["beadOutline"],
         )
-        label = f"{color['paletteId'].upper()} {color['code']}  {count}"
         draw.text(
             (legend_left + 22, legend_top + 2),
-            label,
+            text.legend_lines[index],
             fill=EXPORT_COLORS["textPrimary"],
-            font=font,
+            font=body_font,
         )
-        legend_top += 26
+        legend_top += 30
     return canvas
+
+
+def _layout_annotated_png_coordinates(
+    project: BeadProject,
+    font: ImageFont.FreeTypeFont,
+    canvas_size: tuple[int, int],
+) -> tuple[CoordinateLabelPlacement, ...]:
+    grid_left = LABEL_MARGIN
+    grid_top = LABEL_MARGIN
+    grid_right = grid_left + project.grid.columns * CELL_SIZE
+    grid_bottom = grid_top + project.grid.rows * CELL_SIZE
+    legend_left = grid_right + 24
+    column_lane_step = font.size + COORDINATE_LABEL_GAP
+    row_labels = tuple(
+        _row_coordinate_label(row + 1)
+        for row in range(project.grid.rows)
+        if _should_label_png_coordinate(row, project.grid.rows)
+    )
+    row_lane_step = (
+        _maximum_coordinate_label_width(row_labels, font)
+        + COORDINATE_LABEL_GAP
+    )
+    candidates: list[_CoordinateLabelCandidate] = []
+
+    for column in range(project.grid.columns):
+        if not _should_label_png_coordinate(
+            column,
+            project.grid.columns,
+        ):
+            continue
+        center_x = grid_left + column * CELL_SIZE + CELL_SIZE / 2
+        base_y = grid_top - 8
+        candidates.append(
+            _CoordinateLabelCandidate(
+                axis="column",
+                index=column,
+                label=_column_coordinate_label(column + 1),
+                positions=(
+                    (center_x, base_y),
+                    (center_x, base_y - column_lane_step),
+                ),
+                anchor=_column_coordinate_anchor(
+                    column,
+                    project.grid.columns,
+                    "s",
+                ),
+                boundary=_is_coordinate_boundary(
+                    column,
+                    project.grid.columns,
+                ),
+            )
+        )
+
+    for row in range(project.grid.rows):
+        if not _should_label_png_coordinate(row, project.grid.rows):
+            continue
+        center_y = grid_top + row * CELL_SIZE + CELL_SIZE / 2
+        base_x = grid_left - 8
+        candidates.append(
+            _CoordinateLabelCandidate(
+                axis="row",
+                index=row,
+                label=_row_coordinate_label(row + 1),
+                positions=(
+                    (base_x, center_y),
+                    (base_x - row_lane_step, center_y),
+                ),
+                anchor="rm",
+                boundary=_is_coordinate_boundary(
+                    row,
+                    project.grid.rows,
+                ),
+            )
+        )
+
+    return _place_coordinate_labels(
+        tuple(candidates),
+        font,
+        canvas_box=(0, 0, canvas_size[0], canvas_size[1]),
+        forbidden_boxes=(
+            (grid_left, grid_top, grid_right, grid_bottom),
+            (legend_left, 0, canvas_size[0], canvas_size[1]),
+        ),
+    )
 
 
 def _draw_bead(
@@ -282,8 +785,7 @@ def _plan_pdf_document(project: BeadProject) -> PdfDocumentPlan:
     )
     _validate_pdf_export_budget(board_layout_rows, board_layout_columns)
     statistics = _statistics(project)
-    scale = _pdf_board_scale(project)
-    boards: list[PdfBoardPage] = []
+    board_drafts: list[_PdfBoardDraft] = []
 
     for board_row in range(board_layout_rows):
         row_start_index = board_row * project.grid.board_rows
@@ -306,15 +808,15 @@ def _plan_pdf_document(project: BeadProject) -> PdfDocumentPlan:
             board_statistics = _statistics_for_cells(cells)
             board_row_count = row_end_index - row_start_index
             board_column_count = column_end_index - column_start_index
-            boards.append(
-                PdfBoardPage(
+            board_drafts.append(
+                _PdfBoardDraft(
                     board_id=f"B{board_row + 1}-{board_column + 1}",
-                    page_number=len(boards) + 2,
+                    board_row=board_row + 1,
+                    board_column=board_column + 1,
                     row_start=row_start_index + 1,
                     row_end=row_end_index,
                     column_start=column_start_index + 1,
                     column_end=column_end_index,
-                    scale=scale,
                     width_mm=_physical_span_mm(
                         board_column_count,
                         project.grid.bead_pitch_mm,
@@ -335,6 +837,45 @@ def _plan_pdf_document(project: BeadProject) -> PdfDocumentPlan:
                 )
             )
 
+    board_font = _load_cjk_font(PDF_BOARD_BODY_FONT_SIZE)
+    legend_top, legend_bottom = _pdf_board_legend_vertical_bounds()
+    required_legend_width = max(
+        (
+            _measure_pdf_legend(
+                board.per_color_counts,
+                board_font,
+                legend_bottom - legend_top,
+                include_palette=False,
+            ).required_width
+            for board in board_drafts
+        ),
+        default=0,
+    )
+    legend_width_mm = max(
+        PDF_LEGEND_WIDTH_MM,
+        _px_to_mm(required_legend_width + 1),
+    )
+    scale = _pdf_board_scale(project, legend_width_mm)
+    boards = tuple(
+        PdfBoardPage(
+            board_id=board.board_id,
+            board_row=board.board_row,
+            board_column=board.board_column,
+            page_number=index + 2,
+            row_start=board.row_start,
+            row_end=board.row_end,
+            column_start=board.column_start,
+            column_end=board.column_end,
+            scale=scale,
+            width_mm=board.width_mm,
+            height_mm=board.height_mm,
+            non_empty_bead_count=board.non_empty_bead_count,
+            blank_count=board.blank_count,
+            per_color_counts=board.per_color_counts,
+            legend_width_mm=legend_width_mm,
+        )
+        for index, board in enumerate(board_drafts)
+    )
     summary = PdfSummary(
         revision=project.revision,
         rows=project.grid.rows,
@@ -360,7 +901,21 @@ def _plan_pdf_document(project: BeadProject) -> PdfDocumentPlan:
         board_layout_columns=board_layout_columns,
         per_color_counts=tuple(statistics["perColorCounts"].items()),
     )
-    return PdfDocumentPlan(summary=summary, boards=tuple(boards))
+    plan = PdfDocumentPlan(summary=summary, boards=boards)
+    _layout_pdf_legend(
+        summary.per_color_counts,
+        _pdf_summary_legend_box(),
+        _load_cjk_font(PDF_SUMMARY_BODY_FONT_SIZE),
+        include_palette=True,
+    )
+    for board in boards:
+        _layout_pdf_legend(
+            board.per_color_counts,
+            _pdf_board_legend_box(board),
+            board_font,
+            include_palette=False,
+        )
+    return plan
 
 
 def _render_pdf(project: BeadProject) -> bytes:
@@ -373,10 +928,10 @@ def _render_pdf(project: BeadProject) -> bytes:
             format="PDF",
             append=False,
             resolution=PDF_DPI,
-            title=f"Pattern revision {project.revision}",
+            title=f"{PRODUCT_NAME}打印制作",
             subject=(
-                f"{project.grid.columns} x {project.grid.rows}; "
-                f"{plan.page_count} pages"
+                f"{project.grid.columns} 列 × {project.grid.rows} 行；"
+                f"共 {plan.page_count} 页"
             ),
             creator=PRODUCT_NAME,
         )
@@ -427,74 +982,54 @@ def _render_pdf_summary_page(
 ) -> Image.Image:
     page = _new_pdf_page()
     draw = ImageDraw.Draw(page)
-    heading_font = ImageFont.load_default(size=20)
-    body_font = ImageFont.load_default(size=13)
-    summary = plan.summary
+    heading_font = _load_cjk_font(PDF_SUMMARY_HEADING_FONT_SIZE)
+    body_font = _load_cjk_font(PDF_SUMMARY_BODY_FONT_SIZE)
+    text = _pdf_summary_text(plan)
     left = _mm_to_px(PDF_MARGIN_MM)
     top = _mm_to_px(PDF_MARGIN_MM)
 
     draw.text(
         (left, top),
-        "Pattern production summary",
+        text.title,
         fill=EXPORT_COLORS["textPrimary"],
         font=heading_font,
     )
-    details = (
-        f"Revision: {summary.revision}",
-        f"Matrix: {summary.columns} columns x {summary.rows} rows",
-        (
-            f"Counts: {summary.non_empty_bead_count} beads, "
-            f"{summary.blank_count} blank, "
-            f"{summary.used_color_count} colors"
-        ),
-        (
-            f"Physical size: {summary.width_mm:.1f} x "
-            f"{summary.height_mm:.1f} mm"
-        ),
-        (
-            f"Bead diameter / pitch: "
-            f"{summary.bead_diameter_mm:.1f} / "
-            f"{summary.bead_pitch_mm:.1f} mm"
-        ),
-        (
-            f"Board cells: {summary.board_columns} columns x "
-            f"{summary.board_rows} rows"
-        ),
-        (
-            f"Board layout: {summary.board_layout_columns} columns x "
-            f"{summary.board_layout_rows} rows"
-        ),
-        f"Document pages: {plan.page_count}",
-    )
-    detail_top = top + 40
-    for index, line in enumerate(details):
+    detail_top = top + 52
+    for index, line in enumerate(text.details):
         draw.text(
-            (left, detail_top + index * 22),
+            (left, detail_top + index * 30),
             line,
             fill=EXPORT_COLORS["textPrimary"],
             font=body_font,
         )
 
-    legend_top = detail_top + len(details) * 22 + 20
+    legend_top = detail_top + len(text.details) * 30 + 22
     draw.text(
         (left, legend_top),
-        "Global material legend",
+        text.legend_heading,
         fill=EXPORT_COLORS["textPrimary"],
         font=heading_font,
     )
+    draw.text(
+        (left, legend_top + PDF_SUMMARY_LEGEND_DESCRIPTION_OFFSET),
+        text.legend_columns,
+        fill=EXPORT_COLORS["textSecondary"],
+        font=body_font,
+    )
     _draw_pdf_legend(
         draw,
-        summary.per_color_counts,
-        (
-            left,
-            legend_top + 34,
-            page.width - left,
-            page.height - _mm_to_px(PDF_FOOTER_MM + 4),
-        ),
+        plan.summary.per_color_counts,
+        _pdf_summary_legend_box(),
         body_font,
         include_palette=True,
     )
-    _draw_pdf_footer(draw, plan.page_count, 1, page.width, page.height)
+    _draw_pdf_footer(
+        draw,
+        text.footer,
+        page.width,
+        page.height,
+        body_font,
+    )
     return page
 
 
@@ -505,85 +1040,175 @@ def _render_pdf_board_page(
 ) -> Image.Image:
     page = _new_pdf_page()
     draw = ImageDraw.Draw(page)
-    heading_font = ImageFont.load_default(size=18)
-    body_font = ImageFont.load_default(size=11)
+    heading_font = _load_cjk_font(PDF_BOARD_HEADING_FONT_SIZE)
+    body_font = _load_cjk_font(PDF_BOARD_BODY_FONT_SIZE)
+    coordinate_font = _load_cjk_font(PDF_COORDINATE_FONT_SIZE)
+    text = _pdf_board_text(project, plan, board)
     left = _mm_to_px(PDF_MARGIN_MM)
     top = _mm_to_px(PDF_MARGIN_MM)
-    scale_label = (
-        "1:1"
-        if math.isclose(board.scale, 1.0)
-        else f"{board.scale * 100:.1f}%"
-    )
 
     draw.text(
         (left, top),
-        (
-            f"Board {board.board_id} | rows {board.row_start}-"
-            f"{board.row_end} | columns {board.column_start}-"
-            f"{board.column_end}"
-        ),
+        text.heading,
         fill=EXPORT_COLORS["textPrimary"],
         font=heading_font,
     )
     draw.text(
-        (left, top + 28),
-        (
-            f"Revision {project.revision} | page {board.page_number}/"
-            f"{plan.page_count} | print scale {scale_label}"
-        ),
+        (left, top + 38),
+        text.page_and_scale,
         fill=EXPORT_COLORS["textSecondary"],
         font=body_font,
     )
     draw.text(
-        (left, top + 46),
-        (
-            f"Board size {board.width_mm:.1f} x {board.height_mm:.1f} mm "
-            f"| pitch {project.grid.bead_pitch_mm:.1f} mm | "
-            f"{board.non_empty_bead_count} beads, "
-            f"{board.blank_count} blank"
-        ),
+        (left, top + 66),
+        text.dimensions_and_counts,
         fill=EXPORT_COLORS["textSecondary"],
         font=body_font,
     )
 
-    _draw_pdf_board_pattern(draw, project, board, body_font)
-    legend_left = page.width - _mm_to_px(
-        PDF_MARGIN_MM + PDF_LEGEND_WIDTH_MM
-    )
+    _draw_pdf_board_pattern(draw, project, board, coordinate_font)
+    legend_box = _pdf_board_legend_box(board)
+    legend_left = legend_box[0]
     legend_top = _mm_to_px(PDF_MARGIN_MM + PDF_HEADER_MM)
     draw.text(
         (legend_left, legend_top),
-        f"{project.palette.palette_id.upper()} board legend",
+        text.legend_heading,
         fill=EXPORT_COLORS["textPrimary"],
         font=heading_font,
+    )
+    draw.text(
+        (legend_left, legend_top + PDF_BOARD_LEGEND_DESCRIPTION_OFFSET),
+        text.legend_columns,
+        fill=EXPORT_COLORS["textSecondary"],
+        font=body_font,
     )
     _draw_pdf_legend(
         draw,
         board.per_color_counts,
-        (
-            legend_left,
-            legend_top + 30,
-            page.width - _mm_to_px(PDF_MARGIN_MM),
-            page.height - _mm_to_px(PDF_FOOTER_MM + PDF_MARGIN_MM),
-        ),
+        legend_box,
         body_font,
         include_palette=False,
     )
     _draw_pdf_footer(
         draw,
-        plan.page_count,
-        board.page_number,
+        text.footer,
         page.width,
         page.height,
+        body_font,
     )
     return page
+
+
+def _layout_pdf_board_coordinates(
+    project: BeadProject,
+    board: PdfBoardPage,
+    font: ImageFont.FreeTypeFont,
+) -> tuple[CoordinateLabelPlacement, ...]:
+    pixels_per_mm = PDF_DPI / 25.4 * board.scale
+    bead_diameter = project.grid.bead_diameter_mm * pixels_per_mm
+    pitch = project.grid.bead_pitch_mm * pixels_per_mm
+    coordinate_gutter = _mm_to_px(PDF_COORDINATE_GUTTER_MM)
+    origin_x = _mm_to_px(PDF_MARGIN_MM) + coordinate_gutter
+    origin_y = _mm_to_px(
+        PDF_MARGIN_MM + PDF_HEADER_MM + PDF_COORDINATE_GUTTER_MM
+    )
+    rows = board.row_end - board.row_start + 1
+    columns = board.column_end - board.column_start + 1
+    grid_right = origin_x + bead_diameter + (columns - 1) * pitch
+    grid_bottom = origin_y + bead_diameter + (rows - 1) * pitch
+    legend_box = _pdf_board_legend_box(board)
+    column_lane_step = font.size + COORDINATE_LABEL_GAP
+    row_labels = tuple(
+        _row_coordinate_label(board.row_start + row)
+        for row in range(rows)
+        if _should_label_coordinate(row, rows, pitch)
+    )
+    row_lane_step = (
+        _maximum_coordinate_label_width(row_labels, font)
+        + COORDINATE_LABEL_GAP
+    )
+    candidates: list[_CoordinateLabelCandidate] = []
+
+    for column in range(columns):
+        if not _should_label_coordinate(column, columns, pitch):
+            continue
+        center_x = (
+            origin_x + bead_diameter / 2 + column * pitch
+        )
+        base_y = origin_y - coordinate_gutter
+        candidates.append(
+            _CoordinateLabelCandidate(
+                axis="column",
+                index=column,
+                label=_column_coordinate_label(
+                    board.column_start + column
+                ),
+                positions=(
+                    (round(center_x), base_y),
+                    (
+                        round(center_x),
+                        base_y - column_lane_step,
+                    ),
+                ),
+                anchor=_column_coordinate_anchor(
+                    column,
+                    columns,
+                    "a",
+                ),
+                boundary=_is_coordinate_boundary(column, columns),
+            )
+        )
+
+    for row in range(rows):
+        if not _should_label_coordinate(row, rows, pitch):
+            continue
+        center_y = origin_y + bead_diameter / 2 + row * pitch
+        base_x = origin_x - 4
+        candidates.append(
+            _CoordinateLabelCandidate(
+                axis="row",
+                index=row,
+                label=_row_coordinate_label(board.row_start + row),
+                positions=(
+                    (base_x, round(center_y)),
+                    (base_x - row_lane_step, round(center_y)),
+                ),
+                anchor="rm",
+                boundary=_is_coordinate_boundary(row, rows),
+            )
+        )
+
+    return _place_coordinate_labels(
+        tuple(candidates),
+        font,
+        canvas_box=(
+            0,
+            0,
+            _mm_to_px(PDF_PAGE_WIDTH_MM),
+            _mm_to_px(PDF_PAGE_HEIGHT_MM),
+        ),
+        forbidden_boxes=(
+            (
+                math.floor(origin_x),
+                math.floor(origin_y),
+                math.ceil(grid_right),
+                math.ceil(grid_bottom),
+            ),
+            (
+                legend_box[0],
+                _mm_to_px(PDF_MARGIN_MM + PDF_HEADER_MM),
+                _mm_to_px(PDF_PAGE_WIDTH_MM),
+                _mm_to_px(PDF_PAGE_HEIGHT_MM),
+            ),
+        ),
+    )
 
 
 def _draw_pdf_board_pattern(
     draw: ImageDraw.ImageDraw,
     project: BeadProject,
     board: PdfBoardPage,
-    font: ImageFont.ImageFont,
+    font: ImageFont.FreeTypeFont,
 ) -> None:
     pixels_per_mm = PDF_DPI / 25.4 * board.scale
     bead_diameter = project.grid.bead_diameter_mm * pixels_per_mm
@@ -654,38 +1279,18 @@ def _draw_pdf_board_pattern(
                     fill=EXPORT_COLORS["background"],
                 )
 
-    for local_column in range(columns):
-        if _should_label_coordinate(local_column, columns, pitch):
-            draw.text(
-                (
-                    round(
-                        origin_x
-                        + bead_diameter / 2
-                        + local_column * pitch
-                    ),
-                    origin_y - coordinate_gutter,
-                ),
-                str(board.column_start + local_column),
-                anchor="ma",
-                fill=EXPORT_COLORS["textSecondary"],
-                font=font,
-            )
-    for local_row in range(rows):
-        if _should_label_coordinate(local_row, rows, pitch):
-            draw.text(
-                (
-                    origin_x - 4,
-                    round(
-                        origin_y
-                        + bead_diameter / 2
-                        + local_row * pitch
-                    ),
-                ),
-                str(board.row_start + local_row),
-                anchor="rm",
-                fill=EXPORT_COLORS["textSecondary"],
-                font=font,
-            )
+    for coordinate in _layout_pdf_board_coordinates(
+        project,
+        board,
+        font,
+    ):
+        draw.text(
+            coordinate.position,
+            coordinate.label,
+            anchor=coordinate.anchor,
+            fill=EXPORT_COLORS["textSecondary"],
+            font=font,
+        )
 
 
 def _draw_pdf_legend(
@@ -696,58 +1301,230 @@ def _draw_pdf_legend(
     *,
     include_palette: bool,
 ) -> None:
-    left, top, right, bottom = box
     if not counts:
         draw.text(
-            (left, top),
-            "No bead colors",
+            (box[0], box[1]),
+            "暂无拼豆颜色",
+            anchor="lt",
             fill=EXPORT_COLORS["textSecondary"],
             font=font,
         )
         return
-    row_height = max(14, int(getattr(font, "size", 11)) + 4)
-    rows_per_column = max(1, (bottom - top) // row_height)
-    column_count = math.ceil(len(counts) / rows_per_column)
-    column_width = max(1, (right - left) // column_count)
-    swatch_size = min(10, row_height - 3)
-    for index, (color_id, count) in enumerate(counts):
-        column = index // rows_per_column
-        row = index % rows_per_column
-        x = left + column * column_width
-        y = top + row * row_height
-        color = COLOR_BY_ID[color_id]
+    layout = _layout_pdf_legend(
+        counts,
+        box,
+        font,
+        include_palette=include_palette,
+    )
+    for item in layout.items:
+        color = COLOR_BY_ID[item.color_id]
         draw.rectangle(
-            (x, y, x + swatch_size, y + swatch_size),
+            item.swatch_box,
             fill=color["displayHex"],
             outline=EXPORT_COLORS["beadOutline"],
         )
-        prefix = (
-            f"{color['paletteId'].upper()} {color['code']}"
-            if include_palette
-            else color["code"]
-        )
         draw.text(
-            (x + swatch_size + 4, y),
-            f"{prefix}  {count}",
+            item.text_position,
+            item.label,
+            anchor="lt",
             fill=EXPORT_COLORS["textPrimary"],
             font=font,
         )
 
 
+def _layout_pdf_legend(
+    counts: tuple[tuple[str, int], ...],
+    box: tuple[int, int, int, int],
+    font: ImageFont.ImageFont,
+    *,
+    include_palette: bool,
+) -> PdfLegendLayout:
+    left, top, right, bottom = box
+    measurement = _measure_pdf_legend(
+        counts,
+        font,
+        bottom - top,
+        include_palette=include_palette,
+    )
+    if (
+        measurement.required_width > right - left
+        or measurement.required_height > bottom - top
+    ):
+        raise ApiError(
+            422,
+            "PDF_EXPORT_LIMIT_EXCEEDED",
+            (
+                "材料图例无法在可打印区域内清晰排版，"
+                "请减少颜色数量后重试。"
+            ),
+        )
+
+    column_offsets: list[int] = []
+    next_offset = 0
+    for column_width in measurement.column_widths:
+        column_offsets.append(next_offset)
+        next_offset += column_width + PDF_LEGEND_COLUMN_GAP
+
+    items = []
+    for index, (color_id, count, label, _width, height) in enumerate(
+        measurement.entries
+    ):
+        column = index // measurement.rows_per_column
+        row = index % measurement.rows_per_column
+        x = left + column_offsets[column]
+        row_top = top + row * measurement.row_height
+        swatch_top = row_top + (
+            measurement.row_height - PDF_LEGEND_SWATCH_SIZE
+        ) // 2
+        text_top = row_top + (measurement.row_height - height) // 2
+        items.append(
+            PdfLegendItemLayout(
+                color_id=color_id,
+                count=count,
+                label=label,
+                swatch_box=(
+                    x,
+                    swatch_top,
+                    x + PDF_LEGEND_SWATCH_SIZE,
+                    swatch_top + PDF_LEGEND_SWATCH_SIZE,
+                ),
+                text_position=(
+                    x + PDF_LEGEND_SWATCH_SIZE + PDF_LEGEND_TEXT_GAP,
+                    text_top,
+                ),
+            )
+        )
+    return PdfLegendLayout(
+        items=tuple(items),
+        required_width=measurement.required_width,
+        required_height=measurement.required_height,
+        column_count=len(measurement.column_widths),
+        rows_per_column=measurement.rows_per_column,
+    )
+
+
+def _measure_pdf_legend(
+    counts: tuple[tuple[str, int], ...],
+    font: ImageFont.ImageFont,
+    available_height: int,
+    *,
+    include_palette: bool,
+) -> _PdfLegendMeasurement:
+    measurement_image = Image.new("L", (1, 1))
+    measurement_draw = ImageDraw.Draw(measurement_image)
+    entries = []
+    for color_id, count in counts:
+        label = _pdf_material_legend_label(
+            color_id,
+            count,
+            include_palette=include_palette,
+        )
+        text_box = measurement_draw.textbbox(
+            (0, 0),
+            label,
+            font=font,
+            anchor="lt",
+        )
+        entries.append(
+            (
+                color_id,
+                count,
+                label,
+                text_box[2] - text_box[0],
+                text_box[3] - text_box[1],
+            )
+        )
+
+    maximum_text_height = max(
+        (entry[4] for entry in entries),
+        default=int(getattr(font, "size", 11)),
+    )
+    row_height = max(
+        PDF_LEGEND_SWATCH_SIZE,
+        maximum_text_height,
+    ) + PDF_LEGEND_ROW_GAP
+    rows_per_column = max(1, available_height // row_height)
+    column_count = (
+        math.ceil(len(entries) / rows_per_column) if entries else 0
+    )
+    column_widths = []
+    for column in range(column_count):
+        start = column * rows_per_column
+        end = min(len(entries), start + rows_per_column)
+        column_widths.append(
+            max(
+                PDF_LEGEND_SWATCH_SIZE
+                + PDF_LEGEND_TEXT_GAP
+                + entry[3]
+                for entry in entries[start:end]
+            )
+        )
+    required_width = sum(column_widths) + max(
+        0,
+        len(column_widths) - 1,
+    ) * PDF_LEGEND_COLUMN_GAP
+    used_rows = min(rows_per_column, len(entries))
+    required_height = used_rows * row_height
+    return _PdfLegendMeasurement(
+        entries=tuple(entries),
+        column_widths=tuple(column_widths),
+        required_width=required_width,
+        required_height=required_height,
+        row_height=row_height,
+        rows_per_column=rows_per_column,
+    )
+
+
+def _pdf_summary_legend_box() -> tuple[int, int, int, int]:
+    left = _mm_to_px(PDF_MARGIN_MM)
+    top = _mm_to_px(PDF_MARGIN_MM)
+    detail_top = top + 52
+    legend_top = detail_top + 7 * 30 + 22
+    return (
+        left,
+        legend_top + PDF_SUMMARY_LEGEND_ITEMS_OFFSET,
+        _mm_to_px(PDF_PAGE_WIDTH_MM) - left,
+        _mm_to_px(PDF_PAGE_HEIGHT_MM)
+        - _mm_to_px(PDF_FOOTER_MM + 4),
+    )
+
+
+def _pdf_board_legend_vertical_bounds() -> tuple[int, int]:
+    legend_top = _mm_to_px(PDF_MARGIN_MM + PDF_HEADER_MM)
+    return (
+        legend_top + PDF_BOARD_LEGEND_ITEMS_OFFSET,
+        _mm_to_px(PDF_PAGE_HEIGHT_MM)
+        - _mm_to_px(PDF_FOOTER_MM + PDF_MARGIN_MM),
+    )
+
+
+def _pdf_board_legend_box(
+    board: PdfBoardPage,
+) -> tuple[int, int, int, int]:
+    page_width = _mm_to_px(PDF_PAGE_WIDTH_MM)
+    right = page_width - _mm_to_px(PDF_MARGIN_MM)
+    top, bottom = _pdf_board_legend_vertical_bounds()
+    return (
+        right - _mm_to_px(board.legend_width_mm),
+        top,
+        right,
+        bottom,
+    )
+
+
 def _draw_pdf_footer(
     draw: ImageDraw.ImageDraw,
-    page_count: int,
-    page_number: int,
+    text: str,
     page_width: int,
     page_height: int,
+    font: ImageFont.ImageFont,
 ) -> None:
-    font = ImageFont.load_default(size=11)
     draw.text(
         (
             page_width - _mm_to_px(PDF_MARGIN_MM),
             page_height - _mm_to_px(PDF_MARGIN_MM),
         ),
-        f"Page {page_number}/{page_count}",
+        text,
         anchor="rs",
         fill=EXPORT_COLORS["textSecondary"],
         font=font,
@@ -765,7 +1542,10 @@ def _new_pdf_page() -> Image.Image:
     )
 
 
-def _pdf_board_scale(project: BeadProject) -> float:
+def _pdf_board_scale(
+    project: BeadProject,
+    legend_width_mm: float,
+) -> float:
     physical_width = _physical_span_mm(
         project.grid.board_columns,
         project.grid.bead_pitch_mm,
@@ -779,7 +1559,7 @@ def _pdf_board_scale(project: BeadProject) -> float:
     available_width = (
         PDF_PAGE_WIDTH_MM
         - 2 * PDF_MARGIN_MM
-        - PDF_LEGEND_WIDTH_MM
+        - legend_width_mm
         - PDF_COORDINATE_GUTTER_MM
     )
     available_height = (
@@ -789,6 +1569,15 @@ def _pdf_board_scale(project: BeadProject) -> float:
         - PDF_FOOTER_MM
         - PDF_COORDINATE_GUTTER_MM
     )
+    if available_width <= 0 or available_height <= 0:
+        raise ApiError(
+            422,
+            "PDF_EXPORT_LIMIT_EXCEEDED",
+            (
+                "材料图例无法在可打印区域内清晰排版，"
+                "请减少颜色数量后重试。"
+            ),
+        )
     return min(
         1.0,
         available_width / physical_width,
@@ -804,8 +1593,150 @@ def _physical_span_mm(
     return (cell_count - 1) * pitch_mm + diameter_mm
 
 
+def _format_millimeters(value: float) -> str:
+    tenths = math.floor(value * 10 + 0.5 + 1e-9)
+    return f"{tenths // 10}.{tenths % 10}"
+
+
 def _mm_to_px(value_mm: float) -> int:
     return round(value_mm * PDF_DPI / 25.4)
+
+
+def _px_to_mm(value_px: int) -> float:
+    return value_px * 25.4 / PDF_DPI
+
+
+def _place_coordinate_labels(
+    candidates: tuple[_CoordinateLabelCandidate, ...],
+    font: ImageFont.FreeTypeFont,
+    *,
+    canvas_box: tuple[float, float, float, float],
+    forbidden_boxes: tuple[
+        tuple[float, float, float, float],
+        ...,
+    ],
+) -> tuple[CoordinateLabelPlacement, ...]:
+    measurement_image = Image.new("L", (1, 1))
+    measurement_draw = ImageDraw.Draw(measurement_image)
+    occupied_boxes: list[tuple[float, float, float, float]] = []
+    placements: list[CoordinateLabelPlacement] = []
+    axis_order = {"column": 0, "row": 1}
+
+    try:
+        ordered_candidates = sorted(
+            candidates,
+            key=lambda candidate: (
+                not candidate.boundary,
+                axis_order[candidate.axis],
+                candidate.index,
+            ),
+        )
+        for candidate in ordered_candidates:
+            for position in candidate.positions:
+                box = measurement_draw.textbbox(
+                    position,
+                    candidate.label,
+                    font=font,
+                    anchor=candidate.anchor,
+                )
+                if not _coordinate_box_is_inside(box, canvas_box):
+                    continue
+                if any(
+                    _coordinate_boxes_overlap(box, forbidden)
+                    for forbidden in forbidden_boxes
+                ):
+                    continue
+                if any(
+                    _coordinate_boxes_overlap(box, occupied)
+                    for occupied in occupied_boxes
+                ):
+                    continue
+                occupied_boxes.append(box)
+                placements.append(
+                    CoordinateLabelPlacement(
+                        axis=candidate.axis,
+                        index=candidate.index,
+                        label=candidate.label,
+                        position=position,
+                        anchor=candidate.anchor,
+                    )
+                )
+                break
+    finally:
+        measurement_image.close()
+
+    return tuple(
+        sorted(
+            placements,
+            key=lambda placement: (
+                axis_order[placement.axis],
+                placement.index,
+            ),
+        )
+    )
+
+
+def _maximum_coordinate_label_width(
+    labels: tuple[str, ...],
+    font: ImageFont.FreeTypeFont,
+) -> int:
+    measurement_image = Image.new("L", (1, 1))
+    measurement_draw = ImageDraw.Draw(measurement_image)
+    try:
+        widths = []
+        for label in labels:
+            box = measurement_draw.textbbox(
+                (0, 0),
+                label,
+                font=font,
+                anchor="rm",
+            )
+            widths.append(box[2] - box[0])
+        return max(widths, default=0)
+    finally:
+        measurement_image.close()
+
+
+def _column_coordinate_anchor(
+    index: int,
+    count: int,
+    vertical_anchor: str,
+) -> str:
+    if count == 1:
+        horizontal_anchor = "m"
+    elif index == 0:
+        horizontal_anchor = "l"
+    elif index == count - 1:
+        horizontal_anchor = "r"
+    else:
+        horizontal_anchor = "m"
+    return f"{horizontal_anchor}{vertical_anchor}"
+
+
+def _is_coordinate_boundary(index: int, count: int) -> bool:
+    return index == 0 or index == count - 1
+
+
+def _coordinate_box_is_inside(
+    box: tuple[float, float, float, float],
+    container: tuple[float, float, float, float],
+) -> bool:
+    return (
+        container[0] <= box[0] < box[2] <= container[2]
+        and container[1] <= box[1] < box[3] <= container[3]
+    )
+
+
+def _coordinate_boxes_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> bool:
+    return (
+        left[0] < right[2]
+        and right[0] < left[2]
+        and left[1] < right[3]
+        and right[1] < left[3]
+    )
 
 
 def _should_label_coordinate(
@@ -825,23 +1756,73 @@ def _render_csv(project: BeadProject) -> bytes:
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     statistics = _statistics(project)
+    board_layout_rows = math.ceil(
+        project.grid.rows / project.grid.board_rows
+    )
+    board_layout_columns = math.ceil(
+        project.grid.columns / project.grid.board_columns
+    )
+    width_mm = _physical_span_mm(
+        project.grid.columns,
+        project.grid.bead_pitch_mm,
+        project.grid.bead_diameter_mm,
+    )
+    height_mm = _physical_span_mm(
+        project.grid.rows,
+        project.grid.bead_pitch_mm,
+        project.grid.bead_diameter_mm,
+    )
     writer.writerows(
         [
-            [f"{PRODUCT_NAME}项目", project.id],
-            ["项目版本", project.schema_version],
-            ["矩阵版本", project.revision],
-            ["行", project.grid.rows],
-            ["列", project.grid.columns],
+            ["项目摘要"],
+            ["产品", PRODUCT_NAME],
+            ["行数", project.grid.rows],
+            ["列数", project.grid.columns],
             ["拼豆总数", statistics["nonEmptyBeadCount"]],
             ["空格数", statistics["blankCount"]],
+            ["使用颜色数", len(statistics["perColorCounts"])],
+            [
+                "预计宽度（毫米）",
+                _format_millimeters(width_mm),
+            ],
+            [
+                "预计高度（毫米）",
+                _format_millimeters(height_mm),
+            ],
+            [
+                "拼豆直径（毫米）",
+                _format_millimeters(project.grid.bead_diameter_mm),
+            ],
+            [
+                "拼豆间距（毫米）",
+                _format_millimeters(project.grid.bead_pitch_mm),
+            ],
+            [
+                "拼板规格",
+                (
+                    f"{project.grid.board_rows} 行 × "
+                    f"{project.grid.board_columns} 列"
+                ),
+            ],
+            [
+                "拼板布局",
+                (
+                    f"{board_layout_rows} 行 × "
+                    f"{board_layout_columns} 列"
+                ),
+            ],
+            [
+                "拼板总数",
+                board_layout_rows * board_layout_columns,
+            ],
             [],
             ["材料清单"],
             [
-                "颜色 ID",
+                "颜色标识",
                 "色板",
                 "系列",
                 "色号",
-                "显示 HEX",
+                "显示色值",
                 "名称",
                 "数量",
             ],
@@ -852,7 +1833,7 @@ def _render_csv(project: BeadProject) -> bytes:
         writer.writerow(
             [
                 color["id"],
-                color["paletteId"],
+                _palette_label(color["paletteId"]),
                 color["series"],
                 color["code"],
                 color["displayHex"],
@@ -864,7 +1845,7 @@ def _render_csv(project: BeadProject) -> bytes:
         [
             [],
             ["逐格明细"],
-            ["行", "列", "类型", "颜色 ID", "色板", "系列", "色号"],
+            ["行", "列", "类型", "颜色标识", "色板", "系列", "色号"],
         ]
     )
     for row_index, row in enumerate(project.cells, start=1):
@@ -878,9 +1859,9 @@ def _render_csv(project: BeadProject) -> bytes:
                 [
                     row_index,
                     column_index,
-                    "拼豆" if isinstance(cell, FilledBeadCell) else "空",
+                    "拼豆" if isinstance(cell, FilledBeadCell) else "空格",
                     color["id"] if color else "",
-                    color["paletteId"] if color else "",
+                    _palette_label(color["paletteId"]) if color else "",
                     color["series"] if color else "",
                     color["code"] if color else "",
                 ]

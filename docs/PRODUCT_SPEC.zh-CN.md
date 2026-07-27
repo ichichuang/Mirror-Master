@@ -1,7 +1,7 @@
 # 豆图设计台产品规范（Mirror Master 仓库唯一权威）
 
 - 状态：重建中
-- 规范版本：`1.0.0-draft.3`
+- 规范版本：`1.0.0-draft.4`
 - 基线日期：2026-07-24
 - 语言：简体中文
 
@@ -18,15 +18,17 @@
 
 ### 0.1 重建基线
 
-| 项目                                   | 值                                                                     |
-| -------------------------------------- | ---------------------------------------------------------------------- |
-| 重建前基线 HEAD / `origin/main`        | `d29ff36d3849aa54ec689a231694d7358c05d478`                             |
-| owner seed 提交后 HEAD / `origin/main` | `134491221451bf52a492fa2c4ccfcc96bdb579eb`                             |
-| 产品返工审查基线 HEAD / `origin/main`  | `4cc7f75f90d8c1f4aa6d7238e88e21d8b1896e17`                             |
-| owner seed                             | `拼豆颜色对照表.txt`                                                   |
-| 分支                                   | `main`                                                                 |
-| 重命名                                 | 禁止仓库、package、本地目录和域名重命名                                |
-| 基础设施                               | 不属于产品开发范围；owner 本地验收后由运维决定生产环境、发布与运行方式 |
+| 项目                                    | 值                                                                                 |
+| --------------------------------------- | ---------------------------------------------------------------------------------- |
+| 重建前基线 HEAD / `origin/main`         | `d29ff36d3849aa54ec689a231694d7358c05d478`                                         |
+| owner seed 提交后 HEAD / `origin/main`  | `134491221451bf52a492fa2c4ccfcc96bdb579eb`                                         |
+| 产品返工审查基线 HEAD / `origin/main`   | `4cc7f75f90d8c1f4aa6d7238e88e21d8b1896e17`                                         |
+| 顾客化交互重构基线 HEAD / `origin/main` | `ee671c8416f5c6b807bbed7ba15b315cef05f589`                                         |
+| 顾客化交互方案                          | 方案 A：保留领域、API 与 Canvas 引擎，模块化重建交互层；owner 已于 2026-07-24 批准 |
+| owner seed                              | `拼豆颜色对照表.txt`                                                               |
+| 分支                                    | `main`                                                                             |
+| 重命名                                  | 禁止仓库、package、本地目录和域名重命名                                            |
+| 基础设施                                | 不属于产品开发范围；owner 本地验收后由运维决定生产环境、发布与运行方式             |
 
 ## 1. 产品定义
 
@@ -49,12 +51,12 @@
 
 用户应能在手机上完成：
 
-1. 选择模式并上传图片。
-2. 裁剪、旋转并设定行列、板型与实际尺寸。
-3. 选择真实色板、可用颜色、采样和抖动方式。
+1. 在“制作新图纸”和“镜像已有图纸”两个顾客任务之间做选择，并上传图片；也可直接打开项目 JSON。
+2. 在不理解照片/像素画算法差异的前提下裁剪、旋转并接受自动推荐设置。
+3. 只用图案宽高、预计成品尺寸、拼豆规格、色板和结果质量预设完成准备；需要时再展开“专业设置”。
 4. 生成确定性的拼豆矩阵。
 5. 用触控编辑、撤销、重做、镜像和复核统计。
-6. 导出 PNG、PDF、CSV 和项目 JSON。
+6. 按“分享图片、打印制作、材料清单、保存项目”四个顾客任务完成导出。
 
 桌面端提供更高密度的编辑和检查能力，但不得成为完成核心流程的必要条件。
 
@@ -72,7 +74,7 @@
 
 ### 1.4 顾客能力路线
 
-本轮 Stage 3 交付照片、像素画、已有图纸三种输入，结构化矩阵、尺寸与材料计算、编辑、镜像和导出。下列能力已纳入产品路线，但必须按文档优先、独立验收的后续阶段实施，不得以假按钮或 mock 结果提前出现：
+本轮 Stage 3 对顾客只提供“制作新图纸”和“镜像已有图纸”两个任务入口；内部继续保留照片、像素画、已有图纸三种处理模式，以及结构化矩阵、尺寸与材料计算、编辑、镜像和导出。照片与像素画是自动推荐或“专业设置”中的实现选择，不是上传前的必答题。下列能力已纳入产品路线，但必须按文档优先、独立验收的后续阶段实施，不得以假按钮或 mock 结果提前出现：
 
 - 从空白画布开始设计。
 - 原图与拼豆结果滑动对比、逐色制作、单色高亮和制作进度。
@@ -98,7 +100,7 @@ owner 完成本地运行时验收后，生产基础设施、域名、证书、�
 
 ### 3.1 移动端优先
 
-- 设计基准宽度为 390 CSS px，并验证 320、375、390、430、768 和 1440 px。
+- 设计基准宽度为 390 CSS px，并验证 320、375、390、430、768、1024 和 1440 px。
 - 主要操作触控目标最小 44 × 44 CSS px；相邻危险操作保持至少 8 px 间距。
 - 使用安全区变量处理刘海屏与底部手势区。
 - 移动端以单列任务流、固定底部主操作和可拖拽 bottom sheet 承载参数、色板与材料信息。
@@ -124,14 +126,14 @@ owner 完成本地运行时验收后，生产基础设施、域名、证书、�
 
 ### 3.4 已选视觉方向：专业材料工作台
 
-2026-07-24 已选定 Product Design 视觉方案 2，并按 owner 反馈锁定为下述实现合同。此方向取代方案原稿中的深色主工作区：产品必须是克制、专业、移动端优先的拼豆创作工作室，不能像儿童玩具，也不能退化为只能在桌面使用的密集专家工具。
+2026-07-24 已选定 Product Design 视觉方向 2，并批准交互重构方案 A：保留现有领域、API 与 Canvas 引擎，模块化重建顾客交互层。下述视觉与交互合同共同构成批准方案。视觉方向取代原稿中的深色主工作区：产品必须是克制、专业、移动端优先的拼豆创作工作室，不能像儿童玩具，也不能退化为只能在桌面使用的密集专家工具。
 
 **视觉 thesis**：暖白工作台上的专业手作工具，安静、准确，让真实拼豆图案和材料数据成为唯一视觉焦点。
 
 **内容计划**：
 
-1. 上传：一个占主导的“选择图片”操作，以及照片、像素画、已有图纸三个清楚分开的入口。
-2. 准备：以图片和裁剪区域为主，逐步展开行列、拼板、色板和生成选项。
+1. 上传：先选择“制作新图纸”或“镜像已有图纸”，再使用一个占主导的“选择图片”操作；“打开项目 JSON”作为独立次级入口。
+2. 准备：以图片和裁剪区域为主，默认只显示图案宽高、预计成品尺寸、拼豆规格、色板和结果质量预设，其余参数收进一个默认折叠的“专业设置”。
 3. 编辑：Canvas 占据主要视口，工具、颜色、材料和设置围绕 Canvas 服务。
 4. 完成：从当前矩阵直接查看材料、检查正反面并导出，不增加营销式完成页。
 
@@ -187,7 +189,8 @@ owner 完成本地运行时验收后，生产基础设施、域名、证书、�
 
 #### 3.4.3 顾客语言
 
-- 顾客界面使用“颜色接近方式”“格子取色方式”“最多使用颜色”“拼板”等任务语言，不直接显示 Lab、CIEDE2000、alpha、schema、revision、contract 等实现名词。
+- 默认顾客界面使用“图案大小”“预计成品尺寸”“拼豆规格”“颜色细节”“制作方式”等任务语言。仅在“专业设置”中使用“颜色接近方式”“格子取色方式”“最多使用颜色”“拼板”等可理解标签，不直接显示 Lab、CIEDE2000、alpha、schema、revision、contract 等实现名词。
+- `revision`、`rN`、schema、contract、alpha、CIEDE2000、内部枚举值和接口字段只可存在于代码、测试、项目文件或确有必要的文件元数据中，不得出现在顾客界面、状态、图例、PDF 正文或下载文件名。
 - 必须显示色板品牌与色号，因为它们用于购买和配料；首次出现用“色板 / 色号”解释，例如“色号 MARD A14”。
 - “已有图纸智能镜像”可简称“镜像已有图纸”，辅助说明为“只翻转拼豆格，保留坐标和图例”。
 - 每个设置的默认值应能直接完成任务；高级解释放在同一 sheet 的展开说明中，不创建阻塞式教学弹窗。
@@ -198,11 +201,13 @@ owner 完成本地运行时验收后，生产基础设施、域名、证书、�
 `320–767 px`：
 
 - 使用全屏单任务工作区，顶部栏 52–56 px，固定主操作计入 `env(safe-area-inset-bottom)`。
-- 上传页不放空洞 hero；一个主上传按钮占视觉中心，三个模式使用并列或分行的单选入口明确区分。
-- 准备阶段先显示裁剪，行列与拼板为默认设置，色板与算法设置按需展开；不得一次展示所有专家参数。
+- 上传页不放空洞 hero；“制作新图纸”和“镜像已有图纸”使用两个清楚的任务入口，一个主上传按钮占视觉中心，不出现照片/像素画预选。
+- 准备阶段先显示裁剪和顾客化必需设置；专业参数只存在于一个默认折叠的“专业设置”，不得一次展示所有专家参数。
 - 编辑阶段 Canvas 使用 sheet 之外的最大可用空间；不得让控制条、toast 或 sheet 持续遮挡当前编辑区域。
 - 只允许一个非模态 bottom sheet，并承载设置、颜色、材料和工具；任何时刻不得叠加第二个 sheet、drawer 或 modal。
-- sheet 三态为：收起（仅显示 drag handle、当前工具/颜色与主操作）、半屏（约 44–52 svh）、全屏（顶部栏以下可用高度）。
+- sheet 三态为：收起（显示当前工具、当前颜色、“工具与颜色”入口和主操作）、半屏（约 44–52 svh）、全屏（顶部栏以下可用高度）。
+- sheet 的完整标题区均可点击和拖拽；细 handle 只是视觉提示，不是唯一命中区。
+- 短列表、长列表和导出均复用该 sheet 的现有表面；不得在 sheet 上再叠加 picker、drawer 或 modal。
 - 主操作固定在 sheet 或视口底部安全区内；展开软键盘后仍可见或明确随内容滚动到可见位置。
 
 `768–1023 px`：
@@ -222,25 +227,35 @@ owner 完成本地运行时验收后，生产基础设施、域名、证书、�
 AppShell
 ├─ AppHeader
 ├─ UploadWorkspace
-│  ├─ ModeSelector
+│  ├─ CustomerTaskSelector
 │  ├─ PrimaryUploadAction
+│  ├─ OpenProjectAction
 │  └─ PrivacyNote
 ├─ PrepareWorkspace
 │  ├─ CropCanvas
 │  ├─ EssentialSettings
+│  │  ├─ PatternSizePreset
+│  │  ├─ BeadSizePreset
+│  │  ├─ PaletteControl
+│  │  └─ ResultQualityControls
 │  └─ AdvancedSettingsDisclosure
-└─ EditorWorkspace
-   ├─ ToolRail (desktop/tablet)
-   ├─ PatternCanvas
-   ├─ ViewAndHistoryControls
-   ├─ WorkspaceInspector (desktop)
-   └─ WorkspaceSheet (mobile, single instance)
-      ├─ SheetHandle
-      ├─ SettingsPanel
-      ├─ PalettePanel
-      ├─ MaterialsPanel
-      ├─ ToolsPanel
-      └─ SafeAreaPrimaryAction
+├─ EditorWorkspace
+│  ├─ ToolRail (desktop/tablet)
+│  ├─ PatternCanvas
+│  ├─ ViewAndHistoryControls
+│  └─ ContextualSelectionBar
+├─ WorkspaceInspector (desktop/tablet, stage-owned content)
+├─ WorkspaceSheet (mobile, single app-level instance)
+│  ├─ SheetHeaderAndDragRegion
+│  ├─ SheetPeekSummary
+│  ├─ SettingsPanel
+│  ├─ PalettePanel
+│  ├─ MaterialsPanel
+│  ├─ ToolsPanel
+│  ├─ ExportCompletionPanel
+│  ├─ MobilePickerPanel
+│  └─ SafeAreaPrimaryAction
+└─ OverlayRoot (desktop popovers only)
 ```
 
 - 同一时刻只有一个主工作区可见。
@@ -272,7 +287,68 @@ AppShell
 - 桌面端堆满所有高级参数，或移动端只是缩小的桌面三栏界面。
 - 顾客界面直接暴露算法、API、schema、contract、hash 或 revision 等术语。
 
+#### 3.4.8 顾客选择控件家族
+
+顾客可见流程不得把原生 `<select>` 作为主要选择控件，也不得用一次性 `div` 菜单复制选择器。全部选择场景必须归入同一套可访问控件家族，并共享选中值、活动项、禁用、错误、帮助文本和移动端呈现合同：
+
+- 2–4 个互斥且需要并排比较的选项使用 segmented control 或 radio cards；语义必须是原生 radio 或等价的 `radiogroup` / `radio`。
+- 桌面短列表使用 `UiSelectPopover`。浮层 portal 到应用级 overlay root，使用 `position: fixed`，根据 trigger 的 `getBoundingClientRect()` 定位，不受 inspector 或 sheet 的 overflow 裁剪。
+- 长色号列表使用可搜索 ARIA combobox/listbox；输入、活动项、选中项、结果数量和无结果状态必须可被屏幕阅读器理解。
+- `320–767 px` 的短列表和长列表统一进入现有 `WorkspaceSheet` 的 `MobilePickerPanel`；picker 替换 sheet 内容并提供明确返回，不创建第二层 sheet、drawer、popover 或 modal。
+- `UiSelectPopover` 打开时保留当前选中项并把活动项滚动到可见位置；在 window scroll、任意可滚动祖先滚动、resize、浏览器缩放和 `visualViewport` resize/scroll 时重新定位。
+- 浮层先按可用空间选择向下或向上展开，再把水平与垂直边界 clamp 到 viewport 安全边距内；宽度至少等于 trigger，且不得出现在 trigger 后方、偏离锚点或被应用 chrome 遮挡。
+- 键盘合同：Arrow Up/Down 移动活动项，Home/End 到首尾，Enter/Space 选择，Escape 关闭并恢复原值，Tab 关闭并按文档顺序移出；关闭后除 Tab 自然离开外均把焦点返回 trigger。
+- 打开状态、活动项和选中项分别持久；仅移动活动项不得提前提交值。指针、触控和键盘选择必须走同一变更入口。
+
+#### 3.4.9 顾客化准备预设
+
+准备阶段默认表面只包含下列信息和一个“生成图纸”主操作：
+
+1. 图案宽度与高度（单位“颗”）以及“小巧 / 推荐 / 细致 / 自定义”图案大小。
+2. 根据当前行列、拼豆直径与间距实时计算的预计成品宽高。
+3. “常规 5 mm / 迷你 2.6 mm / 自定义”拼豆规格。
+4. 色板。
+5. 一个“效果与难度”组：颜色细节使用“简单 / 推荐 / 细致”，制作方式使用“容易制作 / 模拟渐变”。
+
+预设是现有合同的顾客化映射，不得另建第二套生成算法：
+
+| 顾客预设    | 合同映射                                    | 顾客说明                         |
+| ----------- | ------------------------------------------- | -------------------------------- |
+| 小巧        | 长边 29 颗，短边按裁剪比例稳定取整          | 用珠较少，细节更少               |
+| 推荐        | 长边 48 颗，短边按裁剪比例稳定取整          | 尺寸与细节平衡                   |
+| 细致        | 长边 72 颗，短边按裁剪比例稳定取整          | 用珠更多，细节更丰富             |
+| 自定义      | 用户输入 `columns`、`rows`，范围仍为 1–300  | 显示实际颗数和预计尺寸           |
+| 常规 5 mm   | `beadDiameterMm = 5`、`beadPitchMm = 5`     | 常见规格                         |
+| 迷你 2.6 mm | `beadDiameterMm = 2.6`、`beadPitchMm = 2.6` | 成品更小，操作更精细             |
+| 自定义拼豆  | 用户输入合法直径与间距                      | 间距不得小于直径                 |
+| 简单        | `maximumColors = min(12, 可用颜色数)`       | 分色少，更容易备料               |
+| 推荐        | `maximumColors = min(24, 可用颜色数)`       | 默认的细节与备料平衡             |
+| 细致        | `maximumColors = min(48, 可用颜色数)`       | 分色更多，选色与备料更复杂       |
+| 容易制作    | `dithering = none`                          | 色块更整齐，单点杂色更少         |
+| 模拟渐变    | `dithering = floydSteinberg`                | 用离散色点模拟渐变，制作难度更高 |
+
+- 行列输入与尺寸预设双向同步：输入不等于任一预设时显示“自定义”，不得偷偷吸附。
+- 小预览只用于解释色块与模拟渐变的差异，不得替代真实生成结果或伪造顾客图片。
+- `maximumColors`、`availableColorIds`、sampling、dithering、`alphaEmptyThreshold`、`beadPitchMm`、拼板预设与自定义拼板尺寸等专家参数只放在同一个默认折叠的“专业设置”中；`maximumColors` 与“颜色细节”双向同步，dithering 与“制作方式”双向同步。
+- 默认拼板为标准方板 29 × 29；顾客只有在“专业设置”中修改拼板。自定义拼板能力和既有项目值必须完整保留。
+
 ## 4. 输入模式
+
+### 4.0 顾客任务与内部模式映射
+
+上传前只允许顾客选择两个任务：
+
+| 顾客任务     | 上传后行为                                                   | 内部模式              |
+| ------------ | ------------------------------------------------------------ | --------------------- |
+| 制作新图纸   | 解码后自动推荐自然图片或清晰像素处理；可在“专业设置”手动改选 | `photo` 或 `pixelArt` |
+| 镜像已有图纸 | 进入网格检测、确认与智能镜像流程                             | `existingChart`       |
+
+- “制作新图纸”不得在文件选择前要求回答照片还是像素画。
+- 自动推荐是呈现层到既有生成合同的确定性映射，不向 project schema、capabilities 或生成 API 新增 `auto` 模式。
+- 对 PNG/WebP，若扫描到第 257 个非透明唯一 RGBA 颜色前已完成全图扫描，则推荐 `pixelArt`；否则推荐 `photo`。JPEG 始终推荐 `photo`。唯一颜色扫描超过 256 后立即停止，避免为大图建立无界集合。
+- 自动结果在“专业设置”中显示为“已自动推荐：自然图片”或“已自动推荐：清晰像素”，并附一行可理解说明；顾客可明确覆盖为“自然图片”或“清晰像素”。
+- 自动与手动选择最终都只解析为 `photo` 或 `pixelArt` 后再生成。项目 JSON 保存解析后的内部模式；再次打开时保持该模式，不重新猜测。
+- “打开项目 JSON”不属于图片模式选择；成功导入后直接进入编辑器。
 
 ### 4.1 照片模式 `photo`
 
@@ -441,11 +517,14 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 默认启用宽高比锁定；修改一维时按裁剪比例确定另一维，并使用稳定的四舍五入规则。
 - 解锁后允许独立设置。
 - 像素画模式提供“一源像素一拼豆”快捷设置，但仍受 300 × 300 上限约束。
+- 顾客默认通过“小巧 / 推荐 / 细致”设置矩阵长边 29 / 48 / 72 颗；等比例短边使用与手动宽高相同的稳定取整规则。
+- 任一手动宽高改动与预设值不一致时，预设状态立即变为“自定义”，同时实时更新预计成品尺寸。
 
 ### 7.4 拼豆与拼板尺寸
 
 - `beadDiameterMm` 范围 1–10 mm，默认 5 mm。
 - `beadPitchMm` 范围 1–12 mm，默认 5 mm，且不得小于 bead diameter。
+- 默认表面只显示“常规 5 mm / 迷你 2.6 mm / 自定义”拼豆规格；自定义时才显示直径和间距输入。
 - 物理宽度：`(columns - 1) * beadPitchMm + beadDiameterMm`。
 - 物理高度：`(rows - 1) * beadPitchMm + beadDiameterMm`。
 - 预设至少包含：小方板 14 × 14、标准方板 29 × 29、自定义。
@@ -519,6 +598,8 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 缩放、窗口变化、方向变化、`pointercancel`、窗口失焦、页面隐藏和销毁时必须结束或回滚当前手势并释放 pointer capture。
 - 快速拖动画笔或橡皮时，使用整数网格线段插值补齐相邻 pointer sample 之间经过的所有 cell，且同一 cell 在一个 transaction 内只记录一次原值。
 - 数据修改按 cell diff 记录；渲染在 `requestAnimationFrame` 内合并，只重绘受影响 cell、选择覆盖层或视图变化导致的可见区域，不得因单 cell 修改遍历并复制完整矩阵。
+- 首次进入编辑器时在不遮挡可编辑 cell 的位置显示一次非阻塞提示：“单指绘制，双指移动和缩放”；提示可关闭，在首次成功绘制或双指手势后自动淡出，仅保存在当前页面会话。
+- 行列跳转默认不占用 Canvas 周边空间；通过“定位格子”操作展开，完成跳转或取消后收起。键盘替代能力保持可发现且可访问。
 
 ### 9.2 工具
 
@@ -529,6 +610,8 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 画笔、吸管、填充和选择复制写入的颜色必须属于项目 `availableColorIds`；非法颜色不得进入矩阵。
 - 选择：矩形选择、移动、复制、清空；越界部分裁剪；移动后原区域清空，复制保留原区域；重叠区域结果必须确定。
 - 每个完整手势是一个 undo transaction。
+- 形成非空矩形选择后显示上下文操作栏，至少包含“已选 W × H”“复制”“移动”“清空”“取消”；移动进入待落位状态，复制保留原区域，取消不得修改矩阵。
+- 上下文操作栏贴近选择但必须避让 viewport、sheet、键盘和安全区；若会遮挡选择区域，则移动到 Canvas 可用区域的另一侧。
 
 ### 9.3 撤销与重做
 
@@ -538,16 +621,17 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - undo/redo 恢复矩阵、revision 和由其派生的统计。
 - 重新生成或更换源图片会建立新的项目历史基线，不跨生成结果或项目撤销；替换前必须保留旧矩阵并明确告知影响。
 
-### 9.5 颜色与检查器交互
+### 9.4 颜色与检查器交互
 
 - 编辑器颜色集合只能来自项目 `availableColorIds`，不得重新显示用户在准备阶段排除的颜色。
 - 准备阶段和编辑阶段均提供按色号搜索、按 series 分组；编辑阶段提供“全部可用”“已使用”“最近使用”筛选。
 - 准备阶段提供选择全部与清空选择；清空后必须阻止生成并给出可操作提示，不得静默保留最后一色。
 - 最近使用颜色仅存在当前项目会话，不写入持久存储。
-- 切换工具、颜色、材料、设置或编辑矩阵时，不得用 `innerHTML` 重建整个 inspector；面板节点、焦点、输入状态和滚动位置必须保持。
+- 切换工具、颜色、材料、设置、预设、选择器或编辑矩阵时，不得用 `innerHTML` 重建整个 PrepareWorkspace、inspector、WorkspaceSheet、MobilePickerPanel 或 ExportCompletionPanel；通过持久节点做定点属性/文本更新，面板节点身份、焦点、输入值、selection range、输入法 composition、展开状态和滚动位置必须保持。若流程转换有意移除 focused control，焦点必须移到对应的逻辑 trigger 或新状态标题，不得落到 document body。
+- 收起态 sheet 始终显示当前工具名称、当前颜色 swatch 与色号、“工具与颜色”入口和当前阶段主操作；不得只剩细 drag handle 或让顾客先展开才知道当前状态。
 - 移动端 bottom sheet 拖动期间高度跟随 pointer，松手后按位置与速度吸附到收起、半屏或全屏；取消手势恢复最近稳定态。
 
-### 9.4 视图与镜像
+### 9.5 视图与镜像
 
 - 正面视图：用户面对成品的结果。
 - 反面视图：用于熨烫/拼放检查，是正面矩阵的水平可视变换；不得暗改矩阵。
@@ -608,23 +692,44 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 ## 12. 导出
 
-所有导出必须捕获同一个不可变 project revision；导出期间发生编辑时，旧任务取消或明确标记为旧 revision。
+所有导出必须捕获同一个不可变 project revision；导出期间发生编辑时，旧任务必须取消或丢弃，顾客只看到“图纸已更新，请重新导出”，不得显示 revision 或 `rN`。
+
+### 12.0 顾客导出任务与容器
+
+导出界面只组织为四个顾客任务：
+
+| 顾客任务 | 格式 | 顾客可配置项                       |
+| -------- | ---- | ---------------------------------- |
+| 分享图片 | PNG  | “纯图案”或“带标注”                 |
+| 打印制作 | PDF  | 无模板选择；始终生成制作级拼板文档 |
+| 材料清单 | CSV  | 无重复版式开关                     |
+| 保存项目 | JSON | 无导出图像选项                     |
+
+- 移动端“完成并导出”进入现有 `WorkspaceSheet` 的 `ExportCompletionPanel` 完成状态；返回编辑时恢复进入前的 tab、焦点和滚动位置，不得在 sheet 上叠加 modal。
+- 桌面端可在常驻 inspector 中进入同一导出状态；不得弹出遮挡 Canvas 且复制设置的第二套导出 modal。
+- 不提供独立“包含网格”复选框。PNG 只保留“纯图案 / 带标注”两个互斥模板；PDF 不读取 PNG 模板并始终生成制作级拼板文档。
+- 下载文件名使用品牌配置与中文任务名：`豆图设计台-分享图-YYYYMMDD.png`、`豆图设计台-打印制作-YYYYMMDD.pdf`、`豆图设计台-材料清单-YYYYMMDD.csv`、`豆图设计台-项目-YYYYMMDD.json`。运行时产品名必须来自品牌配置，文件名经安全清理，不含原始文件名、revision、`rN`、schema 或 hash。
+- 新导出、编辑矩阵、更换图片或打开项目必须取消旧导出请求并使其任务令牌失效；迟到响应不得下载文件或覆盖新状态。取消和失败不得留下半成品。
+- 准备、生成、取消、成功、失败与过期状态全部使用顾客可理解的中文，并通过稳定状态区宣告；同一时刻只允许一个导出请求控制当前下载状态。
 
 ### 12.1 PNG
 
+- 顾客任务名为“分享图片 PNG”。
 - 从矩阵渲染，不截取页面 Canvas。
-- `pure` 模板只输出矩阵范围，不含网格、坐标、图例、边距或不透明 UI 背景；empty 像素保持 alpha `0`。
-- `annotated` 模板包含网格、行列坐标与材料图例；统计必须来自同一捕获 revision。
+- `pure` 在顾客界面显示为“纯图案”，只输出矩阵范围，不含网格、坐标、图例、边距或不透明 UI 背景；empty 像素保持 alpha `0`。
+- `annotated` 在顾客界面显示为“带标注”，包含网格、中文行列坐标与中文材料图例；统计必须来自同一捕获 revision。
 - 模板使用显式枚举，不以含义模糊的单个 `includeGrid` 同时控制网格、坐标、图例和背景。
 - 元数据不包含原始文件名、图片哈希或上传内容。
+- 图内标题、图例、色板/系列/色号、行列与数量标签全部为中文，不显示内部枚举、revision 或 schema。
 
 ### 12.2 PDF
 
+- 顾客任务名为“打印制作 PDF”，并在操作前明确说明“始终生成摘要、拼板分页、坐标和材料图例”。
 - PDF 是制作级多页文档，而不是把整张 PNG 保存为单页 PDF。
-- 摘要页包含项目 revision、矩阵行列、拼豆总数、空格数、分色数量、物理宽高、拼豆直径/间距、拼板规格、拼板行列布局和总页数。
-- 每块拼板至少一页，板编号与布局位置可追溯，例如 `B2-3 / 第 2 板行、第 3 板列`；页脚包含当前页码与总页数。
+- 摘要页包含矩阵行列、拼豆总数、空格数、分色数量、物理宽高、拼豆直径/间距、拼板规格、拼板行列布局和总页数；revision 仅可保留在确有必要的内部文件元数据中，不进入可见正文。
+- 每块拼板至少一页，板编号与布局位置可追溯，例如“第 2 行第 3 块拼板”；页脚使用“第 X 页，共 Y 页”。
 - 每块板页只包含完整 cell，不得跨页裁断；末板允许不满并明确原矩阵行列范围。
-- 每页包含局部行列坐标、实际打印比例说明、色号图例与该板分色数量；全局图例和总数放在摘要页。
+- 每页包含中文局部行列坐标、“打印比例”说明、中文色号图例与该板分色数量；全局图例和总数放在摘要页。
 - 页面尺寸、边距、可打印区域、cell 物理尺寸与缩放比例必须显式计算；无法按 1:1 放入单页时使用可复核的统一缩放并标明比例，不得隐式拉伸。
 - 单次 PDF 最多 500 页（含摘要页），总渲染预算最多 1,100,000,000 raster pixels；两个上限必须由 capabilities 返回。超出任一上限时必须在规划拼板页之前以 `PDF_EXPORT_LIMIT_EXCEEDED` 和稳定中文说明拒绝，不得开始渲染或留下半成品。
 - 通过预算校验的 PDF 必须逐页渲染、写入并及时释放页面位图；不得把所有 A4 页面同时保存在内存中。300 × 300 矩阵配合内置 14 × 14 拼板仍须处于允许预算内。
@@ -632,21 +737,24 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 ### 12.3 CSV
 
+- 顾客任务名为“材料清单 CSV”。
 - UTF-8 with BOM，便于中文表格软件打开。
 - 包含项目摘要、每色材料清单与逐 cell 表。
-- cell 至少包含 row、column、kind、colorId、palette、series、code。
+- 逐格表至少包含“行、列、类型、颜色标识、色板、系列、色号”，顾客可见段落名、列名、类型值和统计标签全部为中文。
 
 ### 12.4 项目 JSON
 
+- 顾客任务名为“保存项目 JSON”。
 - 使用第 6 节 schema。
 - 导入时严格验证版本、矩阵尺寸、colorId 与统计，不信任缓存统计。
 - 不包含原始图片字节。
+- schema、revision 和内部枚举按恢复项目所需保留在 JSON 内容中，但下载界面、状态和文件名不得展示这些术语。
 
 ### 12.5 一致性
 
 - 发起一次导出时先深冻结项目快照，所有 PNG、PDF、CSV 和项目 JSON 必须引用同一 revision、rows、columns、board layout 和 colorId；导出期间的后续编辑不得混入结果。
 - 每种导出的材料总数必须满足统计不变量。
-- 在线后端 CSV 与离线前端 CSV 使用同一列顺序和术语；逐 cell 表固定为 `行、列、类型、颜色 ID、色板、系列、色号`。
+- 在线后端 CSV 与离线前端 CSV 使用同一列顺序和术语；逐格表固定为 `行、列、类型、颜色标识、色板、系列、色号`。
 - 导出失败返回中文错误，不留下半成品下载。
 
 ### 12.6 项目导入与继续编辑
@@ -752,10 +860,13 @@ nonEmptyBeadCount + blankCount === totalCellCount
 2. 主画布：随阶段展示上传、裁剪或矩阵。
 3. 底部固定主操作：下一步、生成、完成编辑或导出。
 4. bottom sheet：
-   - 设置：模式、行列、比例、拼豆/拼板。
-   - 色板：色板、可用色、最大颜色、采样、抖动。
+   - 收起摘要：当前工具、当前颜色、“工具与颜色”和主操作。
+   - 设置：顾客化准备预设；一个默认折叠的“专业设置”承载内部模式、可用色、最大颜色、采样、抖动、透明阈值、间距与拼板。
+   - 色板：色板、颜色搜索、全部可用/已使用/最近使用。
    - 材料：总数、分色数、实际尺寸、拼板。
-   - 编辑：工具、颜色、撤销/重做、视图、镜像。
+   - 编辑：工具、颜色、撤销/重做、视图、镜像和按需展开的“定位格子”。
+   - 完成：分享图片、打印制作、材料清单、保存项目。
+   - 选择器：短列表或长列表的移动 picker 临时替换 sheet 内容并可返回，不新增容器层。
 
 ### 16.2 桌面端
 
@@ -768,7 +879,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 ### 16.3 结果与重新开始
 
 - 生成后直接进入可编辑矩阵，不创建虚假“完成页”。
-- 导出入口显示当前 revision 和统计摘要。
+- 导出入口显示当前图纸统计摘要，不显示 revision、`rN`、schema 或其他实现术语。
 - 当前会话在内存中保留源 `File`、裁剪与全部生成设置，允许从编辑器返回准备阶段调整并再次生成。
 - 返回准备阶段不清空当前矩阵；重新生成前如存在生成后的编辑，明确提示将以新矩阵替换这些编辑，并允许取消。
 - “重新生成”保留源图片与设置，成功后建立新的差异历史基线并替换矩阵；请求失败或取消时保持旧矩阵。
@@ -781,11 +892,15 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 文本和关键控件满足 WCAG 2.2 AA 对比度。
 - 错误不能只用颜色表达。
 - 键盘可完成上传、参数设置、工具选择、单 cell 编辑、undo/redo、镜像和导出。
-- Canvas 提供当前行列、选中颜色和操作说明的可访问状态；提供行列跳转输入作为键盘替代。
+- Canvas 提供当前行列、选中颜色和操作说明的可访问状态；“定位格子”操作按需展开行列跳转输入，作为键盘替代且不长期占据界面。
 - 裁剪同时提供 X、Y、宽、高数值输入以及键盘移动/缩放；Pointer 控件不是唯一入口。
 - inspector tabs 必须具备 `tablist`、roving `tabindex`、`aria-controls`、对应 `tabpanel`，并支持左右/Home/End 键切换。
+- segmented/radio cards 必须暴露组名、单一选中项、禁用状态和错误说明；点击整个卡片与 Space/Arrow 操作得到相同结果。
+- `UiSelectPopover` trigger 必须暴露 `aria-haspopup=listbox`、`aria-expanded` 与浮层关系；listbox 使用稳定 option ID 和 `aria-activedescendant` 或 roving focus，活动项与选中项不得混淆。
+- 可搜索颜色选择器使用标准 combobox/listbox 关系，宣告筛选结果数量和无结果状态；关闭后按第 3.4.8 节恢复或移动焦点。
+- 移动 picker 打开后焦点进入标题或搜索框，焦点被限制在当前 sheet 表面；返回后恢复到原 trigger。软键盘和 `visualViewport` 变化不得遮挡搜索框、活动项或确认操作。
 - 异步生成、导入、导出、撤销/重做、手势取消和 sheet 状态通过稳定的 `role=status` / `aria-live` 区域宣告，不能依赖 toast 消失前被看见。
-- 所有主要控件和 sheet handle 的命中区域至少 44 × 44 CSS px；焦点环在 Canvas、裁剪、tabs、颜色和导出控件上始终可见。
+- 所有主要控件和 sheet 完整标题拖拽区的命中区域至少 44 × 44 CSS px；焦点环在 Canvas、裁剪、tabs、颜色和导出控件上始终可见。
 - `prefers-reduced-motion` 下禁用非必要 sheet 弹性和画布过渡。
 - 200% 文本缩放不遮挡主操作或造成横向页面滚动。
 
@@ -830,42 +945,66 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 在线/离线 CSV 的 BOM、段落、列数、列顺序和逐 cell 内容逐字节一致。
 - 项目 JSON 导出→导入 round-trip 保持矩阵、revision、设置与统计；非法 schema 和颜色合同稳定拒绝。
 - API 错误均为稳定 code + 可操作中文 message。
-- 请求取消不会覆盖新项目状态。
+- 请求取消不会覆盖新项目状态；被编辑、换图、开项目或新导出淘汰的迟到导出响应不会触发下载。
 - 上传内容未写入持久存储。
 
 ### 18.5 响应式与恢复
 
-- 320–430 px 可完成上传、裁剪、生成、编辑、统计、镜像和导出。
+- 在 320、375、390、430、768、1024 和 1440 CSS px 分别验证上传、裁剪、生成、编辑、统计、镜像和导出；不得出现页面横向 overflow、被遮挡主操作或不可到达内容。
+- 每个主要状态断言 `document.documentElement.scrollWidth <= document.documentElement.clientWidth`；非零 safe-area inset 不裁切控件。
+- 768 px 验证 Canvas 与单一可收起面板；1024 和 1440 px 验证 56–64 px rail、Canvas 至少占主内容 55%、304–344 px inspector，且 DOM 中不出现移动 sheet。
 - bottom sheet 不遮挡选中 cell 与主操作，旋转屏幕后状态不丢失。
 - bottom sheet 拖动期间跟手并在取消/松手后稳定吸附；inspector 切换和编辑不丢滚动或焦点。
 - 裁剪可用键盘和数值输入完成；tabs 箭头键、roving focus、tabpanel 关系完整。
+- 收起态 sheet 始终显示当前工具、当前颜色、“工具与颜色”和主操作；标题区整体可点击/拖拽，所有命中区至少 44 × 44 CSS px。
+- 移动 picker、软键盘与安全区同时出现时，搜索、活动项、返回和确认操作仍可见；任何时刻只有一个 sheet 表面。
+- sheet、toast、选择上下文栏和 popover 不得持续遮挡当前目标 cell；矩阵四边与四角均可移入无控件遮挡的可编辑区域。
+- `prefers-reduced-motion`、200% 文本缩放和屏幕阅读器状态分别通过聚焦验收。
 - 更换图片清理旧结果和 Object URL。
 - 刷新显示真实空状态；服务失败后可重试并恢复流程。
+
+### 18.6 顾客化交互
+
+- 上传页只有“制作新图纸”和“镜像已有图纸”两个任务；制作新图纸上传前不出现照片/像素画必答项。
+- 自动推荐在固定图片 fixtures 上稳定解析为 `photo` 或 `pixelArt`，专业设置手动覆盖后生成请求和项目 JSON 使用覆盖值。
+- 小巧/推荐/细致、自定义宽高、常规/迷你/自定义拼豆、简单/推荐/细致颜色和容易制作/模拟渐变逐项映射到第 3.4.9 节既有合同；预计成品尺寸随每次改动更新。
+- 默认准备表面不出现最大颜色、可用色 IDs、采样、抖动、透明阈值、间距或自定义拼板尺寸；这些值在展开“专业设置”后可编辑并保持既有项目值。
+- 顾客主流程没有原生 `<select>`。2–4 选项、桌面短列表、长颜色列表和移动 picker 分别使用第 3.4.8 节规定的控件。
+- `UiSelectPopover` 对 portal、fixed 锚定、向上/向下翻转、viewport clamp、scroll/resize/zoom/`visualViewport` 重定位、层级和 trigger 对齐均有聚焦测试。
+- 选择器对 Arrow/Home/End/Enter/Space/Escape/Tab、活动项/选中项分离、焦点返回、ARIA 关系与筛选状态均有聚焦测试。
+- 移动 picker 替换现有 sheet 内容并可返回，测试中不得发现叠加 sheet、modal、drawer 或 popover。
+- 首次手势提示非阻塞且只在当前页面会话显示；“定位格子”按需展开；矩形选择显示尺寸及复制、移动、清空、取消。
+- 工具、颜色、材料、设置、预设和矩阵更新前后，PrepareWorkspace、inspector、WorkspaceSheet、MobilePickerPanel 与 ExportCompletionPanel 的关键节点身份、焦点元素、输入值、selection range、composition、展开状态和滚动位置保持；有意移除控件时焦点移动到规定的逻辑目标。
+- 导出只有分享图片 PNG、打印制作 PDF、材料清单 CSV、保存项目 JSON 四个任务；PNG 只有纯图案/带标注，PDF 始终为制作级拼板文档，移动端导出不叠加 modal。
+- 顾客界面、状态、PNG/PDF/CSV 可见文字和下载文件名的术语扫描不得出现 revision、`rN`、schema、contract、alpha、CIEDE2000 或内部枚举值；项目 JSON 和必要内部元数据除外。
 
 ## 19. 仓库实施计划
 
 ### 19.1 模块分类
 
-| 分类         | 当前模块                               | 决策                                                                                 |
-| ------------ | -------------------------------------- | ------------------------------------------------------------------------------------ |
-| 保留 retain  | `backend/app/detection.py`             | 保留网格证据提取和自动/手动检测，补充合同测试与轴能力。                              |
-| 保留 retain  | `backend/app/mirror.py`                | 保留从原始 cell 读取并重排的实现原则，扩展垂直轴与双镜像恒等。                       |
-| 保留 retain  | `src/features/grid-selection/*`        | 保留自然图坐标与半开矩形几何，纳入已有图纸模式。                                     |
-| 保留 retain  | `src/features/local-image-input/*`     | 保留本地预览、验证和 Object URL 生命周期，修正为三模式入口。                         |
-| 修复 repair  | `backend/app/service.py`               | 拆出上传解码、生成、导出服务；移除托管平台专属业务分支。                             |
-| 修复 repair  | `backend/app/models.py`                | 增加 capabilities、palette、project、generation、statistics、export 严格模型。       |
-| 修复 repair  | `backend/app/main.py`                  | 增加新接口、统一错误与取消安全；保留静态前端挂载和 health。                          |
-| 修复 repair  | `src/features/grid-api/client.ts`      | 改为通用 API client，接受 `AbortSignal`，保留 grid 合同解析。                        |
-| 替换 replace | `src/app.ts`、`src/main.ts`            | 替换 Pixelanim 单流程，建立 upload → crop/settings → generate → edit/export 状态机。 |
-| 替换 replace | `src/styles/page.css`、`tokens.css`    | 替换旧镜像工具视觉，建立移动端优先 tokens、safe area、sheet 和桌面 inspector。       |
-| 替换 replace | README 中产品定义                      | 改为完整拼豆生成器，并只指向本文件作为产品权威。                                     |
-| 新增 new     | owner seed、palette 生成脚本与生成资产 | 从唯一 owner seed 同时生成 JSON、TypeScript、Python 和人类清单，并执行 39/221 验证。 |
-| 新增 new     | `src/domain/project/*`                 | 项目 schema、矩阵不变量、统计、物理尺寸和拼板。                                      |
-| 新增 new     | `src/domain/palette/*`                 | palette 查询、可用色过滤、Lab/CIEDE2000 与匹配。                                     |
-| 新增 new     | `src/features/pattern-generation/*`    | crop 映射、采样、透明度、最大颜色和抖动。                                            |
-| 新增 new     | `src/features/pattern-editor/*`        | Canvas、工具、命中测试、Pointer Events、历史和视图变换。                             |
-| 新增 new     | `src/features/pattern-export/*`        | PNG/CSV/JSON client 导出与 PDF API。                                                 |
-| 新增 new     | backend pattern/palette/export 模块    | 后端权威生成、校验、统计与 Pillow 导出。                                             |
+| 分类         | 当前模块                               | 决策                                                                                   |
+| ------------ | -------------------------------------- | -------------------------------------------------------------------------------------- |
+| 保留 retain  | `backend/app/detection.py`             | 保留网格证据提取和自动/手动检测，补充合同测试与轴能力。                                |
+| 保留 retain  | `backend/app/mirror.py`                | 保留从原始 cell 读取并重排的实现原则，扩展垂直轴与双镜像恒等。                         |
+| 保留 retain  | `src/features/grid-selection/*`        | 保留自然图坐标与半开矩形几何，纳入已有图纸模式。                                       |
+| 保留 retain  | `src/features/local-image-input/*`     | 保留本地预览、验证和 Object URL 生命周期，入口改为两个顾客任务，上传后再解析内部模式。 |
+| 修复 repair  | `backend/app/service.py`               | 拆出上传解码、生成、导出服务；移除托管平台专属业务分支。                               |
+| 修复 repair  | `backend/app/models.py`                | 增加 capabilities、palette、project、generation、statistics、export 严格模型。         |
+| 修复 repair  | `backend/app/main.py`                  | 增加新接口、统一错误与取消安全；保留静态前端挂载和 health。                            |
+| 修复 repair  | `src/features/grid-api/client.ts`      | 改为通用 API client，接受 `AbortSignal`，保留 grid 合同解析。                          |
+| 修复 repair  | `src/app.ts`、`src/main.ts`            | 保留领域编排与状态机，拆出顾客流程、持久面板和导出工作区，避免继续扩张整页字符串渲染。 |
+| 修复 repair  | `src/styles/page.css`、`tokens.css`    | 在既有薄荷工作台 tokens 上补全选择器、上下文栏、safe area、单一 sheet 和响应式状态。   |
+| 替换 replace | README 中产品定义                      | 改为完整拼豆生成器，并只指向本文件作为产品权威。                                       |
+| 新增 new     | owner seed、palette 生成脚本与生成资产 | 从唯一 owner seed 同时生成 JSON、TypeScript、Python 和人类清单，并执行 39/221 验证。   |
+| 新增 new     | `src/domain/project/*`                 | 项目 schema、矩阵不变量、统计、物理尺寸和拼板。                                        |
+| 新增 new     | `src/domain/palette/*`                 | palette 查询、可用色过滤、Lab/CIEDE2000 与匹配。                                       |
+| 新增 new     | `src/features/pattern-generation/*`    | crop 映射、采样、透明度、最大颜色和抖动。                                              |
+| 新增 new     | `src/features/pattern-editor/*`        | Canvas、工具、命中测试、Pointer Events、历史和视图变换。                               |
+| 新增 new     | `src/features/pattern-export/*`        | PNG/CSV/JSON client 导出与 PDF API。                                                   |
+| 新增 new     | 顾客流程与预设模块                     | 两任务入口、自动推荐、顾客预设到既有 generation/grid 合同的纯函数映射。                |
+| 新增 new     | 共用选择器与 overlay 模块              | radio cards、`UiSelectPopover`、combobox/listbox 与单一移动 picker，共享状态合同。     |
+| 新增 new     | 持久 inspector/sheet 模块              | 定点更新 DOM，保持节点身份、焦点、输入和滚动；承载 peek、工具、材料与完成导出状态。    |
+| 新增 new     | backend pattern/palette/export 模块    | 后端权威生成、校验、统计与 Pillow 导出。                                               |
 
 ### 19.2 合同边界
 
@@ -899,10 +1038,11 @@ nonEmptyBeadCount + blankCount === totalCellCount
 3. 固化 palette source、生成脚本和 39/221 测试。
 4. 建立 project schema、矩阵不变量、统计、尺寸和算法 golden tests。
 5. 新增后端 capabilities、palettes、generate、export，不先删除 grid API。
-6. 建立移动端任务状态机、crop workspace、Canvas editor、inspector 和 exports。
-7. 把旧网格 UI 收敛到 existingChart 模式。
-8. 移除 Pixelanim-only 文案和托管平台专属运行时假设。
-9. 完成前端检查、后端测试、构建、健康检查和手动浏览器验收。
+6. 先以失败测试锁定两任务入口、自动推荐、预设映射和统一选择器合同，再实现共用控件。
+7. 重建准备阶段和持久 inspector/sheet；把旧网格 UI 收敛到“镜像已有图纸”任务。
+8. 补齐编辑器 peek、首次提示、定位格子、选择上下文栏和单层完成/导出状态。
+9. 中文化全部顾客界面与导出可见内容，移除 Pixelanim-only 文案和顾客可见技术术语。
+10. 完成生成器、前后端检查、构建、基准、统一服务、API、应用内浏览器和设计 QA 验收。
 
 ### 19.4 回滚边界
 
@@ -920,20 +1060,28 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 - 前端：palette validation、schema、deterministic mapping、transparency、statistics、dimensions、undo/redo、horizontal/vertical double mirror、export consistency。
 - 前端补充：gesture state、pinch/pan bounds、pointer cancellation、stroke interpolation、diff history、palette restriction、项目 JSON round-trip、custom board、capabilities fallback、inspector focus/scroll、bottom sheet drag、keyboard crop 和 tabs semantics。
+- 顾客交互聚焦测试：两任务入口、自动推荐与手动覆盖、全部预设映射、专业设置折叠、radio cards、`UiSelectPopover` portal/fixed positioning/flip/clamp/reposition、popover 键盘与 ARIA、combobox/listbox 搜索、单一移动 picker、sheet peek 精确内容、完整标题拖拽区、首次提示、定位格子、选择上下文栏、单层导出、术语负向扫描、持久节点身份/焦点/输入/selection range/滚动，以及 320/375/390/430/768/1024/1440 响应式状态。
 - 后端：palette parity、project validation、generate determinism、alpha zero、API errors、existing-chart label/coordinate/legend preservation、double mirror RGBA identity、pure/annotated PNG、multi-page PDF coverage、CSV parity、custom board 和 immutable revision consistency。
 - 不添加 Playwright。
-- 运行 `pnpm test`、`pnpm typecheck`、`pnpm lint`、`pnpm format:check`、`pnpm build`。
-- 运行后端 pytest。
-- 运行可重复的 100 × 100 / 300 × 300 编辑性能基准并记录环境与结果。
-- 启动统一 FastAPI 服务并检查 `/api/health`、`/api/capabilities`、`/api/palettes`。
-- 使用应用内浏览器手动检查：上传、裁剪、生成、编辑、统计、镜像、导出、更换图片、刷新和错误恢复。
+- 依次运行 `pnpm run generate:palettes`、`pnpm run generate:icons`、`pnpm run generate:tokens`、`pnpm run generate:brand`，确认生成 diff 只包含预期变化；随后运行总门禁 `pnpm run check` 并单独记录其中测试、类型、lint、格式和 production build 结果。
+- 运行后端 pytest 并记录通过/失败/跳过数。
+- 运行 `pnpm run benchmark:editor`，记录可重复的 100 × 100 / 300 × 300 编辑环境、结果和阈值判定。
+- 通过 `./scripts/start-local.sh` 启动统一 FastAPI 服务，检查 `/api/health`、`/api/capabilities`、`/api/palettes`，并以真实 fixtures 检查 pattern generate/export 与 grid detect/mirror。
+- 使用应用内浏览器且不使用 mock，分别以真实照片、真实像素画、owner 已有图纸和项目 JSON 完成手动验收；覆盖鼠标、触控模拟与键盘，全部 dropdown/picker、准备预设、专业设置、sheet 三态、编辑工具、平移/缩放、选择、重新生成、材料、正反面、矩阵镜像、智能图纸镜像及四种导出。
+- 在 390 px 移动视口和 1440 px 桌面视口至少捕获：任务上传、准备默认、专业设置展开、编辑 sheet peek/桌面 inspector、选择上下文、导出完成、已有图纸镜像；另捕获桌面 popover 与移动 picker 打开态。320/375/430/768/1024 的布局可用检查必须记录，即使不为每个状态重复截图。
+- 刷新根目录 `design-qa.md`，明确它是链接本规范的非规范性验收证据；逐张记录截图路径、viewport、DPR、fixture、状态、日期、工作树基线、预期/实际、控制台结果和剩余问题。旧 commit 截图不得冒充当前验收。
+- Product Design 验收必须在同一轮中用图像查看工具同时检查批准的视觉参考与最新浏览器截图，至少记录文案、布局、字体、颜色、容器/间距、Canvas chrome、响应式和交互状态的对照结果；P0/P1/P2 未清零时不得交付。
 
 ## 21. owner 本地验收与运维移交清单
 
-- 确认三套移动端视觉方向中的选定方案。
+- 在报告所列本地 URL 验收批准的交互方案 A 与视觉方向 2 是否按本规范落地。
 - 复核 MARD 显示色仅为屏幕近似的声明。
-- 用真实照片、真实像素画和真实已有图纸各验收一次。
+- 用真实照片、真实像素画、真实 owner 已有图纸和项目 JSON 各验收一次；覆盖鼠标、触控模拟、键盘、全部选择器、顾客预设、专业设置、编辑/选择、重新生成、材料、镜像与四个导出任务。
 - 核对常用拼豆直径、pitch 和拼板预设是否符合实际库存。
-- 复核本地统一服务、自动化测试、构建产物、健康检查和浏览器验收结果。
-- owner 审查本次清理与本地运行结果后，才可决定是否提交或推送。
+- 逐一打开 PNG、PDF、CSV 和项目 JSON，核对中文可见内容、矩阵/材料一致性、PDF 制作页、下载文件名与 JSON round-trip。
+- 复核本地统一服务、生成器、`pnpm run check`、后端测试、构建产物、编辑基准、API、控制台、`design-qa.md` 和截图清单。
+- 验收报告必须记录仓库根目录、origin、分支、远端 fetch 时间、编辑前 HEAD 与 `origin/main`、ahead/behind、编辑前干净状态、最终精确文件列表，以及未覆盖用户改动的核对结果。
+- 验收报告必须包含 UX 根因、规范变化、测试命令与结果、截图链接、本地 URL、剩余风险和 owner 结论。
+- owner 审查本次清理与本地运行结果并明确签收后，才可决定是否提交或推送；签收前不得提交或推送。
+- 报告同时确认未部署、未创建分支、未重命名、未使用 mock 或 Playwright、未提交、未推送。
 - owner 完成本地验收后，把平台中立的运行合同和验收清单移交运维；最终基础设施与发布方案只由运维决定。

@@ -1,7 +1,8 @@
 import { brandConfig } from '../brand/brand.config';
-import { PALETTE_COLORS } from '../generated/palettes';
+import { PALETTE_COLORS, PALETTES } from '../generated/palettes';
 import {
   assertValidProject,
+  calculatePhysicalLayout,
   calculateStatistics,
   parseBeadProject,
   type BeadProject,
@@ -9,6 +10,7 @@ import {
 } from './project';
 
 const COLOR_BY_ID = new Map(PALETTE_COLORS.map((color) => [color.id, color]));
+const PALETTE_LABEL_BY_ID = new Map(PALETTES.map((palette) => [palette.id, palette.label]));
 
 export function captureProjectRevision(project: unknown): BeadProject {
   return parseBeadProject(structuredClone(project));
@@ -22,17 +24,25 @@ export function exportProjectJson(project: BeadProject): string {
 export function exportProjectCsv(project: BeadProject): string {
   assertValidProject(project);
   const statistics = calculateStatistics(project.cells);
+  const layout = calculatePhysicalLayout(project);
   const rows: string[][] = [
-    [`${brandConfig.productName}项目`, project.id],
-    ['项目版本', project.schemaVersion],
-    ['矩阵版本', String(project.revision)],
-    ['行', String(project.grid.rows)],
-    ['列', String(project.grid.columns)],
+    ['项目摘要'],
+    ['产品', brandConfig.productName],
+    ['行数', String(project.grid.rows)],
+    ['列数', String(project.grid.columns)],
     ['拼豆总数', String(statistics.nonEmptyBeadCount)],
     ['空格数', String(statistics.blankCount)],
+    ['使用颜色数', String(statistics.usedColorCount)],
+    ['预计宽度（毫米）', formatMillimeters(layout.widthMm)],
+    ['预计高度（毫米）', formatMillimeters(layout.heightMm)],
+    ['拼豆直径（毫米）', formatMillimeters(project.grid.beadDiameterMm)],
+    ['拼豆间距（毫米）', formatMillimeters(project.grid.beadPitchMm)],
+    ['拼板规格', `${String(project.grid.boardRows)} 行 × ${String(project.grid.boardColumns)} 列`],
+    ['拼板布局', `${String(layout.boardRows)} 行 × ${String(layout.boardColumns)} 列`],
+    ['拼板总数', String(layout.boardCount)],
     [],
     ['材料清单'],
-    ['颜色 ID', '色板', '系列', '色号', '显示 HEX', '名称', '数量'],
+    ['颜色标识', '色板', '系列', '色号', '显示色值', '名称', '数量'],
   ];
 
   for (const [colorId, count] of Object.entries(statistics.perColorCounts)) {
@@ -40,9 +50,13 @@ export function exportProjectCsv(project: BeadProject): string {
     if (!color) {
       throw new Error(`项目包含未知颜色：${colorId}`);
     }
+    const paletteLabel = PALETTE_LABEL_BY_ID.get(color.paletteId);
+    if (!paletteLabel) {
+      throw new Error(`项目包含未知色板：${color.paletteId}`);
+    }
     rows.push([
       color.id,
-      color.paletteId,
+      paletteLabel,
       color.series,
       color.code,
       color.displayHex,
@@ -51,23 +65,27 @@ export function exportProjectCsv(project: BeadProject): string {
     ]);
   }
 
-  rows.push([], ['逐格明细'], ['行', '列', '类型', '颜色 ID', '色板', '系列', '色号']);
+  rows.push([], ['逐格明细'], ['行', '列', '类型', '颜色标识', '色板', '系列', '色号']);
   project.cells.forEach((matrixRow, rowIndex) => {
     matrixRow.forEach((cell, columnIndex) => {
       if (cell.kind === 'empty') {
-        rows.push([String(rowIndex + 1), String(columnIndex + 1), '空', '', '', '', '']);
+        rows.push([String(rowIndex + 1), String(columnIndex + 1), '空格', '', '', '', '']);
         return;
       }
       const color = COLOR_BY_ID.get(cell.colorId);
       if (!color) {
         throw new Error(`项目包含未知颜色：${cell.colorId}`);
       }
+      const paletteLabel = PALETTE_LABEL_BY_ID.get(color.paletteId);
+      if (!paletteLabel) {
+        throw new Error(`项目包含未知色板：${color.paletteId}`);
+      }
       rows.push([
         String(rowIndex + 1),
         String(columnIndex + 1),
         '拼豆',
         color.id,
-        color.paletteId,
+        paletteLabel,
         color.series,
         color.code,
       ]);
@@ -105,4 +123,9 @@ export function safeDownloadBaseName(fileName: string): string {
 
 function escapeCsvCell(value: string): string {
   return /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
+
+function formatMillimeters(value: number): string {
+  const tenths = Math.floor(value * 10 + 0.5 + 1e-9);
+  return `${String(Math.floor(tenths / 10))}.${String(tenths % 10)}`;
 }

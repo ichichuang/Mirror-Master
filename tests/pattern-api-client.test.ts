@@ -81,7 +81,14 @@ test('pattern export rejects a response from a different matrix revision', async
     });
 
   try {
-    await assert.rejects(exportPattern(projectFixture(), 'png', 'annotated'), /矩阵版本不一致/u);
+    await assert.rejects(
+      exportPattern(projectFixture(), 'png', 'annotated'),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === '图纸已更新，请重新导出' &&
+        'code' in error &&
+        error.code === 'EXPORT_REVISION_MISMATCH',
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

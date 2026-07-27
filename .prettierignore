@@ -1,3 +1,4 @@
+.pytest_cache/
 backend/.pytest_cache/
 backend/.venv/
 backend/**/__pycache__/

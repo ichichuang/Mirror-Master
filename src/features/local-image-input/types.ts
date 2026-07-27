@@ -34,6 +34,10 @@ export interface ImageDimensions {
   readonly height: number;
 }
 
+export interface DecodedImageResource extends ImageDimensions {
+  readonly image: HTMLImageElement;
+}
+
 export type FileValidationResult =
   | {
       readonly ok: true;

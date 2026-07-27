@@ -2,6 +2,7 @@ import { DESIGN_TOKENS } from '../../design/generated/tokens';
 import type { MatrixCellChange } from '../../domain/history';
 import type { BeadCell, BeadProject } from '../../domain/project';
 import { PALETTE_COLORS } from '../../generated/palettes';
+import type { FirstUseGesture } from './firstUseHint';
 import { EditorGestureState, resolvePointerIntent, type TrackedPointer } from './gestureState';
 import { MatrixDraft, type MatrixTransactionResult } from './matrixTransaction';
 import {
@@ -14,10 +15,13 @@ import {
 import {
   clearSelectedCells,
   copySelectedCells,
+  createSelectionCellSnapshot,
+  getSelectionTransferPreviewCell,
   moveSelectedCells,
   normalizeSelection,
   selectionContains,
   type CellSelection,
+  type SelectionCellSnapshot,
   type SelectionOperationResult,
 } from './selection';
 import { rasterizeGridSegment } from './stroke';
@@ -40,6 +44,14 @@ import {
 export type { CellSelection } from './selection';
 
 export type EditorTool = 'paint' | 'erase' | 'eyedropper' | 'fill' | 'select';
+export type SelectionTransferMode = 'copy' | 'move' | null;
+
+export interface SelectionViewportRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
 
 export interface CanvasEditorCallbacks {
   readonly onCommit: (
@@ -50,6 +62,10 @@ export interface CanvasEditorCallbacks {
   readonly onColorPick: (colorId: string) => void;
   readonly onStatus: (message: string) => void;
   readonly onSelectionChange?: (selection: CellSelection | null) => void;
+  readonly onSelectionViewportRectChange?: (rect: SelectionViewportRect | null) => void;
+  /** Mirrors the temporary placement override while the externally selected tool remains unchanged. */
+  readonly onSelectionTransferModeChange?: (mode: SelectionTransferMode) => void;
+  readonly onSuccessfulGesture?: (gesture: FirstUseGesture) => void;
 }
 
 export interface PatternCanvasController {
@@ -64,8 +80,12 @@ export interface PatternCanvasController {
   readonly panBy: (deltaX: number, deltaY: number) => void;
   readonly jumpToCell: (row: number, column: number) => void;
   readonly clearSelection: () => void;
+  readonly cancelSelection: () => void;
+  /** Arms one placement gesture without changing the externally selected editor tool. */
+  readonly beginSelectionTransfer: (mode: Exclude<SelectionTransferMode, null>) => void;
   readonly copySelection: (deltaRow: number, deltaColumn: number) => void;
   readonly moveSelection: (deltaRow: number, deltaColumn: number) => void;
+  readonly getSelectionViewportRect: () => SelectionViewportRect | null;
   readonly getPerformanceSnapshot: () => EditorPerformanceSnapshot;
   readonly resetPerformanceMetrics: () => void;
   readonly destroy: () => void;
@@ -83,6 +103,8 @@ interface ActiveToolGesture {
   last: CellPoint;
   readonly draft: MatrixDraft | null;
   readonly selectionBefore: CellSelection | null;
+  readonly selectionSnapshot: SelectionCellSnapshot | null;
+  readonly transferMode: SelectionTransferMode;
   copySelection: boolean;
 }
 
@@ -93,6 +115,7 @@ interface ActivePanGesture {
 
 interface PinchBaseline {
   readonly transform: ViewportTransform;
+  readonly viewportMode: ViewportMode;
   readonly centroid: ViewportPoint;
   readonly distance: number;
 }
@@ -134,6 +157,8 @@ export function mountPatternCanvas(
     project.palette.availableColorIds[0] ?? PALETTE_COLORS[0]?.id ?? 'default:A01';
   let reverseView = false;
   let selection: CellSelection | null = null;
+  let selectionTransferMode: SelectionTransferMode = null;
+  let lastSelectionViewportRectKey: string | null | undefined;
   let keyboardPoint: CellPoint = Object.freeze({ row: 0, column: 0 });
   let toolGesture: ActiveToolGesture | null = null;
   let panGesture: ActivePanGesture | null = null;
@@ -171,6 +196,7 @@ export function mountPatternCanvas(
       const sameCells = nextProject.cells === cells;
       const previousGrid = getGridDimensions();
       cancelAllGestures(false);
+      const preservedSelection = selection;
       project = nextProject;
       cells = nextProject.cells;
       if (!project.palette.availableColorIds.includes(selectedColorId)) {
@@ -185,7 +211,7 @@ export function mountPatternCanvas(
         column: Math.min(keyboardPoint.column, nextProject.grid.columns - 1),
       });
       if (!sameCells) {
-        setSelection(null);
+        setSelection(clipSelectionToGrid(preservedSelection));
       }
       const gridChanged =
         previousGrid.rows !== nextProject.grid.rows ||
@@ -294,12 +320,15 @@ export function mountPatternCanvas(
       announceKeyboardPoint();
     },
     clearSelection,
+    cancelSelection,
+    beginSelectionTransfer,
     copySelection(deltaRow: number, deltaColumn: number) {
       translateSelection('copy', deltaRow, deltaColumn);
     },
     moveSelection(deltaRow: number, deltaColumn: number) {
       translateSelection('move', deltaRow, deltaColumn);
     },
+    getSelectionViewportRect,
     getPerformanceSnapshot: () => performanceTracker.snapshot,
     resetPerformanceMetrics() {
       performanceTracker.reset();
@@ -341,11 +370,13 @@ export function mountPatternCanvas(
     if (snapshot.mode === 'pinch') {
       if (previousMode !== 'pinch') {
         rollbackToolGesture();
+        setSelectionTransferMode(null);
         panGesture = null;
         const pinch = snapshot.pinch;
         if (pinch) {
           pinchBaseline = Object.freeze({
             transform: viewportTransform,
+            viewportMode,
             centroid: pinch.centroid,
             distance: Math.max(1, pinch.distance),
           });
@@ -425,10 +456,16 @@ export function mountPatternCanvas(
 
     if (mode === 'pinch') {
       const pointerIds = gestures.pointerIds;
+      const completedPinch =
+        pinchBaseline !== null &&
+        !viewportTransformsEqual(viewportTransform, pinchBaseline.transform);
       gestures.end(event.pointerId);
       releasePointers(pointerIds);
       pinchBaseline = null;
       panGesture = null;
+      if (completedPinch) {
+        callbacks.onSuccessfulGesture?.('pinch');
+      }
       event.preventDefault();
       return;
     }
@@ -474,6 +511,25 @@ export function mountPatternCanvas(
 
   function startToolGesture(event: PointerEvent, point: CellPoint): void {
     const selectionBefore = selection;
+    if (selectionTransferMode) {
+      if (!selectionBefore || !selectionContains(selectionBefore, point.row, point.column)) {
+        callbacks.onStatus('请从选中区域内开始拖动。');
+        return;
+      }
+      toolGesture = {
+        pointerId: event.pointerId,
+        kind: 'select-move',
+        start: point,
+        last: point,
+        draft: null,
+        selectionBefore,
+        selectionSnapshot: createSelectionCellSnapshot(cells, selectionBefore),
+        transferMode: selectionTransferMode,
+        copySelection: selectionTransferMode === 'copy',
+      };
+      return;
+    }
+
     if (tool === 'paint' || tool === 'erase') {
       const draft = new MatrixDraft(cells);
       toolGesture = {
@@ -483,6 +539,8 @@ export function mountPatternCanvas(
         last: point,
         draft,
         selectionBefore,
+        selectionSnapshot: null,
+        transferMode: null,
         copySelection: false,
       };
       applyPaintPoint(draft, point);
@@ -498,6 +556,11 @@ export function mountPatternCanvas(
         last: point,
         draft: null,
         selectionBefore,
+        selectionSnapshot:
+          movingSelection && selectionBefore
+            ? createSelectionCellSnapshot(cells, selectionBefore)
+            : null,
+        transferMode: null,
         copySelection: event.altKey,
       };
       if (!movingSelection) {
@@ -518,6 +581,8 @@ export function mountPatternCanvas(
       last: point,
       draft: null,
       selectionBefore,
+      selectionSnapshot: null,
+      transferMode: null,
       copySelection: false,
     };
   }
@@ -540,7 +605,8 @@ export function mountPatternCanvas(
         endColumn: point.column,
       });
     } else if (active.kind === 'select-move') {
-      active.copySelection = copySelectionModifier;
+      active.copySelection =
+        active.transferMode === 'copy' || (active.transferMode === null && copySelectionModifier);
       const source = active.selectionBefore;
       if (source) {
         setSelection(
@@ -564,6 +630,9 @@ export function mountPatternCanvas(
         tool === 'erase' ? '已擦除拼豆。' : '已更新图案。',
         transactionStartedAt,
       );
+      if (result.changes.length > 0) {
+        callbacks.onSuccessfulGesture?.('draw');
+      }
       return;
     }
     if (active.kind === 'single' && finalPoint) {
@@ -577,6 +646,7 @@ export function mountPatternCanvas(
       const result = active.copySelection
         ? copySelectedCells(cells, active.selectionBefore, deltaRow, deltaColumn)
         : moveSelectedCells(cells, active.selectionBefore, deltaRow, deltaColumn);
+      setSelectionTransferMode(null);
       applySelectionResult(
         result,
         active.copySelection ? '已复制选中区域。' : '已移动选中区域。',
@@ -669,6 +739,27 @@ export function mountPatternCanvas(
     );
   }
 
+  function cancelSelection(): void {
+    cancelAllGestures(false);
+    if (!selection) {
+      return;
+    }
+    setSelection(null);
+    callbacks.onStatus('已取消选区。');
+  }
+
+  function beginSelectionTransfer(mode: Exclude<SelectionTransferMode, null>): void {
+    cancelAllGestures(false);
+    if (!selection) {
+      callbacks.onStatus('请先选择要处理的区域。');
+      return;
+    }
+    setSelectionTransferMode(mode);
+    callbacks.onStatus(
+      mode === 'copy' ? '拖动选中区域，松手后放置副本。' : '拖动选中区域，松手后完成移动。',
+    );
+  }
+
   function translateSelection(
     operation: 'copy' | 'move',
     deltaRow: number,
@@ -735,12 +826,25 @@ export function mountPatternCanvas(
 
   function cancelAllGestures(announce: boolean): void {
     const pointerIds = gestures.pointerIds;
-    const hadGesture = gestures.snapshot.mode !== 'idle' || toolGesture !== null;
+    const cancelledPinchTransform =
+      gestures.snapshot.mode === 'pinch' ? pinchBaseline?.transform : null;
+    const cancelledPinchMode =
+      gestures.snapshot.mode === 'pinch' ? pinchBaseline?.viewportMode : null;
+    const hadGesture =
+      gestures.snapshot.mode !== 'idle' || toolGesture !== null || selectionTransferMode !== null;
     rollbackToolGesture();
+    setSelectionTransferMode(null);
     gestures.cancelAll();
     releasePointers(pointerIds);
     panGesture = null;
     pinchBaseline = null;
+    if (cancelledPinchTransform) {
+      viewportTransform = cancelledPinchTransform;
+      if (cancelledPinchMode) {
+        viewportMode = cancelledPinchMode;
+      }
+      scheduleFullRender();
+    }
     spacePressed = false;
     spaceUsedForPan = false;
     if (hadGesture && announce) {
@@ -767,8 +871,11 @@ export function mountPatternCanvas(
   }
 
   function handleWheel(event: WheelEvent): void {
-    if (gestures.snapshot.mode !== 'idle') {
+    if (gestures.snapshot.mode !== 'idle' && selectionTransferMode === null) {
       return;
+    }
+    if (selectionTransferMode !== null) {
+      cancelAllGestures(false);
     }
     event.preventDefault();
     viewportMode = 'manual';
@@ -799,7 +906,7 @@ export function mountPatternCanvas(
 
   function handleKeyDown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
-      if (gestures.snapshot.mode !== 'idle' || toolGesture) {
+      if (gestures.snapshot.mode !== 'idle' || toolGesture || selectionTransferMode !== null) {
         event.preventDefault();
         cancelAllGestures(true);
       }
@@ -906,7 +1013,61 @@ export function mountPatternCanvas(
   function setSelection(nextSelection: CellSelection | null): void {
     selection = nextSelection ? normalizeSelection(nextSelection) : null;
     callbacks.onSelectionChange?.(selection);
+    emitSelectionViewportRect();
     scheduleFullRender();
+  }
+
+  function setSelectionTransferMode(nextMode: SelectionTransferMode): void {
+    if (selectionTransferMode === nextMode) {
+      return;
+    }
+    selectionTransferMode = nextMode;
+    callbacks.onSelectionTransferModeChange?.(nextMode);
+  }
+
+  function getSelectionViewportRect(): SelectionViewportRect | null {
+    if (!selection) {
+      return null;
+    }
+    const normalized = normalizeSelection(selection);
+    const leftColumn = reverseView
+      ? project.grid.columns - 1 - normalized.endColumn
+      : normalized.startColumn;
+    const rightColumn = reverseView
+      ? project.grid.columns - 1 - normalized.startColumn
+      : normalized.endColumn;
+    return Object.freeze({
+      left: viewportTransform.offsetX + leftColumn * viewportTransform.scale,
+      top: viewportTransform.offsetY + normalized.startRow * viewportTransform.scale,
+      width: (rightColumn - leftColumn + 1) * viewportTransform.scale,
+      height: (normalized.endRow - normalized.startRow + 1) * viewportTransform.scale,
+    });
+  }
+
+  function emitSelectionViewportRect(): void {
+    const rect = getSelectionViewportRect();
+    const key = rect
+      ? `${String(rect.left)}:${String(rect.top)}:${String(rect.width)}:${String(rect.height)}`
+      : null;
+    if (key === lastSelectionViewportRectKey) {
+      return;
+    }
+    lastSelectionViewportRectKey = key;
+    callbacks.onSelectionViewportRectChange?.(rect);
+  }
+
+  function clipSelectionToGrid(source: CellSelection | null): CellSelection | null {
+    if (!source || project.grid.rows <= 0 || project.grid.columns <= 0) {
+      return null;
+    }
+    const normalized = normalizeSelection(source);
+    const startRow = Math.max(0, normalized.startRow);
+    const startColumn = Math.max(0, normalized.startColumn);
+    const endRow = Math.min(project.grid.rows - 1, normalized.endRow);
+    const endColumn = Math.min(project.grid.columns - 1, normalized.endColumn);
+    return startRow <= endRow && startColumn <= endColumn
+      ? Object.freeze({ startRow, startColumn, endRow, endColumn })
+      : null;
   }
 
   function translateSelectionRect(
@@ -988,6 +1149,7 @@ export function mountPatternCanvas(
   }
 
   function scheduleFullRender(): void {
+    emitSelectionViewportRect();
     invalidation.markFull();
     scheduleRender();
   }
@@ -1068,7 +1230,20 @@ export function mountPatternCanvas(
   }
 
   function drawCell(row: number, column: number): void {
-    const cell = toolGesture?.draft?.getCell(row, column) ?? cells[row]?.[column];
+    const active = toolGesture;
+    const cell =
+      active?.draft?.getCell(row, column) ??
+      (active?.kind === 'select-move' && active.selectionSnapshot
+        ? getSelectionTransferPreviewCell(
+            cells,
+            active.selectionSnapshot,
+            active.copySelection ? 'copy' : 'move',
+            active.last.row - active.start.row,
+            active.last.column - active.start.column,
+            row,
+            column,
+          )
+        : cells[row]?.[column]);
     if (!cell) {
       return;
     }
@@ -1220,6 +1395,15 @@ function cellsEqual(left: BeadCell, right: BeadCell): boolean {
   return (
     left.kind === right.kind &&
     (left.kind === 'empty' || (right.kind === 'bead' && left.colorId === right.colorId))
+  );
+}
+
+function viewportTransformsEqual(left: ViewportTransform, right: ViewportTransform): boolean {
+  const epsilon = 0.000001;
+  return (
+    Math.abs(left.scale - right.scale) <= epsilon &&
+    Math.abs(left.offsetX - right.offsetX) <= epsilon &&
+    Math.abs(left.offsetY - right.offsetY) <= epsilon
   );
 }
 

@@ -5,8 +5,12 @@ import type { MatrixCellChange } from '../src/domain/history';
 import type { BeadCell, BeadProject } from '../src/domain/project';
 import {
   mountPatternCanvas,
+  type CellSelection,
   type PatternCanvasController,
+  type SelectionTransferMode,
+  type SelectionViewportRect,
 } from '../src/features/pattern-editor/canvasEditor';
+import type { FirstUseGesture } from '../src/features/pattern-editor/firstUseHint';
 import type { EditorPerformanceSnapshot } from '../src/features/pattern-editor/renderState';
 
 const EMPTY: BeadCell = Object.freeze({ kind: 'empty' });
@@ -70,6 +74,113 @@ test('a second touch rolls back a pending tool draft and owns the gesture as a p
   assert.equal(harness.commits.length, 0);
   assert.equal(harness.canvas.hasPointerCapture(4), false);
   assert.equal(harness.canvas.hasPointerCapture(5), false);
+  harness.destroy();
+});
+
+test('successful pointer drawing and two-finger movement expose first-use gesture events', () => {
+  const drawHarness = createHarness();
+  drawHarness.pointer('pointerdown', { pointerId: 40, row: 0, column: 0 });
+  assert.deepEqual(drawHarness.successfulGestures, []);
+  drawHarness.pointer('pointerup', { pointerId: 40, row: 0, column: 0 });
+  assert.deepEqual(drawHarness.successfulGestures, ['draw']);
+  drawHarness.destroy();
+
+  const pinchHarness = createHarness();
+  pinchHarness.pointer('pointerdown', {
+    pointerId: 41,
+    row: 0,
+    column: 0,
+    pointerType: 'touch',
+  });
+  pinchHarness.pointer('pointerdown', {
+    pointerId: 42,
+    row: 1,
+    column: 1,
+    pointerType: 'touch',
+  });
+  pinchHarness.pointer('pointermove', {
+    pointerId: 42,
+    row: 2,
+    column: 2,
+    pointerType: 'touch',
+  });
+  pinchHarness.pointer('pointermove', {
+    pointerId: 42,
+    row: 3,
+    column: 3,
+    pointerType: 'touch',
+  });
+
+  assert.deepEqual(pinchHarness.successfulGestures, []);
+  pinchHarness.pointer('pointerup', {
+    pointerId: 42,
+    row: 3,
+    column: 3,
+    pointerType: 'touch',
+  });
+  assert.deepEqual(pinchHarness.successfulGestures, ['pinch']);
+  pinchHarness.destroy();
+});
+
+test('a cancelled pinch does not report a successful first-use gesture', () => {
+  const harness = createHarness();
+  harness.pointer('pointerdown', {
+    pointerId: 43,
+    row: 0,
+    column: 0,
+    pointerType: 'touch',
+  });
+  harness.pointer('pointerdown', {
+    pointerId: 44,
+    row: 1,
+    column: 1,
+    pointerType: 'touch',
+  });
+  harness.pointer('pointermove', {
+    pointerId: 44,
+    row: 3,
+    column: 3,
+    pointerType: 'touch',
+  });
+  harness.pointer('pointercancel', {
+    pointerId: 44,
+    row: 3,
+    column: 3,
+    pointerType: 'touch',
+  });
+
+  assert.deepEqual(harness.successfulGestures, []);
+  harness.destroy();
+});
+
+test('a zero-motion pinch completion does not report a successful first-use gesture', () => {
+  const harness = createHarness();
+  harness.pointer('pointerdown', {
+    pointerId: 48,
+    row: 0,
+    column: 0,
+    pointerType: 'touch',
+  });
+  harness.pointer('pointerdown', {
+    pointerId: 49,
+    row: 1,
+    column: 1,
+    pointerType: 'touch',
+  });
+  harness.pointer('pointermove', {
+    pointerId: 49,
+    row: 1,
+    column: 1,
+    pointerType: 'touch',
+  });
+  harness.pointer('pointerup', {
+    pointerId: 49,
+    row: 1,
+    column: 1,
+    pointerType: 'touch',
+  });
+
+  assert.deepEqual(harness.successfulGestures, []);
   harness.destroy();
 });
 
@@ -197,16 +308,429 @@ test('row and column jump clamps, reveals, focuses, and announces the target cel
   harness.destroy();
 });
 
+test('explicit copy placement previews without writing and commits one source-preserving transaction', () => {
+  const harness = createHarness(
+    false,
+    patternProject([
+      [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 20, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 20, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 20, row: 0, column: 1 });
+
+  harness.beginSelectionTransfer('copy');
+  harness.pointer('pointerdown', { pointerId: 21, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 21, row: 1, column: 1 });
+
+  assert.equal(harness.commits.length, 0);
+  assert.deepEqual(harness.selections.at(-1), {
+    startRow: 1,
+    startColumn: 1,
+    endRow: 1,
+    endColumn: 2,
+  });
+
+  harness.pointer('pointerup', { pointerId: 21, row: 1, column: 1 });
+
+  assert.equal(harness.commits.length, 1);
+  assert.deepEqual(
+    harness.commits[0]?.cells,
+    matrix([
+      [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+      [EMPTY, bead('default:A01'), bead('default:A02'), EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  assert.deepEqual(
+    harness.commits[0]?.changes.map(({ row, column }) => ({ row, column })),
+    [
+      { row: 1, column: 1 },
+      { row: 1, column: 2 },
+    ],
+  );
+  assert.equal(harness.transferModes.at(-1), null);
+  harness.destroy();
+});
+
+test('an armed transfer overrides paint for one placement gesture and then restores paint', () => {
+  const harness = createHarness(
+    false,
+    patternProject([
+      [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 24, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 24, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 24, row: 0, column: 1 });
+  harness.setTool('paint');
+
+  harness.beginSelectionTransfer('copy');
+  harness.pointer('pointerdown', { pointerId: 25, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 25, row: 1, column: 1 });
+  assert.equal(harness.commits.length, 0);
+  harness.pointer('pointerup', { pointerId: 25, row: 1, column: 1 });
+
+  assert.deepEqual(
+    harness.commits[0]?.cells,
+    matrix([
+      [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+      [EMPTY, bead('default:A01'), bead('default:A02'), EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  assert.equal(harness.transferModes.at(-1), null);
+
+  harness.pointer('pointerdown', { pointerId: 26, row: 3, column: 3 });
+  harness.pointer('pointerup', { pointerId: 26, row: 3, column: 3 });
+  assert.deepEqual(
+    harness.commits[1]?.changes.map(({ row, column }) => ({ row, column })),
+    [{ row: 3, column: 3 }],
+  );
+  harness.destroy();
+});
+
+test('wheel zoom cancels an armed transfer without changing the selected matrix', () => {
+  const harness = createHarness();
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 27, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 27, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 27, row: 0, column: 1 });
+  harness.beginSelectionTransfer('copy');
+
+  harness.wheel(-120);
+
+  assert.equal(harness.transferModes.at(-1), null);
+  assert.equal(harness.commits.length, 0);
+  assert.deepEqual(harness.selections.at(-1), {
+    startRow: 0,
+    startColumn: 0,
+    endRow: 0,
+    endColumn: 1,
+  });
+  harness.destroy();
+});
+
+test('a second touch cancels an active transfer preview before taking over as pinch', () => {
+  const harness = createHarness();
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 28, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 28, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 28, row: 0, column: 1 });
+  harness.beginSelectionTransfer('copy');
+  harness.pointer('pointerdown', {
+    pointerId: 29,
+    row: 0,
+    column: 0,
+    pointerType: 'touch',
+  });
+  harness.pointer('pointermove', {
+    pointerId: 29,
+    row: 1,
+    column: 1,
+    pointerType: 'touch',
+  });
+
+  harness.pointer('pointerdown', {
+    pointerId: 30,
+    row: 3,
+    column: 3,
+    pointerType: 'touch',
+  });
+
+  assert.equal(harness.transferModes.at(-1), null);
+  assert.equal(harness.commits.length, 0);
+  assert.deepEqual(harness.selections.at(-1), {
+    startRow: 0,
+    startColumn: 0,
+    endRow: 0,
+    endColumn: 1,
+  });
+  harness.pointer('pointerup', {
+    pointerId: 30,
+    row: 3,
+    column: 3,
+    pointerType: 'touch',
+  });
+  harness.destroy();
+});
+
+test('move placement renders snapshot destinations and cleared sources before commit', () => {
+  const harness = createHarness(
+    false,
+    patternProject([
+      [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  harness.flushFrame();
+  const firstColor = harness.canvas.beadColorAt(30, 30);
+  const secondColor = harness.canvas.beadColorAt(50, 30);
+  assert.ok(firstColor);
+  assert.ok(secondColor);
+  harness.canvas.clearArcFills();
+
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 45, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 45, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 45, row: 0, column: 1 });
+  harness.beginSelectionTransfer('move');
+  harness.pointer('pointerdown', { pointerId: 46, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 46, row: 1, column: 1 });
+  harness.flushFrame();
+
+  assert.equal(harness.commits.length, 0);
+  assert.equal(harness.canvas.beadColorAt(30, 30), null);
+  assert.equal(harness.canvas.beadColorAt(50, 30), null);
+  assert.equal(harness.canvas.beadColorAt(50, 50), firstColor);
+  assert.equal(harness.canvas.beadColorAt(70, 50), secondColor);
+  harness.destroy();
+});
+
+test('explicit move placement crops a partial out-of-bounds target at commit', () => {
+  const harness = createHarness(
+    false,
+    patternProject([
+      [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 22, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 22, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 22, row: 0, column: 1 });
+
+  harness.beginSelectionTransfer('move');
+  harness.pointer('pointerdown', { pointerId: 23, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 23, row: 0, column: 3 });
+  assert.equal(harness.commits.length, 0);
+  harness.pointer('pointerup', { pointerId: 23, row: 0, column: 3 });
+
+  assert.equal(harness.commits.length, 1);
+  assert.deepEqual(
+    harness.commits[0]?.cells,
+    matrix([
+      [EMPTY, EMPTY, EMPTY, bead('default:A01')],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  assert.deepEqual(harness.selections.at(-1), {
+    startRow: 0,
+    startColumn: 3,
+    endRow: 0,
+    endColumn: 3,
+  });
+  harness.destroy();
+});
+
+test('project shrink removes an old selection with no remaining grid intersection', () => {
+  const harness = createHarness();
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 47, row: 2, column: 2 });
+  harness.pointer('pointermove', { pointerId: 47, row: 3, column: 3 });
+  harness.pointer('pointerup', { pointerId: 47, row: 3, column: 3 });
+
+  harness.setProject(sizedProject(1, 1));
+
+  assert.equal(harness.selections.at(-1), null);
+  assert.equal(harness.selectionRect(), null);
+  harness.destroy();
+});
+
+test('transfer cancellation paths restore the original selection without a matrix commit', () => {
+  const cancellationCases: ReadonlyArray<{
+    readonly name: string;
+    readonly cancel: (harness: ReturnType<typeof createHarness>) => void;
+  }> = [
+    {
+      name: 'pointercancel',
+      cancel: (harness) => harness.pointer('pointercancel', { pointerId: 31, row: 1, column: 1 }),
+    },
+    {
+      name: 'lost pointer capture',
+      cancel: (harness) => harness.lostPointerCapture(31),
+    },
+    {
+      name: 'Escape',
+      cancel: (harness) => harness.keyDown('Escape'),
+    },
+    {
+      name: 'tool change',
+      cancel: (harness) => harness.setTool('paint'),
+    },
+    {
+      name: 'project change',
+      cancel: (harness) =>
+        harness.setProject(
+          patternProject([
+            [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+            [EMPTY, EMPTY, EMPTY, EMPTY],
+            [EMPTY, EMPTY, EMPTY, EMPTY],
+            [EMPTY, EMPTY, EMPTY, EMPTY],
+          ]),
+        ),
+    },
+    {
+      name: 'reverse view',
+      cancel: (harness) => harness.setReverseView(true),
+    },
+    {
+      name: 'viewport reset',
+      cancel: (harness) => harness.fit(),
+    },
+  ];
+
+  for (const cancellationCase of cancellationCases) {
+    const harness = createSelectedTransferHarness(31);
+    cancellationCase.cancel(harness);
+
+    assert.equal(harness.commits.length, 0, cancellationCase.name);
+    assert.deepEqual(
+      harness.selections.at(-1),
+      {
+        startRow: 0,
+        startColumn: 0,
+        endRow: 0,
+        endColumn: 1,
+      },
+      cancellationCase.name,
+    );
+    assert.equal(harness.transferModes.at(-1), null, cancellationCase.name);
+    harness.destroy();
+  }
+});
+
+test('destroy rolls back a transfer preview without committing matrix changes', () => {
+  const harness = createSelectedTransferHarness(32);
+
+  harness.destroy();
+
+  assert.equal(harness.commits.length, 0);
+  assert.deepEqual(harness.selections.at(-1), {
+    startRow: 0,
+    startColumn: 0,
+    endRow: 0,
+    endColumn: 1,
+  });
+  assert.equal(harness.transferModes.at(-1), null);
+});
+
+test('cancel selection is non-destructive while clear selection remains a transaction', () => {
+  const cancelHarness = createSelectedTransferHarness(33);
+  cancelHarness.cancelSelection();
+
+  assert.equal(cancelHarness.commits.length, 0);
+  assert.equal(cancelHarness.selections.at(-1), null);
+  cancelHarness.destroy();
+
+  const clearHarness = createSelectedTransferHarness(34);
+  clearHarness.clearSelection();
+
+  assert.equal(clearHarness.commits.length, 1);
+  assert.equal(clearHarness.selections.at(-1), null);
+  assert.deepEqual(
+    clearHarness.commits[0]?.changes.map(({ row, column }) => ({ row, column })),
+    [
+      { row: 0, column: 0 },
+      { row: 0, column: 1 },
+    ],
+  );
+  clearHarness.destroy();
+});
+
+test('selection viewport callback exposes the current CSS-pixel rectangle', () => {
+  const harness = createHarness();
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 35, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 35, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 35, row: 0, column: 1 });
+
+  assert.deepEqual(harness.selectionRects.at(-1), {
+    left: 20,
+    top: 20,
+    width: 40,
+    height: 20,
+  });
+  assert.deepEqual(harness.selectionRect(), {
+    left: 20,
+    top: 20,
+    width: 40,
+    height: 20,
+  });
+  harness.destroy();
+});
+
+test('selection viewport callback follows a visual reverse without changing logical selection', () => {
+  const harness = createHarness();
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: 36, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: 36, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: 36, row: 0, column: 1 });
+
+  harness.setReverseView(true);
+
+  assert.deepEqual(harness.selectionRects.at(-1), {
+    left: 60,
+    top: 20,
+    width: 40,
+    height: 20,
+  });
+  assert.deepEqual(harness.selections.at(-1), {
+    startRow: 0,
+    startColumn: 0,
+    endRow: 0,
+    endColumn: 1,
+  });
+  harness.destroy();
+});
+
 interface PointerOptions {
   readonly pointerId: number;
   readonly row: number;
   readonly column: number;
   readonly pointerType?: string;
+  readonly altKey?: boolean;
 }
 
 interface CommitRecord {
   readonly cells: readonly (readonly BeadCell[])[];
   readonly changes: readonly MatrixCellChange[];
+}
+
+function createSelectedTransferHarness(pointerId: number): ReturnType<typeof createHarness> {
+  const harness = createHarness(
+    false,
+    patternProject([
+      [bead('default:A01'), bead('default:A02'), EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+      [EMPTY, EMPTY, EMPTY, EMPTY],
+    ]),
+  );
+  harness.setTool('select');
+  harness.pointer('pointerdown', { pointerId: pointerId + 100, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId: pointerId + 100, row: 0, column: 1 });
+  harness.pointer('pointerup', { pointerId: pointerId + 100, row: 0, column: 1 });
+  harness.beginSelectionTransfer('copy');
+  harness.pointer('pointerdown', { pointerId, row: 0, column: 0 });
+  harness.pointer('pointermove', { pointerId, row: 1, column: 1 });
+  return harness;
 }
 
 function createHarness(
@@ -216,13 +740,25 @@ function createHarness(
   readonly canvas: FakeCanvas;
   readonly commits: CommitRecord[];
   readonly statuses: string[];
+  readonly successfulGestures: FirstUseGesture[];
+  readonly selections: Array<CellSelection | null>;
+  readonly selectionRects: Array<SelectionViewportRect | null>;
+  readonly transferModes: SelectionTransferMode[];
   readonly pointer: (type: string, options: PointerOptions) => void;
+  readonly wheel: (deltaY: number) => void;
+  readonly lostPointerCapture: (pointerId: number) => void;
   readonly zoomIn: () => void;
   readonly actualSize: () => void;
+  readonly fit: () => void;
   readonly jumpToCell: (row: number, column: number) => void;
   readonly setProject: (project: BeadProject) => void;
+  readonly setTool: (tool: 'paint' | 'erase' | 'eyedropper' | 'fill' | 'select') => void;
   readonly setColor: (colorId: string) => void;
   readonly setReverseView: (reverse: boolean) => void;
+  readonly beginSelectionTransfer: (mode: Exclude<SelectionTransferMode, null>) => void;
+  readonly cancelSelection: () => void;
+  readonly clearSelection: () => void;
+  readonly selectionRect: () => SelectionViewportRect | null;
   readonly keyDown: (key: string) => void;
   readonly hideDocument: () => void;
   readonly blurCanvas: () => void;
@@ -248,6 +784,10 @@ function createHarness(
   const canvas = new FakeCanvas();
   const commits: CommitRecord[] = [];
   const statuses: string[] = [];
+  const successfulGestures: FirstUseGesture[] = [];
+  const selections: Array<CellSelection | null> = [];
+  const selectionRects: Array<SelectionViewportRect | null> = [];
+  const transferModes: SelectionTransferMode[] = [];
   let currentProject = initialProject;
   let controller: PatternCanvasController | null = null;
   controller = mountPatternCanvas(canvas as unknown as HTMLCanvasElement, currentProject, {
@@ -262,12 +802,28 @@ function createHarness(
     onStatus(message) {
       statuses.push(message);
     },
+    onSelectionChange(selection) {
+      selections.push(selection);
+    },
+    onSelectionViewportRectChange(rect) {
+      selectionRects.push(rect);
+    },
+    onSelectionTransferModeChange(mode) {
+      transferModes.push(mode);
+    },
+    onSuccessfulGesture(gesture) {
+      successfulGestures.push(gesture);
+    },
   });
 
   return {
     canvas,
     commits,
     statuses,
+    successfulGestures,
+    selections,
+    selectionRects,
+    transferModes,
     pointer(type, options) {
       const cellSize = 20;
       canvas.dispatch(type, {
@@ -276,7 +832,21 @@ function createHarness(
         button: type === 'pointermove' ? -1 : 0,
         clientX: 20 + (options.column + 0.5) * cellSize,
         clientY: 20 + (options.row + 0.5) * cellSize,
-        altKey: false,
+        altKey: options.altKey ?? false,
+        preventDefault() {},
+      });
+    },
+    wheel(deltaY) {
+      canvas.dispatch('wheel', {
+        deltaY,
+        clientX: 60,
+        clientY: 60,
+        preventDefault() {},
+      });
+    },
+    lostPointerCapture(pointerId) {
+      canvas.dispatch('lostpointercapture', {
+        pointerId,
         preventDefault() {},
       });
     },
@@ -286,17 +856,35 @@ function createHarness(
     actualSize() {
       controller.actualSize();
     },
+    fit() {
+      controller.fit();
+    },
     jumpToCell(row, column) {
       controller.jumpToCell(row, column);
     },
     setProject(nextProject) {
       controller.setProject(nextProject);
     },
+    setTool(tool) {
+      controller.setTool(tool);
+    },
     setColor(colorId) {
       controller.setColor(colorId);
     },
     setReverseView(reverse) {
       controller.setReverseView(reverse);
+    },
+    beginSelectionTransfer(mode) {
+      controller.beginSelectionTransfer(mode);
+    },
+    cancelSelection() {
+      controller.cancelSelection();
+    },
+    clearSelection() {
+      controller.clearSelection();
+    },
+    selectionRect() {
+      return controller.getSelectionViewportRect();
     },
     keyDown(key) {
       canvas.dispatch('keydown', {
@@ -332,6 +920,33 @@ function createHarness(
 
 function project(colorId = 'default:A01'): BeadProject {
   return sizedProject(4, 4, colorId);
+}
+
+function bead(colorId: string): BeadCell {
+  return Object.freeze({ kind: 'bead', colorId });
+}
+
+function matrix(rows: readonly (readonly BeadCell[])[]): readonly (readonly BeadCell[])[] {
+  return Object.freeze(rows.map((row) => Object.freeze([...row])));
+}
+
+function patternProject(rows: readonly (readonly BeadCell[])[]): BeadProject {
+  const cells = matrix(rows);
+  const colorIds = [
+    ...new Set(
+      cells.flatMap((row) => row.flatMap((cell) => (cell.kind === 'bead' ? [cell.colorId] : []))),
+    ),
+  ];
+  return {
+    grid: {
+      rows: cells.length,
+      columns: cells[0]?.length ?? 0,
+    },
+    palette: {
+      availableColorIds: colorIds.length > 0 ? colorIds : ['default:A01'],
+    },
+    cells,
+  } as BeadProject;
 }
 
 function sizedProject(rows: number, columns: number, colorId = 'default:A01'): BeadProject {
@@ -406,23 +1021,52 @@ class FakeCanvas extends FakeEventTarget {
     readonly width: number;
     readonly height: number;
   }> = [];
+  readonly arcFills: Array<{
+    readonly x: number;
+    readonly y: number;
+    readonly color: string;
+  }> = [];
   focusCount = 0;
 
   getContext(): CanvasRenderingContext2D {
+    let fillStyle = '';
+    let currentArc: { readonly x: number; readonly y: number } | null = null;
     return {
+      get fillStyle() {
+        return fillStyle;
+      },
+      set fillStyle(value: string | CanvasGradient | CanvasPattern) {
+        fillStyle = String(value);
+      },
       setTransform() {},
       fillRect() {},
       strokeRect: (x: number, y: number, width: number, height: number) => {
         this.strokeRects.push({ x, y, width, height });
       },
-      beginPath() {},
+      beginPath() {
+        currentArc = null;
+      },
       rect() {},
       clip() {},
       save() {},
       restore() {},
-      arc() {},
-      fill() {},
+      arc(x: number, y: number) {
+        currentArc = { x, y };
+      },
+      fill: () => {
+        if (currentArc) {
+          this.arcFills.push({ ...currentArc, color: fillStyle });
+        }
+      },
     } as unknown as CanvasRenderingContext2D;
+  }
+
+  clearArcFills(): void {
+    this.arcFills.length = 0;
+  }
+
+  beadColorAt(x: number, y: number): string | null {
+    return this.arcFills.find((fill) => fill.x === x && fill.y === y)?.color ?? null;
   }
 
   getBoundingClientRect(): DOMRect {

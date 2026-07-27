@@ -1,0 +1,838 @@
+import type { ProjectMode } from '../../domain/project';
+import type { CropPercent } from '../crop-controls/cropControls';
+import type { ModePreference, NewPatternMode } from '../customer-flow/modeRecommendation';
+import {
+  beadDimensionsForPreset,
+  dimensionsForLongEdge,
+  physicalDimensionsForGrid,
+  processingSettingsForPreset,
+  resolveBeadSizePreset,
+  resolveColorCountPreset,
+  resolveColorLimit,
+  resolvePatternSizePreset,
+  resolveProcessingPreset,
+  type BeadSizePreset,
+  type ColorCountPreset,
+  type PatternSizePreset,
+  type ProcessingPreset,
+} from '../customer-flow/presets';
+
+export interface PrepareWorkspaceState {
+  readonly croppedColumns: number;
+  readonly croppedRows: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly patternSizePreset: PatternSizePreset;
+  readonly beadDiameterMm: number;
+  readonly beadPitchMm: number;
+  readonly beadSizePreset: BeadSizePreset;
+  readonly maximumColors: number;
+  readonly availableColorCount: number;
+  readonly colorCountPreset: ColorCountPreset;
+  readonly dithering: 'none' | 'floydSteinberg';
+  readonly processingPreset: ProcessingPreset;
+  readonly physicalSizeMm: {
+    readonly widthMm: number;
+    readonly heightMm: number;
+  };
+}
+
+export interface CreatePrepareWorkspaceStateInput {
+  readonly croppedColumns: number;
+  readonly croppedRows: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly beadDiameterMm: number;
+  readonly beadPitchMm: number;
+  readonly maximumColors: number;
+  readonly availableColorCount: number;
+  readonly dithering: 'none' | 'floydSteinberg';
+}
+
+export interface CreateNewImagePrepareDefaultsInput {
+  readonly croppedColumns: number;
+  readonly croppedRows: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly availableColorCount: number;
+}
+
+export type PrepareWorkspaceAction =
+  | {
+      readonly type: 'selectPatternSize';
+      readonly preset: Exclude<PatternSizePreset, 'custom'>;
+    }
+  | {
+      readonly type: 'setDimensions';
+      readonly columns: number;
+      readonly rows: number;
+    }
+  | {
+      readonly type: 'setCropDimensions';
+      readonly croppedColumns: number;
+      readonly croppedRows: number;
+    }
+  | {
+      readonly type: 'selectBeadSize';
+      readonly preset: BeadSizePreset;
+    }
+  | {
+      readonly type: 'setBeadDimensions';
+      readonly beadDiameterMm: number;
+      readonly beadPitchMm: number;
+    }
+  | {
+      readonly type: 'selectColorCount';
+      readonly preset: Exclude<ColorCountPreset, 'custom'>;
+    }
+  | {
+      readonly type: 'setMaximumColors';
+      readonly maximumColors: number;
+    }
+  | {
+      readonly type: 'setAvailableColorCount';
+      readonly count: number;
+    }
+  | {
+      readonly type: 'selectProcessing';
+      readonly preset: ProcessingPreset;
+    }
+  | {
+      readonly type: 'setDithering';
+      readonly dithering: 'none' | 'floydSteinberg';
+    };
+
+export function createPrepareWorkspaceState(
+  input: CreatePrepareWorkspaceStateInput,
+): PrepareWorkspaceState {
+  return finalizePrepareWorkspaceState(input);
+}
+
+export function createNewImagePrepareDefaults(
+  input: CreateNewImagePrepareDefaultsInput,
+): CreatePrepareWorkspaceStateInput {
+  return Object.freeze({
+    croppedColumns: input.croppedColumns,
+    croppedRows: input.croppedRows,
+    columns: input.columns,
+    rows: input.rows,
+    beadDiameterMm: 5,
+    beadPitchMm: 5,
+    maximumColors: Math.min(24, input.availableColorCount),
+    availableColorCount: input.availableColorCount,
+    dithering: 'none',
+  });
+}
+
+export function hasAvailableColorSelection(selectedIds: ReadonlySet<string>): boolean {
+  return selectedIds.size > 0;
+}
+
+export function syncCropNumericInputValues(
+  root: ParentNode,
+  crop: CropPercent,
+  editingInput?: HTMLInputElement,
+): void {
+  for (const [selector, value] of [
+    ['[data-crop-x]', crop.x],
+    ['[data-crop-y]', crop.y],
+    ['[data-crop-width]', crop.width],
+    ['[data-crop-height]', crop.height],
+  ] as const) {
+    const input = root.querySelector<HTMLInputElement>(selector);
+    if (!input || input === editingInput) continue;
+    const nextValue = value.toFixed(1);
+    if (input.value !== nextValue) input.value = nextValue;
+  }
+}
+
+export function reducePrepareWorkspaceState(
+  state: PrepareWorkspaceState,
+  action: PrepareWorkspaceAction,
+): PrepareWorkspaceState {
+  switch (action.type) {
+    case 'selectPatternSize': {
+      const dimensions = dimensionsForLongEdge(
+        action.preset,
+        state.croppedColumns,
+        state.croppedRows,
+      );
+      return finalizePrepareWorkspaceState(
+        { ...state, ...dimensions },
+        { patternSizePreset: action.preset },
+      );
+    }
+    case 'setDimensions':
+      return finalizePrepareWorkspaceState({ ...state, ...action });
+    case 'setCropDimensions': {
+      const crop = {
+        croppedColumns: action.croppedColumns,
+        croppedRows: action.croppedRows,
+      };
+      if (state.patternSizePreset === 'custom') {
+        return finalizePrepareWorkspaceState(
+          { ...state, ...crop },
+          { patternSizePreset: 'custom' },
+        );
+      }
+      const dimensions = dimensionsForLongEdge(
+        state.patternSizePreset,
+        crop.croppedColumns,
+        crop.croppedRows,
+      );
+      return finalizePrepareWorkspaceState(
+        { ...state, ...crop, ...dimensions },
+        { patternSizePreset: state.patternSizePreset },
+      );
+    }
+    case 'selectBeadSize': {
+      if (action.preset === 'custom') {
+        return finalizePrepareWorkspaceState(state, { beadSizePreset: 'custom' });
+      }
+      const dimensions = beadDimensionsForPreset(action.preset);
+      return finalizePrepareWorkspaceState(
+        { ...state, ...dimensions },
+        { beadSizePreset: action.preset },
+      );
+    }
+    case 'setBeadDimensions':
+      return finalizePrepareWorkspaceState({
+        ...state,
+        beadDiameterMm: action.beadDiameterMm,
+        beadPitchMm: action.beadPitchMm,
+      });
+    case 'selectColorCount':
+      return finalizePrepareWorkspaceState(
+        {
+          ...state,
+          maximumColors:
+            state.availableColorCount === 0
+              ? 0
+              : resolveColorLimit(action.preset, state.availableColorCount),
+        },
+        { colorCountPreset: action.preset },
+      );
+    case 'setMaximumColors':
+      return finalizePrepareWorkspaceState({
+        ...state,
+        maximumColors:
+          state.availableColorCount === 0
+            ? 0
+            : clampInteger(action.maximumColors, 1, state.availableColorCount),
+      });
+    case 'setAvailableColorCount': {
+      const availableColorCount = nonnegativeInteger(action.count, '可用颜色数量');
+      const maximumColors =
+        availableColorCount === 0
+          ? 0
+          : state.colorCountPreset === 'custom'
+            ? clampInteger(state.maximumColors, 1, availableColorCount)
+            : resolveColorLimit(state.colorCountPreset, availableColorCount);
+      return finalizePrepareWorkspaceState(
+        { ...state, availableColorCount, maximumColors },
+        { colorCountPreset: state.colorCountPreset },
+      );
+    }
+    case 'selectProcessing': {
+      const settings = processingSettingsForPreset(action.preset);
+      return finalizePrepareWorkspaceState(
+        { ...state, ...settings },
+        { processingPreset: action.preset },
+      );
+    }
+    case 'setDithering':
+      return finalizePrepareWorkspaceState({ ...state, dithering: action.dithering });
+  }
+}
+
+function finalizePrepareWorkspaceState(
+  input: CreatePrepareWorkspaceStateInput,
+  overrides: Partial<
+    Pick<
+      PrepareWorkspaceState,
+      'patternSizePreset' | 'beadSizePreset' | 'colorCountPreset' | 'processingPreset'
+    >
+  > = {},
+): PrepareWorkspaceState {
+  const croppedColumns = positiveFinite(input.croppedColumns, '裁剪宽度');
+  const croppedRows = positiveFinite(input.croppedRows, '裁剪高度');
+  const columns = boundedGridDimension(input.columns, '图案列数');
+  const rows = boundedGridDimension(input.rows, '图案行数');
+  const availableColorCount = nonnegativeInteger(input.availableColorCount, '可用颜色数量');
+  const beadDimensions = beadDimensionsForPreset('custom', {
+    beadDiameterMm: input.beadDiameterMm,
+    beadPitchMm: input.beadPitchMm,
+  });
+  const maximumColors =
+    availableColorCount === 0 ? 0 : clampInteger(input.maximumColors, 1, availableColorCount);
+  return Object.freeze({
+    croppedColumns,
+    croppedRows,
+    columns,
+    rows,
+    patternSizePreset:
+      overrides.patternSizePreset ??
+      resolvePatternSizePreset({ columns, rows }, croppedColumns, croppedRows),
+    ...beadDimensions,
+    beadSizePreset: overrides.beadSizePreset ?? resolveBeadSizePreset(beadDimensions),
+    maximumColors,
+    availableColorCount,
+    colorCountPreset:
+      overrides.colorCountPreset ??
+      (availableColorCount === 0
+        ? 'custom'
+        : resolveColorCountPreset(maximumColors, availableColorCount)),
+    dithering: input.dithering,
+    processingPreset: overrides.processingPreset ?? resolveProcessingPreset(input.dithering),
+    physicalSizeMm: physicalDimensionsForGrid({
+      columns,
+      rows,
+      ...beadDimensions,
+    }),
+  });
+}
+
+export function resolveSupportedNewPatternMode(
+  preference: ModePreference,
+  recommendation: NewPatternMode,
+  supportedModes: readonly ProjectMode[],
+): NewPatternMode {
+  const supported = supportedModes.filter(
+    (candidate): candidate is NewPatternMode => candidate === 'photo' || candidate === 'pixelArt',
+  );
+  if (supported.length === 0) {
+    throw new Error('当前服务暂不支持制作新图纸。');
+  }
+  const requested = preference === 'auto' ? recommendation : preference;
+  return supported.includes(requested) ? requested : (supported[0] ?? 'photo');
+}
+
+export interface MountPreparePresetControlsOptions {
+  readonly initialState: CreatePrepareWorkspaceStateInput;
+  readonly onChange?: (state: PrepareWorkspaceState) => void;
+}
+
+export interface PreparePresetControlsController {
+  readonly getState: () => PrepareWorkspaceState;
+  readonly hydrate: (input: CreatePrepareWorkspaceStateInput) => void;
+  readonly setCropDimensions: (croppedColumns: number, croppedRows: number) => void;
+  readonly setAvailableColorCount: (count: number) => void;
+  readonly setDithering: (dithering: 'none' | 'floydSteinberg') => void;
+  readonly syncFromFields: () => void;
+  readonly destroy: () => void;
+}
+
+export function mountPreparePresetControls(
+  root: HTMLElement,
+  options: MountPreparePresetControlsOptions,
+): PreparePresetControlsController {
+  let state = createPrepareWorkspaceState(options.initialState);
+  let destroyed = false;
+  root.addEventListener('change', onChange);
+  root.addEventListener('input', onInput);
+  render();
+
+  return Object.freeze({
+    getState: () => state,
+    hydrate(input: CreatePrepareWorkspaceStateInput) {
+      if (destroyed) return;
+      state = createPrepareWorkspaceState(input);
+      render();
+    },
+    setCropDimensions(croppedColumns: number, croppedRows: number) {
+      update({ type: 'setCropDimensions', croppedColumns, croppedRows });
+    },
+    setAvailableColorCount(count: number) {
+      update({ type: 'setAvailableColorCount', count });
+    },
+    setDithering(dithering: 'none' | 'floydSteinberg') {
+      update({ type: 'setDithering', dithering });
+    },
+    syncFromFields,
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      root.removeEventListener('change', onChange);
+      root.removeEventListener('input', onInput);
+    },
+  });
+
+  function onChange(event: Event): void {
+    const InputConstructor = root.ownerDocument.defaultView?.HTMLInputElement;
+    const target = event.target;
+    if (
+      InputConstructor === undefined ||
+      !(target instanceof InputConstructor) ||
+      !target.checked
+    ) {
+      return;
+    }
+    if (target.name === 'pattern-size-preset') {
+      const preset = Number(target.value);
+      if (preset === 29 || preset === 48 || preset === 72) {
+        update({ type: 'selectPatternSize', preset });
+      }
+      return;
+    }
+    if (target.name === 'bead-size-preset') {
+      const preset =
+        target.value === 'custom'
+          ? 'custom'
+          : target.value === '2.6'
+            ? 2.6
+            : target.value === '5'
+              ? 5
+              : null;
+      if (preset === null) return;
+      update({ type: 'selectBeadSize', preset });
+      if (preset === 'custom') {
+        const details = root.querySelector<HTMLDetailsElement>('[data-professional-settings]');
+        if (details) details.open = true;
+      }
+      return;
+    }
+    if (target.name === 'color-count-preset') {
+      const preset = Number(target.value);
+      if (preset === 12 || preset === 24 || preset === 48) {
+        update({ type: 'selectColorCount', preset });
+      }
+      return;
+    }
+    if (target.name === 'processing-preset') {
+      if (target.value === 'easy' || target.value === 'gradient') {
+        update({ type: 'selectProcessing', preset: target.value });
+      }
+    }
+  }
+
+  function onInput(event: Event): void {
+    const InputConstructor = root.ownerDocument.defaultView?.HTMLInputElement;
+    const target = event.target;
+    if (InputConstructor === undefined || !(target instanceof InputConstructor)) return;
+    if (target.matches('[data-columns], [data-rows]')) {
+      syncDimensionsFromFields();
+      return;
+    }
+    if (target.matches('[data-bead-diameter], [data-bead-pitch]')) {
+      syncBeadDimensionsFromFields();
+      return;
+    }
+    if (target.matches('[data-maximum-colors]')) {
+      update({
+        type: 'setMaximumColors',
+        maximumColors: numericInput(root, '[data-maximum-colors]', state.maximumColors),
+      });
+    }
+  }
+
+  function syncFromFields(): void {
+    if (destroyed) return;
+    syncDimensionsFromFields(false);
+    syncBeadDimensionsFromFields(false);
+    state = reducePrepareWorkspaceState(state, {
+      type: 'setMaximumColors',
+      maximumColors: numericInput(root, '[data-maximum-colors]', state.maximumColors),
+    });
+    render();
+    options.onChange?.(state);
+  }
+
+  function syncDimensionsFromFields(notify = true): void {
+    const columns = Math.round(numericInput(root, '[data-columns]', state.columns));
+    const rows = Math.round(numericInput(root, '[data-rows]', state.rows));
+    update({ type: 'setDimensions', columns, rows }, notify);
+  }
+
+  function syncBeadDimensionsFromFields(notify = true): void {
+    const beadDiameterMm = numericInput(root, '[data-bead-diameter]', state.beadDiameterMm);
+    const beadPitchMm = Math.max(
+      beadDiameterMm,
+      numericInput(root, '[data-bead-pitch]', state.beadPitchMm),
+    );
+    update({ type: 'setBeadDimensions', beadDiameterMm, beadPitchMm }, notify);
+  }
+
+  function update(action: PrepareWorkspaceAction, notify = true): void {
+    if (destroyed) return;
+    state = reducePrepareWorkspaceState(state, action);
+    render();
+    if (notify) options.onChange?.(state);
+  }
+
+  function render(): void {
+    setInputValue(root, '[data-columns]', state.columns);
+    setInputValue(root, '[data-rows]', state.rows);
+    setInputValue(root, '[data-bead-diameter]', state.beadDiameterMm);
+    setInputValue(root, '[data-bead-pitch]', state.beadPitchMm);
+    setInputValue(root, '[data-maximum-colors]', state.maximumColors);
+    checkPreset(root, 'pattern-size-preset', state.patternSizePreset);
+    checkPreset(root, 'bead-size-preset', state.beadSizePreset);
+    checkPreset(root, 'color-count-preset', state.colorCountPreset);
+    checkPreset(root, 'processing-preset', state.processingPreset);
+    for (const element of root.querySelectorAll<HTMLElement>('[data-physical-size]')) {
+      const nextText =
+        `约 ${(state.physicalSizeMm.widthMm / 10).toFixed(1)} × ` +
+        `${(state.physicalSizeMm.heightMm / 10).toFixed(1)} cm`;
+      if (element.textContent !== nextText) element.textContent = nextText;
+    }
+    const maximumColors = root.querySelector<HTMLInputElement>('[data-maximum-colors]');
+    if (maximumColors) {
+      maximumColors.disabled = state.availableColorCount === 0;
+      maximumColors.min = state.availableColorCount === 0 ? '0' : '1';
+    }
+    const dithering = root.querySelector<HTMLButtonElement>('[data-dithering]');
+    if (dithering) {
+      dithering.dataset.value = state.dithering;
+      const label = dithering.querySelector<HTMLElement>('[data-select-label]');
+      if (label) {
+        label.textContent = state.dithering === 'none' ? '干净色块' : '细腻过渡';
+      }
+    }
+    const customBeadFields = root.querySelector<HTMLFieldSetElement>('[data-custom-bead-fields]');
+    if (customBeadFields) {
+      const custom = state.beadSizePreset === 'custom';
+      customBeadFields.hidden = !custom;
+      customBeadFields.disabled = !custom;
+    }
+    const customPatternState = root.querySelector<HTMLElement>('[data-pattern-size-custom]');
+    if (customPatternState) {
+      const custom = state.patternSizePreset === 'custom';
+      customPatternState.hidden = !custom;
+      const dimensions = customPatternState.querySelector<HTMLElement>(
+        '[data-custom-pattern-size]',
+      );
+      const nextText = `${String(state.columns)} × ${String(state.rows)} 颗`;
+      if (dimensions && dimensions.textContent !== nextText) {
+        dimensions.textContent = nextText;
+      }
+    }
+  }
+}
+
+export interface LatestSourceRequest {
+  readonly begin: () => { readonly token: number; readonly signal: AbortSignal };
+  readonly isCurrent: (token: number) => boolean;
+  readonly cancel: () => void;
+}
+
+export function createLatestSourceRequest(): LatestSourceRequest {
+  let token = 0;
+  let controller: AbortController | null = null;
+  return Object.freeze({
+    begin() {
+      controller?.abort();
+      controller = new AbortController();
+      token += 1;
+      return Object.freeze({ token, signal: controller.signal });
+    },
+    isCurrent(candidate: number) {
+      return controller !== null && !controller.signal.aborted && candidate === token;
+    },
+    cancel() {
+      controller?.abort();
+      controller = null;
+    },
+  });
+}
+
+export interface PrepareColor {
+  readonly id: string;
+  readonly code: string;
+  readonly name?: string;
+  readonly series: string;
+  readonly displayHex: string;
+  readonly paletteLabel: string;
+}
+
+export interface AvailableColorGridUpdate {
+  readonly colors: readonly PrepareColor[];
+  readonly selectedIds: ReadonlySet<string>;
+  readonly query: string;
+  readonly series: string;
+}
+
+export interface AvailableColorGridRenderer {
+  readonly update: (input: AvailableColorGridUpdate) => void;
+  readonly destroy: () => void;
+}
+
+export interface AvailableColorGridRendererOptions {
+  readonly searchInput?: HTMLInputElement;
+  readonly status?: HTMLElement;
+  readonly onToggle?: (colorId: string, selected: boolean) => void;
+}
+
+interface ColorChoiceNodes {
+  readonly root: HTMLLabelElement;
+  readonly input: HTMLInputElement;
+  readonly swatch: HTMLSpanElement;
+  readonly code: HTMLElement;
+}
+
+interface ColorGroupNodes {
+  readonly root: HTMLElement;
+  readonly choices: HTMLElement;
+}
+
+export function createAvailableColorGridRenderer(
+  root: HTMLElement,
+  options: AvailableColorGridRendererOptions = {},
+): AvailableColorGridRenderer {
+  const document = root.ownerDocument;
+  const window = document.defaultView;
+  const groups = new Map<string, ColorGroupNodes>();
+  const choices = new Map<string, ColorChoiceNodes>();
+  let visibleColorIds: readonly string[] = Object.freeze([]);
+  let activeColorId: string | undefined;
+  let composing = false;
+  let destroyed = false;
+  if (root.id === '') {
+    root.id = `available-color-listbox-${String(nextAvailableColorListboxId())}`;
+  }
+  root.setAttribute('role', 'listbox');
+  root.setAttribute('aria-multiselectable', 'true');
+  if (options.status) {
+    if (options.status.id === '') options.status.id = `${root.id}-status`;
+    options.status.setAttribute('role', 'status');
+    options.status.setAttribute('aria-live', 'polite');
+  }
+  if (options.searchInput) {
+    options.searchInput.setAttribute('role', 'combobox');
+    options.searchInput.setAttribute('aria-autocomplete', 'list');
+    options.searchInput.setAttribute('aria-expanded', 'true');
+    options.searchInput.setAttribute('aria-controls', root.id);
+    if (options.status) {
+      options.searchInput.setAttribute('aria-describedby', options.status.id);
+    }
+    options.searchInput.addEventListener('keydown', onSearchKeydown);
+    options.searchInput.addEventListener('compositionstart', onCompositionStart);
+    options.searchInput.addEventListener('compositionend', onCompositionEnd);
+  }
+
+  return Object.freeze({
+    update(input: AvailableColorGridUpdate) {
+      const activeColorIds = new Set(input.colors.map((color: PrepareColor) => color.id));
+      const normalizedQuery = input.query.trim().toLocaleLowerCase();
+      const visibleBySeries = new Map<string, number>();
+      const nextVisibleIds: string[] = [];
+
+      for (const color of input.colors) {
+        const group = ensureGroup(color.series);
+        const choice = ensureChoice(color, group);
+        updateChoice(choice, color, input.selectedIds.has(color.id));
+        const matchesSeries = input.series === '' || input.series === color.series;
+        const searchable =
+          `${color.id} ${color.code} ${color.name ?? ''} ${color.paletteLabel}`.toLocaleLowerCase();
+        const visible = matchesSeries && searchable.includes(normalizedQuery);
+        choice.root.hidden = !visible;
+        if (visible) {
+          nextVisibleIds.push(color.id);
+          visibleBySeries.set(color.series, (visibleBySeries.get(color.series) ?? 0) + 1);
+        }
+      }
+
+      for (const [colorId, choice] of choices) {
+        if (!activeColorIds.has(colorId)) {
+          choice.root.hidden = true;
+        }
+      }
+      for (const [series, group] of groups) {
+        group.root.hidden = (visibleBySeries.get(series) ?? 0) === 0;
+      }
+      const visibleCount = [...visibleBySeries.values()].reduce((total, count) => total + count, 0);
+      root.setAttribute('aria-label', `选择手边有的拼豆颜色，当前显示 ${String(visibleCount)} 色`);
+      visibleColorIds = Object.freeze(nextVisibleIds);
+      if (!visibleColorIds.includes(activeColorId ?? '')) {
+        activeColorId = visibleColorIds[0];
+      }
+      updateActivePresentation();
+      if (options.status) {
+        options.status.textContent =
+          visibleCount === 0 ? '没有符合条件的颜色' : `显示 ${String(visibleCount)} 种颜色`;
+      }
+    },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      options.searchInput?.removeEventListener('keydown', onSearchKeydown);
+      options.searchInput?.removeEventListener('compositionstart', onCompositionStart);
+      options.searchInput?.removeEventListener('compositionend', onCompositionEnd);
+    },
+  });
+
+  function ensureGroup(series: string): ColorGroupNodes {
+    const retained = groups.get(series);
+    if (retained) {
+      return retained;
+    }
+    const group = document.createElement('section');
+    const heading = document.createElement('h3');
+    const groupChoices = document.createElement('div');
+    group.className = 'available-color-series-group';
+    group.dataset.availableColorSeriesKey = series;
+    group.setAttribute('aria-label', `${series} 系列`);
+    heading.textContent = `${series} 系列`;
+    group.append(heading, groupChoices);
+    root.append(group);
+    const nodes = Object.freeze({ root: group, choices: groupChoices });
+    groups.set(series, nodes);
+    return nodes;
+  }
+
+  function ensureChoice(color: PrepareColor, group: ColorGroupNodes): ColorChoiceNodes {
+    const retained = choices.get(color.id);
+    if (retained) {
+      if (retained.root.parentElement !== group.choices) {
+        group.choices.append(retained.root);
+      }
+      return retained;
+    }
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    const swatch = document.createElement('span');
+    const code = document.createElement('small');
+    label.className = 'available-color-choice';
+    label.dataset.availableColorKey = color.id;
+    label.id = `${root.id}-option-${safeDomId(color.id)}`;
+    label.setAttribute('role', 'option');
+    input.type = 'checkbox';
+    input.tabIndex = -1;
+    input.dataset.availableColorId = color.id;
+    swatch.className = 'available-color-swatch';
+    swatch.setAttribute('aria-hidden', 'true');
+    label.append(input, swatch, code);
+    group.choices.append(label);
+    const nodes = Object.freeze({ root: label, input, swatch, code });
+    choices.set(color.id, nodes);
+    return nodes;
+  }
+
+  function onCompositionStart(): void {
+    composing = true;
+  }
+
+  function onCompositionEnd(): void {
+    composing = false;
+  }
+
+  function onSearchKeydown(event: KeyboardEvent): void {
+    if (composing || event.isComposing) return;
+    if (visibleColorIds.length === 0) return;
+    const currentIndex = Math.max(0, visibleColorIds.indexOf(activeColorId ?? ''));
+    if (event.key === 'ArrowDown') {
+      activeColorId = visibleColorIds[(currentIndex + 1) % visibleColorIds.length];
+    } else if (event.key === 'ArrowUp') {
+      activeColorId =
+        visibleColorIds[(currentIndex - 1 + visibleColorIds.length) % visibleColorIds.length];
+    } else if (event.key === 'Home') {
+      activeColorId = visibleColorIds[0];
+    } else if (event.key === 'End') {
+      activeColorId = visibleColorIds.at(-1);
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      toggleActiveChoice();
+    } else {
+      return;
+    }
+    event.preventDefault();
+    updateActivePresentation();
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      choices.get(activeColorId ?? '')?.root.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function toggleActiveChoice(): void {
+    if (!activeColorId) return;
+    const choice = choices.get(activeColorId);
+    if (!choice || choice.root.hidden) return;
+    choice.input.checked = !choice.input.checked;
+    choice.root.setAttribute('aria-selected', String(choice.input.checked));
+    options.onToggle?.(activeColorId, choice.input.checked);
+    const EventConstructor = window?.Event;
+    if (EventConstructor) {
+      choice.input.dispatchEvent(new EventConstructor('change', { bubbles: true }));
+    }
+  }
+
+  function updateActivePresentation(): void {
+    const active = activeColorId ? choices.get(activeColorId) : undefined;
+    if (options.searchInput && active && !active.root.hidden) {
+      options.searchInput.setAttribute('aria-activedescendant', active.root.id);
+    } else {
+      options.searchInput?.removeAttribute('aria-activedescendant');
+    }
+    for (const [colorId, choice] of choices) {
+      choice.root.dataset.active = String(colorId === activeColorId && !choice.root.hidden);
+    }
+  }
+}
+
+function updateChoice(choice: ColorChoiceNodes, color: PrepareColor, selected: boolean): void {
+  const label = `${color.paletteLabel} ${color.code}${color.name ? ` · ${color.name}` : ''}`;
+  choice.root.title = label;
+  if (choice.input.checked !== selected) choice.input.checked = selected;
+  choice.input.setAttribute('aria-label', label);
+  choice.root.setAttribute('aria-selected', String(selected));
+  choice.swatch.style.setProperty('--swatch', color.displayHex);
+  choice.code.textContent = color.code;
+}
+
+function positiveFinite(value: number, label: string): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label}必须是正数。`);
+  }
+  return value;
+}
+
+function nonnegativeInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label}必须是非负整数。`);
+  }
+  return value;
+}
+
+function boundedGridDimension(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 300) {
+    throw new Error(`${label}必须在 1 到 300 之间。`);
+  }
+  return value;
+}
+
+function clampInteger(value: number, minimum: number, maximum: number): number {
+  if (!Number.isFinite(value)) {
+    return minimum;
+  }
+  return Math.min(maximum, Math.max(minimum, Math.round(value)));
+}
+
+function numericInput(root: ParentNode, selector: string, fallback: number): number {
+  const value = root.querySelector<HTMLInputElement>(selector)?.valueAsNumber;
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function setInputValue(root: ParentNode, selector: string, value: number): void {
+  const input = root.querySelector<HTMLInputElement>(selector);
+  const nextValue = String(value);
+  if (input && input.value !== nextValue) input.value = nextValue;
+}
+
+function checkPreset(
+  root: ParentNode,
+  name: string,
+  value: PatternSizePreset | BeadSizePreset | ColorCountPreset | ProcessingPreset,
+): void {
+  for (const input of root.querySelectorAll<HTMLInputElement>(`input[name="${name}"]`)) {
+    const checked = input.value === String(value);
+    if (input.checked !== checked) input.checked = checked;
+  }
+}
+
+let availableColorListboxSequence = 0;
+
+function nextAvailableColorListboxId(): number {
+  availableColorListboxSequence += 1;
+  return availableColorListboxSequence;
+}
+
+function safeDomId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+}

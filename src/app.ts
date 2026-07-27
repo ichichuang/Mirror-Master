@@ -1,5 +1,7 @@
 import { ACCEPTED_IMAGE_ACCEPT } from './features/local-image-input/types';
 import { brandConfig } from './brand/brand.config';
+import { EXPORT_TASKS, type ExportTaskDefinition } from './features/export-completion/exportState';
+import { FIRST_USE_HINT_MESSAGE } from './features/pattern-editor/firstUseHint';
 
 export function renderApp(): string {
   return `
@@ -43,6 +45,7 @@ export function renderApp(): string {
         ${renderChartWorkspace()}
       </main>
 
+      <div class="app-overlay-root" data-overlay-root></div>
       <p
         class="app-live visually-hidden"
         role="status"
@@ -58,17 +61,21 @@ function renderUploadWorkspace(): string {
   return `
     <section class="upload-workspace stage-panel" data-upload-workspace aria-labelledby="upload-title">
       <div class="upload-intro">
-        <span class="eyebrow">新建图纸</span>
-        <h1 id="upload-title">从一张图片开始</h1>
-        <p>选择图片类型，我们会给出合适的默认设置。</p>
+        <h1 id="upload-title">开始制作拼豆图纸</h1>
+        <p>先选择要完成的事情，再上传一张图片。</p>
       </div>
 
-      <div class="mode-selector" role="radiogroup" aria-label="图片类型">
-        ${renderModeOption('photo', '照片', '适合人物、宠物与插画', 'ph-image', true)}
-        ${renderModeOption('pixelArt', '像素画', '保留清晰的像素边缘', 'ph-grid-nine')}
-        ${renderModeOption(
-          'existingChart',
-          '已有图纸',
+      <div class="mode-selector task-selector" role="radiogroup" aria-label="制作任务">
+        ${renderTaskOption(
+          'newPattern',
+          '制作新图纸',
+          '上传照片、插画或像素图片，自动选择合适的处理方式',
+          'ph-image-square',
+          true,
+        )}
+        ${renderTaskOption(
+          'mirrorExistingChart',
+          '镜像已有图纸',
           '镜像拼豆格，保留坐标和图例',
           'ph-squares-four',
         )}
@@ -115,7 +122,7 @@ function renderUploadWorkspace(): string {
   `;
 }
 
-function renderModeOption(
+function renderTaskOption(
   value: string,
   title: string,
   description: string,
@@ -124,7 +131,7 @@ function renderModeOption(
 ): string {
   return `
     <label class="mode-option">
-      <input type="radio" name="input-mode" value="${value}" ${checked ? 'checked' : ''} />
+      <input type="radio" name="customer-task" value="${value}" ${checked ? 'checked' : ''} />
       <span class="mode-icon" aria-hidden="true"><i class="ph ${icon}"></i></span>
       <span>
         <strong>${title}</strong>
@@ -142,8 +149,8 @@ function renderPrepareWorkspace(): string {
         <div class="crop-column">
           <div class="stage-heading">
             <div>
-              <span class="eyebrow">准备图片</span>
-              <h1 id="prepare-title">确定图案范围</h1>
+              <span class="eyebrow">制作新图纸</span>
+              <h1 id="prepare-title">裁剪并设置图案</h1>
             </div>
             <button class="text-button" type="button" data-prepare-replace>更换图片</button>
           </div>
@@ -167,65 +174,6 @@ function renderPrepareWorkspace(): string {
             </div>
           </div>
 
-          <fieldset class="crop-numeric-controls" data-crop-numeric-controls>
-            <legend>裁剪位置与大小（%）</legend>
-            <label>
-              <span>左侧 X</span>
-              <input
-                type="number"
-                min="0"
-                max="92"
-                step="0.1"
-                value="0"
-                inputmode="decimal"
-                aria-describedby="crop-keyboard-help"
-                data-crop-x
-              />
-            </label>
-            <label>
-              <span>顶部 Y</span>
-              <input
-                type="number"
-                min="0"
-                max="92"
-                step="0.1"
-                value="0"
-                inputmode="decimal"
-                aria-describedby="crop-keyboard-help"
-                data-crop-y
-              />
-            </label>
-            <label>
-              <span>宽度</span>
-              <input
-                type="number"
-                min="8"
-                max="100"
-                step="0.1"
-                value="100"
-                inputmode="decimal"
-                aria-describedby="crop-keyboard-help"
-                data-crop-width
-              />
-            </label>
-            <label>
-              <span>高度</span>
-              <input
-                type="number"
-                min="8"
-                max="100"
-                step="0.1"
-                value="100"
-                inputmode="decimal"
-                aria-describedby="crop-keyboard-help"
-                data-crop-height
-              />
-            </label>
-          </fieldset>
-          <p id="crop-keyboard-help" class="control-help">
-            聚焦裁剪框后，用方向键移动；按住 Shift 每次移动 5%；按住 Option / Alt 加方向键调整宽高。
-          </p>
-
           <div class="crop-actions" aria-label="图片方向">
             <button class="secondary-button" type="button" data-rotate-left>
               <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
@@ -239,171 +187,354 @@ function renderPrepareWorkspace(): string {
           </div>
         </div>
 
-        <aside class="prepare-settings" aria-label="生成设置">
-          <div class="settings-section">
-            <div class="section-heading">
-              <div>
-                <span class="step-number">1</span>
-                <h2>图纸大小</h2>
+        <aside
+          class="prepare-settings"
+          aria-label="生成设置"
+          data-prepare-picker-surface
+        >
+          <div data-prepare-settings-panel>
+            <section class="settings-section customer-setting">
+              <div class="section-heading">
+                <div>
+                  <span class="step-number">1</span>
+                  <h2>图案大小</h2>
+                </div>
               </div>
-              <span data-size-summary></span>
-            </div>
-            <div class="dimension-inputs">
-              <label>
-                <span>列</span>
-                <input type="number" min="1" max="300" value="48" inputmode="numeric" data-columns />
-              </label>
-              <button
-                class="aspect-lock is-active"
-                type="button"
-                aria-pressed="true"
-                data-aspect-lock
-                aria-label="保持图片比例"
-              >
-                <i class="ph ph-link" aria-hidden="true"></i>
-              </button>
-              <label>
-                <span>行</span>
-                <input type="number" min="1" max="300" value="48" inputmode="numeric" data-rows />
-              </label>
-            </div>
-            <label class="field-row">
-              <span>
-                <strong>拼板</strong>
-                <small data-board-summary>约需 4 块拼板</small>
-              </span>
-              <select data-board-preset>
-                <option value="standardSquare">29 × 29 标准方板</option>
-                <option value="smallSquare">14 × 14 小方板</option>
-                <option value="custom">自定义拼板</option>
-              </select>
-            </label>
-            <fieldset class="custom-board-fields" data-custom-board-fields>
-              <legend>自定义拼板格数</legend>
-              <label>
-                <span>每块列数</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="300"
-                  value="29"
-                  inputmode="numeric"
-                  aria-describedby="custom-board-help"
-                  data-custom-board-columns
-                />
-              </label>
-              <label>
-                <span>每块行数</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="300"
-                  value="29"
-                  inputmode="numeric"
-                  aria-describedby="custom-board-help"
-                  data-custom-board-rows
-                />
-              </label>
-              <small id="custom-board-help">按实际拼板孔位填写，材料估算会按行列分板。</small>
-            </fieldset>
-          </div>
+              <fieldset class="preset-cards preset-cards-three">
+                <legend class="visually-hidden">选择图案大小</legend>
+                ${renderPresetCard('pattern-size-preset', '29', '小巧', '长边 29 颗', false)}
+                ${renderPresetCard('pattern-size-preset', '48', '推荐', '长边 48 颗', true)}
+                ${renderPresetCard('pattern-size-preset', '72', '细致', '长边 72 颗', false)}
+              </fieldset>
+              <div class="dimension-inputs">
+                <label>
+                  <span>宽（颗）</span>
+                  <input type="number" min="1" max="300" value="48" inputmode="numeric" data-columns />
+                </label>
+                <button
+                  class="aspect-lock is-active"
+                  type="button"
+                  aria-pressed="true"
+                  data-aspect-lock
+                  aria-label="保持图片比例"
+                >
+                  <i class="ph ph-link" aria-hidden="true"></i>
+                </button>
+                <label>
+                  <span>高（颗）</span>
+                  <input type="number" min="1" max="300" value="48" inputmode="numeric" data-rows />
+                </label>
+              </div>
+              <p class="custom-pattern-size-state" data-pattern-size-custom hidden>
+                <strong>自定义</strong>
+                <span data-custom-pattern-size>48 × 48 颗</span>
+              </p>
+              <div class="physical-size-summary">
+                <span>预计成品尺寸</span>
+                <strong data-physical-size data-size-summary>约 24.0 × 24.0 cm</strong>
+              </div>
+            </section>
 
-          <div class="settings-section">
-            <div class="section-heading">
-              <div>
-                <span class="step-number">2</span>
-                <h2>选择颜色</h2>
+            <section class="settings-section customer-setting">
+              <div class="section-heading">
+                <div>
+                  <span class="step-number">2</span>
+                  <h2>拼豆规格</h2>
+                </div>
               </div>
-            </div>
-            <label class="field-row">
-              <span>
-                <strong>色板</strong>
-                <small>按手边可用的拼豆选择</small>
-              </span>
-              <select data-palette-id>
-                <option value="mard">MARD · 221 色</option>
-                <option value="default">默认色板 · 39 色</option>
-              </select>
-            </label>
-            <label class="field-row">
-              <span>
-                <strong>最多使用颜色</strong>
-                <small>减少备料种类，更容易完成</small>
-              </span>
-              <input type="number" min="1" max="221" value="24" inputmode="numeric" data-maximum-colors />
-            </label>
-            <details class="available-color-filter" data-available-color-filter>
-              <summary>
+              <fieldset class="preset-cards preset-cards-three">
+                <legend class="visually-hidden">选择拼豆规格</legend>
+                ${renderPresetCard('bead-size-preset', '5', '常规', '5 mm', true)}
+                ${renderPresetCard('bead-size-preset', '2.6', '迷你', '2.6 mm', false)}
+                ${renderPresetCard('bead-size-preset', 'custom', '自定义', '按实际尺寸', false)}
+              </fieldset>
+            </section>
+
+            <section class="settings-section customer-setting">
+              <div class="section-heading">
+                <div>
+                  <span class="step-number">3</span>
+                  <h2>色板与颜色细节</h2>
+                </div>
+              </div>
+              <div class="field-row">
                 <span>
-                  <strong>手边有的颜色</strong>
-                  <small data-available-color-summary>已选择 221 色</small>
+                  <strong>色板</strong>
+                  <small>按手边可用的拼豆选择</small>
                 </span>
-                <i class="ph ph-caret-down" aria-hidden="true"></i>
-              </summary>
-              <div class="available-color-filter-content">
-                <div class="available-color-filter-heading">
-                  <p>取消没有的色号，生成时就不会使用它。</p>
-                  <div>
-                    <button class="text-button" type="button" data-select-all-colors>全部选中</button>
-                    <button class="text-button" type="button" data-clear-all-colors>清除选择</button>
-                  </div>
-                </div>
-                <div class="available-color-controls" role="search" aria-label="筛选可用颜色">
-                  <label>
-                    <span>搜索色号或名称</span>
-                    <input
-                      type="search"
-                      autocomplete="off"
-                      placeholder="例如 A14、海蓝"
-                      data-available-color-search
-                    />
-                  </label>
-                  <label>
-                    <span>系列</span>
-                    <select data-available-color-series>
-                      <option value="">全部系列</option>
-                    </select>
-                  </label>
-                </div>
-                <div
-                  class="available-color-grid"
-                  data-available-color-grid
-                  aria-label="选择手边有的拼豆颜色"
-                ></div>
+                ${renderSelectTrigger('data-palette-id', 'mard', 'MARD · 221 色', '选择色板')}
               </div>
-            </details>
-          </div>
+              <fieldset class="preset-cards preset-cards-three">
+                <legend class="visually-hidden">选择颜色细节</legend>
+                ${renderPresetCard('color-count-preset', '12', '简单', '最多 12 色', false)}
+                ${renderPresetCard('color-count-preset', '24', '推荐', '最多 24 色', true)}
+                ${renderPresetCard('color-count-preset', '48', '细致', '最多 48 色', false)}
+              </fieldset>
+            </section>
 
-          <details class="advanced-settings" data-advanced-settings>
+            <section class="settings-section customer-setting">
+              <div class="section-heading">
+                <div>
+                  <span class="step-number">4</span>
+                  <h2>制作方式</h2>
+                </div>
+              </div>
+              <fieldset class="preset-cards preset-cards-two processing-cards">
+                <legend class="visually-hidden">选择制作方式</legend>
+                ${renderPresetCard('processing-preset', 'easy', '容易制作', '色块清楚，备料更直接', true)}
+                ${renderPresetCard(
+                  'processing-preset',
+                  'gradient',
+                  '模拟渐变',
+                  '用相邻颜色交错表现过渡',
+                  false,
+                )}
+              </fieldset>
+            </section>
+
+            <details class="advanced-settings" data-professional-settings>
             <summary>
               <span>
-                <strong>更多生成设置</strong>
-                <small>默认设置适合大多数照片</small>
+                  <strong>专业设置</strong>
+                  <small>处理方式、拼板和精细参数</small>
               </span>
               <i class="ph ph-caret-down" aria-hidden="true"></i>
             </summary>
             <div class="advanced-settings-content">
-              <fieldset>
-                <legend>格子取色方式</legend>
+                <fieldset class="mode-preference">
+                  <legend>图片处理方式</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="mode-preference"
+                      value="auto"
+                      data-mode-preference="auto"
+                      checked
+                    />
+                    <span>自动推荐<small>根据图片格式和颜色给出建议</small></span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="mode-preference"
+                      value="photo"
+                      data-mode-preference="photo"
+                    />
+                    <span>自然图片<small>适合照片与插画</small></span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="mode-preference"
+                      value="pixelArt"
+                      data-mode-preference="pixelArt"
+                    />
+                    <span>清晰像素<small>保留明确的像素边缘</small></span>
+                  </label>
+                </fieldset>
+                <p
+                  class="recommendation-status"
+                  role="status"
+                  aria-live="polite"
+                  data-mode-recommendation
+                >正在分析图片并准备建议…</p>
+
+                <fieldset class="crop-numeric-controls" data-crop-numeric-controls>
+                  <legend>裁剪位置与大小（%）</legend>
+                  <label>
+                    <span>左侧</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="92"
+                      step="0.1"
+                      value="0"
+                      inputmode="decimal"
+                      aria-describedby="crop-keyboard-help"
+                      data-crop-x
+                    />
+                  </label>
+                  <label>
+                    <span>顶部</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="92"
+                      step="0.1"
+                      value="0"
+                      inputmode="decimal"
+                      aria-describedby="crop-keyboard-help"
+                      data-crop-y
+                    />
+                  </label>
+                  <label>
+                    <span>宽度</span>
+                    <input
+                      type="number"
+                      min="8"
+                      max="100"
+                      step="0.1"
+                      value="100"
+                      inputmode="decimal"
+                      aria-describedby="crop-keyboard-help"
+                      data-crop-width
+                    />
+                  </label>
+                  <label>
+                    <span>高度</span>
+                    <input
+                      type="number"
+                      min="8"
+                      max="100"
+                      step="0.1"
+                      value="100"
+                      inputmode="decimal"
+                      aria-describedby="crop-keyboard-help"
+                      data-crop-height
+                    />
+                  </label>
+                </fieldset>
+                <p id="crop-keyboard-help" class="control-help">
+                  聚焦裁剪框后，用方向键移动；按住 Shift 每次移动 5%；按住 Option / Alt 加方向键调整宽高。
+                </p>
+
+                <div class="field-row">
+                  <span>
+                    <strong>拼板</strong>
+                    <small data-board-summary>约需 4 块拼板</small>
+                  </span>
+                  ${renderSelectTrigger(
+                    'data-board-preset',
+                    'standardSquare',
+                    '29 × 29 标准方板',
+                    '选择拼板',
+                  )}
+                </div>
+                <fieldset class="custom-board-fields" data-custom-board-fields hidden disabled>
+                  <legend>自定义拼板格数</legend>
+                  <label>
+                    <span>每块列数</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="300"
+                      value="29"
+                      inputmode="numeric"
+                      aria-describedby="custom-board-help"
+                      data-custom-board-columns
+                    />
+                  </label>
+                  <label>
+                    <span>每块行数</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="300"
+                      value="29"
+                      inputmode="numeric"
+                      aria-describedby="custom-board-help"
+                      data-custom-board-rows
+                    />
+                  </label>
+                  <small id="custom-board-help">按实际拼板孔位填写，材料估算会按行列分板。</small>
+                </fieldset>
+
+                <label class="field-row">
+                  <span>
+                    <strong>最多使用颜色</strong>
+                    <small>与上方“颜色细节”保持同步</small>
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="221"
+                    value="24"
+                    inputmode="numeric"
+                    data-maximum-colors
+                  />
+                </label>
+
+                <button
+                  class="secondary-button available-color-mobile-trigger"
+                  type="button"
+                  data-open-available-colors
+                >
+                  选择手边有的颜色
+                  <i class="ph ph-caret-right" aria-hidden="true"></i>
+                </button>
+                <section class="available-color-filter" data-available-color-filter>
+                  <div class="available-color-filter-heading">
+                    <span>
+                      <strong>手边有的颜色</strong>
+                      <small data-available-color-summary>已选择 221 色</small>
+                    </span>
+                    <div>
+                      <button class="text-button" type="button" data-select-all-colors>全部选中</button>
+                      <button class="text-button" type="button" data-clear-all-colors>清除选择</button>
+                    </div>
+                  </div>
+                  <p>取消没有的色号，生成时就不会使用它。</p>
+                  <div class="available-color-controls" role="search" aria-label="筛选可用颜色">
+                    <label>
+                      <span>搜索色号或名称</span>
+                      <input
+                        type="search"
+                        autocomplete="off"
+                        placeholder="例如 A14、海蓝"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded="true"
+                        aria-controls="available-color-listbox"
+                        aria-describedby="available-color-filter-status"
+                        data-available-color-search
+                      />
+                    </label>
+                    <div class="selector-field">
+                      <span>系列</span>
+                      ${renderSelectTrigger(
+                        'data-available-color-series',
+                        '',
+                        '全部系列',
+                        '筛选颜色系列',
+                      )}
+                    </div>
+                  </div>
+                  <div
+                    id="available-color-listbox"
+                    class="available-color-grid"
+                    role="listbox"
+                    aria-multiselectable="true"
+                    data-available-color-grid
+                    aria-label="选择手边有的拼豆颜色"
+                  ></div>
+                  <p
+                    id="available-color-filter-status"
+                    class="color-filter-status"
+                    role="status"
+                    aria-live="polite"
+                    data-available-color-filter-status
+                  ></p>
+                </section>
+
+              <fieldset class="sampling-options">
+                  <legend>格子取色方式</legend>
                 <label>
                   <input type="radio" name="sampling" value="average" checked />
-                  <span>平均取色<small>照片更自然</small></span>
+                    <span>平均取色<small>自然图片更平滑</small></span>
                 </label>
                 <label>
                   <input type="radio" name="sampling" value="nearest" />
-                  <span>保留像素<small>像素画更清晰</small></span>
+                    <span>保留像素<small>清晰像素更锐利</small></span>
                 </label>
               </fieldset>
-              <label class="field-row">
+
+                <div class="field-row">
                 <span>
-                  <strong>颜色过渡</strong>
-                  <small>关闭时色块更干净</small>
+                    <strong>颜色接近方式</strong>
+                    <small>与上方“制作方式”保持同步</small>
                 </span>
-                <select data-dithering>
-                  <option value="none">干净色块</option>
-                  <option value="floydSteinberg">细腻过渡</option>
-                </select>
-              </label>
+                  ${renderSelectTrigger('data-dithering', 'none', '干净色块', '选择颜色接近方式')}
+                </div>
               <label class="field-row">
                 <span>
                   <strong>透明区域</strong>
@@ -411,36 +542,39 @@ function renderPrepareWorkspace(): string {
                 </span>
                 <input type="range" min="0" max="1" step="0.05" value="0.1" data-alpha-threshold />
               </label>
-              <label class="field-row">
-                <span>
-                  <strong>单颗拼豆直径</strong>
-                  <small>用于估算成品大小，常见为 5 mm</small>
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  step="0.1"
-                  value="5"
-                  inputmode="decimal"
-                  data-bead-diameter
-                />
-              </label>
-              <label class="field-row">
-                <span>
-                  <strong>相邻拼豆间距</strong>
-                  <small>不能小于单颗直径，常见为 5 mm</small>
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  max="12"
-                  step="0.1"
-                  value="5"
-                  inputmode="decimal"
-                  data-bead-pitch
-                />
-              </label>
+                <fieldset class="custom-bead-fields" data-custom-bead-fields hidden disabled>
+                  <legend>自定义拼豆尺寸</legend>
+                  <label class="field-row">
+                    <span>
+                      <strong>单颗拼豆直径</strong>
+                      <small>用于估算成品大小</small>
+                    </span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      step="0.1"
+                      value="5"
+                      inputmode="decimal"
+                      data-bead-diameter
+                    />
+                  </label>
+                  <label class="field-row">
+                    <span>
+                      <strong>相邻拼豆间距</strong>
+                      <small>不能小于单颗直径</small>
+                    </span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="12"
+                      step="0.1"
+                      value="5"
+                      inputmode="decimal"
+                      data-bead-pitch
+                    />
+                  </label>
+                </fieldset>
             </div>
           </details>
 
@@ -459,9 +593,46 @@ function renderPrepareWorkspace(): string {
             </button>
           </div>
           <p class="inline-status" data-generate-status role="status"></p>
+          </div>
         </aside>
       </div>
     </section>
+  `;
+}
+
+function renderPresetCard(
+  name: string,
+  value: string,
+  title: string,
+  description: string,
+  checked: boolean,
+): string {
+  return `
+    <label class="preset-card">
+      <input type="radio" name="${name}" value="${value}" ${checked ? 'checked' : ''} />
+      <span><strong>${title}</strong><small>${description}</small></span>
+      <i class="ph ph-check" aria-hidden="true"></i>
+    </label>
+  `;
+}
+
+function renderSelectTrigger(
+  dataAttribute: string,
+  value: string,
+  label: string,
+  accessibleLabel: string,
+): string {
+  return `
+    <button
+      class="ui-select-trigger"
+      type="button"
+      ${dataAttribute}
+      data-value="${value}"
+      aria-label="${accessibleLabel}"
+    >
+      <span data-select-label>${label}</span>
+      <i class="ph ph-caret-down" aria-hidden="true"></i>
+    </button>
   `;
 }
 
@@ -509,48 +680,36 @@ function renderPatternWorkspace(): string {
               <i class="ph ph-plus" aria-hidden="true"></i>
             </button>
           </div>
-          <div
-            class="canvas-toolbar-group selection-actions"
-            role="group"
-            data-selection-actions
-            data-selection-active="false"
-            aria-label="选中区域操作"
+          <button
+            class="text-button canvas-jump-toggle"
+            type="button"
+            data-toggle-canvas-jump
+            aria-expanded="false"
+            aria-controls="canvas-jump-panel"
           >
-            <button
-              class="icon-button"
-              type="button"
-              data-selection-action="move"
-              aria-label="选区向右移动一格"
-              disabled
-            >
-              <i class="ph ph-arrows-out-simple" aria-hidden="true"></i>
-            </button>
-            <button
-              class="icon-button"
-              type="button"
-              data-selection-action="copy"
-              aria-label="选区向右复制一格"
-              disabled
-            >
-              <i class="ph ph-squares-four" aria-hidden="true"></i>
-            </button>
-            <button
-              class="icon-button"
-              type="button"
-              data-selection-action="clear"
-              data-clear-selection
-              aria-label="清空选中区域"
-              disabled
-            >
-              <i class="ph ph-trash" aria-hidden="true"></i>
-            </button>
-          </div>
+            <i class="ph ph-crosshair" aria-hidden="true"></i>
+            <span>定位格子</span>
+          </button>
+        </div>
+        <div class="first-use-hint" data-first-use-hint role="status" hidden>
+          <i class="ph ph-hand-pointing" aria-hidden="true"></i>
+          <span>${FIRST_USE_HINT_MESSAGE}</span>
+          <button
+            class="icon-button"
+            type="button"
+            data-dismiss-first-use-hint
+            aria-label="关闭操作提示"
+          >
+            <i class="ph ph-x" aria-hidden="true"></i>
+          </button>
         </div>
         <div class="pattern-canvas-frame">
           <form
+            id="canvas-jump-panel"
             class="canvas-jump-form"
             data-canvas-jump-form
             aria-label="跳转到指定拼豆格"
+            hidden
           >
             <label>
               <span>行</span>
@@ -581,7 +740,37 @@ function renderPatternWorkspace(): string {
             <button class="text-button" type="submit" data-canvas-jump-submit>
               跳转
             </button>
+            <button class="text-button" type="button" data-canvas-jump-cancel>
+              取消
+            </button>
           </form>
+          <div
+            class="selection-context-bar"
+            role="toolbar"
+            aria-label="选中区域操作"
+            data-selection-context
+            hidden
+          >
+            <strong data-selection-description>已选 1 × 1</strong>
+            <div class="selection-context-actions">
+              <button type="button" data-selection-action="copy" aria-pressed="false">
+                <i class="ph ph-squares-four" aria-hidden="true"></i>
+                <span>复制</span>
+              </button>
+              <button type="button" data-selection-action="move" aria-pressed="false">
+                <i class="ph ph-arrows-out-simple" aria-hidden="true"></i>
+                <span>移动</span>
+              </button>
+              <button type="button" data-selection-action="clear" data-clear-selection>
+                <i class="ph ph-trash" aria-hidden="true"></i>
+                <span>清空</span>
+              </button>
+              <button type="button" data-selection-action="cancel">
+                <i class="ph ph-x" aria-hidden="true"></i>
+                <span>取消</span>
+              </button>
+            </div>
+          </div>
           <canvas
             class="pattern-canvas"
             data-pattern-canvas
@@ -615,12 +804,32 @@ function renderPatternWorkspace(): string {
             </button>
           </div>
         </div>
+        ${renderExportCompletionPanel('desktop')}
       </aside>
 
       <section class="workspace-sheet" data-workspace-sheet data-sheet-state="peek" aria-label="编辑控制面板">
-        <button class="sheet-handle" type="button" data-sheet-handle aria-label="展开控制面板">
-          <span aria-hidden="true"></span>
-        </button>
+        <header class="sheet-header" data-sheet-drag-region>
+          <button class="sheet-handle" type="button" data-sheet-handle aria-label="展开控制面板">
+            <span aria-hidden="true"></span>
+          </button>
+          <div class="sheet-peek-summary" data-sheet-peek-summary>
+            <span class="sheet-peek-item">
+              <i class="ph ph-pencil-simple" aria-hidden="true"></i>
+              <span data-sheet-current-tool>画笔</span>
+            </span>
+            <span class="sheet-peek-item">
+              <span
+                class="sheet-summary-swatch"
+                data-sheet-current-color-swatch
+                aria-hidden="true"
+              ></span>
+              <strong data-sheet-current-color>MARD A1</strong>
+            </span>
+            <button class="text-button" type="button" data-sheet-open-tools>
+              工具与颜色
+            </button>
+          </div>
+        </header>
         ${renderInspectorTabs('mobile')}
         ${renderPaletteControls('mobile')}
         <div
@@ -630,6 +839,7 @@ function renderPatternWorkspace(): string {
           aria-labelledby="inspector-mobile-tab-tools"
           tabindex="0"
           data-sheet-content
+          data-mobile-picker-panel
           data-tabpanel-surface="mobile"
         ></div>
         <div class="sheet-primary">
@@ -644,66 +854,8 @@ function renderPatternWorkspace(): string {
             </button>
           </div>
         </div>
+        ${renderExportCompletionPanel('mobile')}
       </section>
-
-      <div
-        class="export-popover"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="export-dialog-title"
-        data-export-popover
-        hidden
-      >
-        <div class="export-heading">
-          <div>
-            <span class="eyebrow">导出当前图纸</span>
-            <h2 id="export-dialog-title">选择文件格式</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-export aria-label="关闭导出选项">
-            <i class="ph ph-x" aria-hidden="true"></i>
-          </button>
-        </div>
-        <label class="export-grid-option">
-          <input type="checkbox" checked data-export-grid />
-          <span>包含网格、坐标和材料图例</span>
-        </label>
-        <fieldset
-          class="export-template-options"
-          data-export-template-options
-          aria-describedby="export-template-help"
-        >
-          <legend>图纸样式</legend>
-          <label>
-            <input
-              type="radio"
-              name="export-template"
-              value="pure"
-              data-export-template="pure"
-            />
-            <span>纯图案<small>只保留拼豆矩阵</small></span>
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="export-template"
-              value="annotated"
-              data-export-template="annotated"
-              checked
-            />
-            <span>带标注<small>包含网格、坐标和材料图例</small></span>
-          </label>
-        </fieldset>
-        <p id="export-template-help" class="control-help">
-          PNG 和 PDF 会使用所选样式；CSV 与项目 JSON 始终保留完整数据。
-        </p>
-        <div class="export-actions">
-          ${renderExportButton('png', 'PNG 图纸', '适合查看与分享', 'ph-image-square')}
-          ${renderExportButton('pdf', 'PDF 打印稿', '按页打印和分板', 'ph-file-pdf')}
-          ${renderExportButton('csv', 'CSV 材料表', '颜色数量与逐格明细', 'ph-table')}
-          ${renderExportButton('json', '项目 JSON', '以后继续编辑', 'ph-brackets-curly')}
-        </div>
-        <p class="inline-status" data-export-status role="status"></p>
-      </div>
     </section>
   `;
 }
@@ -801,9 +953,12 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
       </fieldset>
       <label class="palette-series">
         <span>系列</span>
-        <select data-color-series-filter aria-describedby="color-filter-status-${surface}">
-          <option value="">全部系列</option>
-        </select>
+        ${renderSelectTrigger(
+          'data-color-series-filter',
+          '',
+          '全部系列',
+          `筛选${surface === 'desktop' ? '桌面' : '移动端'}颜色系列`,
+        )}
       </label>
       <p
         id="color-filter-status-${surface}"
@@ -816,19 +971,78 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
   `;
 }
 
-function renderExportButton(
-  format: string,
-  title: string,
-  description: string,
-  icon: string,
-): string {
+function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
   return `
-    <button class="export-option" type="button" data-export-format="${format}">
-      <i class="ph ${icon}" aria-hidden="true"></i>
-      <span><strong>${title}</strong><small>${description}</small></span>
-      <i class="ph ph-arrow-down" aria-hidden="true"></i>
+    <section
+      class="export-completion"
+      aria-labelledby="export-${surface}-title"
+      data-export-completion
+      data-export-surface="${surface}"
+      hidden
+    >
+      <div class="export-heading">
+        <div>
+          <span class="eyebrow">完成当前图纸</span>
+          <h2 id="export-${surface}-title">选择接下来要做的事</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-export aria-label="返回编辑">
+          <i class="ph ph-arrow-left" aria-hidden="true"></i>
+        </button>
+      </div>
+      <p class="export-summary" data-export-summary>当前图纸已可分享、打印或继续保存。</p>
+      <div class="export-task-grid" role="group" aria-label="导出任务">
+        ${EXPORT_TASKS.map((task) => renderExportTask(task)).join('')}
+      </div>
+      <fieldset class="export-template-options" data-export-template-options>
+        <legend>分享图片样式</legend>
+        <label>
+          <input
+            type="radio"
+            name="export-template-${surface}"
+            value="pure"
+            data-export-template="pure"
+          />
+          <span>纯图案<small>透明背景，只保留拼豆图案</small></span>
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="export-template-${surface}"
+            value="annotated"
+            data-export-template="annotated"
+            checked
+          />
+          <span>带标注<small>包含网格、坐标和材料图例</small></span>
+        </label>
+      </fieldset>
+      <button class="primary-button export-run" type="button" data-export-run>
+        下载分享图片
+      </button>
+      <p class="inline-status" data-export-status role="status" aria-live="polite"></p>
+    </section>
+  `;
+}
+
+function renderExportTask(task: ExportTaskDefinition): string {
+  return `
+    <button
+      class="export-task ${task.id === 'shareImage' ? 'is-active' : ''}"
+      type="button"
+      data-export-task="${task.id}"
+      data-export-format="${task.format}"
+      aria-pressed="${task.id === 'shareImage' ? 'true' : 'false'}"
+    >
+      <i class="ph ${exportTaskIcon(task.id)}" aria-hidden="true"></i>
+      <span><strong>${task.label}</strong><small>${task.description}</small></span>
     </button>
   `;
+}
+
+function exportTaskIcon(task: ExportTaskDefinition['id']): string {
+  if (task === 'shareImage') return 'ph-image-square';
+  if (task === 'printMaking') return 'ph-file-pdf';
+  if (task === 'materialsList') return 'ph-table';
+  return 'ph-brackets-curly';
 }
 
 function renderChartWorkspace(): string {

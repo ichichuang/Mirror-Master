@@ -22,22 +22,21 @@
 
 .ph-arrow-clockwise::before { content: "\E036"; }
 .ph-arrow-counter-clockwise::before { content: "\E038"; }
-.ph-arrow-down::before { content: "\E03E"; }
+.ph-arrow-left::before { content: "\E058"; }
 .ph-arrow-right::before { content: "\E06C"; }
 .ph-arrow-u-up-left::before { content: "\E08A"; }
 .ph-arrow-u-up-right::before { content: "\E08C"; }
-.ph-arrows-down-up::before { content: "\E098"; }
-.ph-arrows-left-right::before { content: "\E0A0"; }
 .ph-arrows-out-simple::before { content: "\E0A6"; }
 .ph-brackets-curly::before { content: "\E860"; }
 .ph-caret-down::before { content: "\E136"; }
+.ph-caret-right::before { content: "\E13A"; }
 .ph-check::before { content: "\E182"; }
+.ph-crosshair::before { content: "\E1D6"; }
 .ph-eraser::before { content: "\E21E"; }
 .ph-export::before { content: "\EAF0"; }
 .ph-eyedropper::before { content: "\E568"; }
 .ph-file-pdf::before { content: "\E702"; }
-.ph-grid-nine::before { content: "\EC8C"; }
-.ph-image::before { content: "\E2CA"; }
+.ph-hand-pointing::before { content: "\E29A"; }
 .ph-image-square::before { content: "\E2CC"; }
 .ph-link::before { content: "\E2E2"; }
 .ph-minus::before { content: "\E32A"; }

@@ -15,6 +15,13 @@ export interface SelectionOperationResult {
   readonly selection: CellSelection | null;
 }
 
+export interface SelectionCellSnapshot {
+  readonly selection: CellSelection;
+  readonly cells: readonly (readonly BeadCell[])[];
+}
+
+export type SelectionTransferOperation = 'copy' | 'move';
+
 interface SelectionCell {
   readonly rowOffset: number;
   readonly columnOffset: number;
@@ -39,6 +46,65 @@ export function selectionContains(selection: CellSelection, row: number, column:
     row <= normalized.endRow &&
     column >= normalized.startColumn &&
     column <= normalized.endColumn
+  );
+}
+
+export function createSelectionCellSnapshot(
+  cells: readonly (readonly BeadCell[])[],
+  selection: CellSelection,
+): SelectionCellSnapshot | null {
+  const normalized = clipSelection(selection, cells);
+  if (!normalized) {
+    return null;
+  }
+  return Object.freeze({
+    selection: normalized,
+    cells: Object.freeze(
+      cells
+        .slice(normalized.startRow, normalized.endRow + 1)
+        .map((row) => Object.freeze(row.slice(normalized.startColumn, normalized.endColumn + 1))),
+    ),
+  });
+}
+
+export function getSelectionTransferPreviewCell(
+  cells: readonly (readonly BeadCell[])[],
+  snapshot: SelectionCellSnapshot,
+  operation: SelectionTransferOperation,
+  deltaRow: number,
+  deltaColumn: number,
+  row: number,
+  column: number,
+): BeadCell | null {
+  const baseCell = cells[row]?.[column];
+  if (!baseCell) {
+    return null;
+  }
+  const sourceRow = row - deltaRow;
+  const sourceColumn = column - deltaColumn;
+  if (normalizedSelectionContains(snapshot.selection, sourceRow, sourceColumn)) {
+    return (
+      snapshot.cells[sourceRow - snapshot.selection.startRow]?.[
+        sourceColumn - snapshot.selection.startColumn
+      ] ?? baseCell
+    );
+  }
+  if (operation === 'move' && normalizedSelectionContains(snapshot.selection, row, column)) {
+    return EMPTY_CELL;
+  }
+  return baseCell;
+}
+
+function normalizedSelectionContains(
+  selection: CellSelection,
+  row: number,
+  column: number,
+): boolean {
+  return (
+    row >= selection.startRow &&
+    row <= selection.endRow &&
+    column >= selection.startColumn &&
+    column <= selection.endColumn
   );
 }
 
@@ -92,6 +158,21 @@ function translateSelectedCells(
   }
 
   const source = snapshotSelection(cells, normalized);
+  const hasValidDestination = source.some((entry) =>
+    isInBounds(
+      cells,
+      normalized.startRow + entry.rowOffset + deltaRow,
+      normalized.startColumn + entry.columnOffset + deltaColumn,
+    ),
+  );
+  if (!hasValidDestination) {
+    return Object.freeze({
+      cells,
+      changes: Object.freeze([]),
+      selection: normalized,
+    });
+  }
+
   const draft = new MatrixDraft(cells);
   if (clearSource) {
     for (const entry of source) {

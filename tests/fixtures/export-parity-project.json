@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "1.0",
+  "id": "export-parity-project",
+  "createdAt": "2026-07-24T00:00:00.000Z",
+  "updatedAt": "2026-07-24T00:00:00.000Z",
+  "mode": "pixelArt",
+  "source": {
+    "fileName": "shared-golden.png",
+    "mimeType": "image/png",
+    "naturalWidth": 3,
+    "naturalHeight": 2,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "crop": {
+      "x": 0,
+      "y": 0,
+      "width": 3,
+      "height": 2
+    },
+    "rotation": 0
+  },
+  "grid": {
+    "rows": 2,
+    "columns": 3,
+    "aspectLocked": true,
+    "beadDiameterMm": 1.25,
+    "beadPitchMm": 1.25,
+    "boardPresetId": "custom",
+    "boardRows": 2,
+    "boardColumns": 2
+  },
+  "palette": {
+    "paletteId": "default",
+    "paletteVersion": "2026-07-24",
+    "availableColorIds": ["default:A01", "default:A06", "default:B01"],
+    "maximumColors": 3
+  },
+  "generation": {
+    "sampling": "nearest",
+    "colorDistance": "ciede2000",
+    "dithering": "none",
+    "alphaEmptyThreshold": 0.0
+  },
+  "cells": [
+    [
+      {
+        "kind": "bead",
+        "colorId": "default:A01"
+      },
+      {
+        "kind": "empty"
+      },
+      {
+        "kind": "bead",
+        "colorId": "default:B01"
+      }
+    ],
+    [
+      {
+        "kind": "bead",
+        "colorId": "default:B01"
+      },
+      {
+        "kind": "bead",
+        "colorId": "default:A06"
+      },
+      {
+        "kind": "empty"
+      }
+    ]
+  ],
+  "revision": 17
+}

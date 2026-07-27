@@ -103,11 +103,7 @@ export async function exportPattern(
     signal,
   );
   if (response.headers.get('X-Project-Revision') !== String(project.revision)) {
-    throw new PatternApiError(
-      502,
-      'EXPORT_REVISION_MISMATCH',
-      '导出响应与当前矩阵版本不一致，请重新导出。',
-    );
+    throw new PatternApiError(502, 'EXPORT_REVISION_MISMATCH', '图纸已更新，请重新导出');
   }
   return response.blob();
 }

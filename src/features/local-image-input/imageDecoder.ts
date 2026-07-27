@@ -1,8 +1,21 @@
-import type { ImageDimensions } from './types';
+import type { DecodedImageResource, ImageDimensions } from './types';
 
-export function decodeImageFromObjectUrl(objectUrl: string): Promise<ImageDimensions> {
+export type HtmlImageElementFactory = () => HTMLImageElement;
+
+export async function decodeImageFromObjectUrl(
+  objectUrl: string,
+  createImage: HtmlImageElementFactory = () => new Image(),
+): Promise<ImageDimensions> {
+  const resource = await decodeImageResourceFromObjectUrl(objectUrl, createImage);
+  return Object.freeze({ width: resource.width, height: resource.height });
+}
+
+export function decodeImageResourceFromObjectUrl(
+  objectUrl: string,
+  createImage: HtmlImageElementFactory = () => new Image(),
+): Promise<DecodedImageResource> {
   return new Promise((resolve, reject) => {
-    const image = new Image();
+    const image = createImage();
 
     const cleanup = (): void => {
       image.onload = null;
@@ -19,7 +32,7 @@ export function decodeImageFromObjectUrl(objectUrl: string): Promise<ImageDimens
         return;
       }
 
-      resolve({ width, height });
+      resolve(Object.freeze({ width, height, image }));
     };
 
     image.onerror = () => {

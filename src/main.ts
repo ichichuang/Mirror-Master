@@ -5,12 +5,7 @@ import './styles/page.css';
 
 import { renderApp } from './app';
 import { brandConfig } from './brand/brand.config';
-import {
-  captureProjectRevision,
-  exportProjectCsv,
-  exportProjectJson,
-  safeDownloadBaseName,
-} from './domain/export';
+import { safeDownloadBaseName } from './domain/export';
 import { MatrixHistory } from './domain/history';
 import {
   calculatePhysicalLayout,
@@ -26,7 +21,6 @@ import {
   FALLBACK_APP_CAPABILITIES,
   loadAppCapabilities,
   type AppCapabilities,
-  type AppPngTemplate,
 } from './features/app-capabilities/capabilities';
 import {
   applyCropKeyboardStep,
@@ -39,29 +33,101 @@ import {
   type GridDetectionContract,
 } from './features/grid-api/client';
 import { mountGridEditor, type GridEditorController } from './features/grid-editor/gridEditor';
-import { decodeImageFromObjectUrl } from './features/local-image-input/imageDecoder';
+import { decodeImageResourceFromObjectUrl } from './features/local-image-input/imageDecoder';
 import {
   formatFileSize,
   validateSingleImageFile,
 } from './features/local-image-input/fileValidation';
 import { createObjectUrlStore } from './features/local-image-input/objectUrlStore';
 import {
+  calculateSheetSnapPoints,
+  createSheetMotionState,
   dragSheetHeight,
-  snapSheetHeight,
+  reduceSheetMotion,
+  type SheetMotionState,
   type SheetSnapPoints,
   type SheetState,
 } from './features/mobile-sheet/sheetMath';
-import {
-  filterPaletteColors,
-  groupPaletteColorsBySeries,
-  pushRecentColor,
-} from './features/palette-controls/paletteControls';
+import { filterPaletteColors, pushRecentColor } from './features/palette-controls/paletteControls';
 import {
   mountPatternCanvas,
   type CellSelection,
   type EditorTool,
   type PatternCanvasController,
+  type SelectionTransferMode,
+  type SelectionViewportRect,
 } from './features/pattern-editor/canvasEditor';
+import {
+  createFirstUseHintSession,
+  type FirstUseGesture,
+} from './features/pattern-editor/firstUseHint';
+import {
+  describeSelection,
+  positionSelectionContextBar,
+  type ViewportRect,
+} from './features/pattern-editor/selectionContext';
+import { recommendDecodedImageMode } from './features/customer-flow/imageRecommendation';
+import {
+  setModePreference,
+  updateRecommendation,
+  type NewPatternPrepareState,
+} from './features/customer-flow/prepareState';
+import { dimensionsForLongEdge } from './features/customer-flow/presets';
+import {
+  type CustomerTask,
+  type ModePreference,
+  type NewPatternMode,
+} from './features/customer-flow/modeRecommendation';
+import {
+  createExportCoordinator,
+  type ExportCoordinatorEvent,
+} from './features/export-completion/exportCoordinator';
+import {
+  beginExport,
+  closeExportCompletion,
+  completeExport,
+  createExportCompletionState,
+  exportTaskDefinition,
+  failExport,
+  openExportCompletion,
+  selectExportTask,
+  setExportPngTemplate,
+  type ExportCompletionState,
+  type ExportPngTemplate,
+  type ExportTaskId,
+} from './features/export-completion/exportState';
+import {
+  createAdaptiveSelectController,
+  type AdaptiveSelectController,
+} from './features/prepare-workspace/adaptiveSelect';
+import {
+  createAvailableColorMobilePanel,
+  type AvailableColorMobilePanelController,
+} from './features/prepare-workspace/availableColorMobilePanel';
+import {
+  createAvailableColorGridRenderer,
+  createLatestSourceRequest,
+  createNewImagePrepareDefaults,
+  hasAvailableColorSelection,
+  mountPreparePresetControls,
+  resolveSupportedNewPatternMode,
+  syncCropNumericInputValues,
+  type AvailableColorGridRenderer,
+  type PreparePresetControlsController,
+} from './features/prepare-workspace/prepareWorkspace';
+import {
+  beginUploadedImage,
+  chooseSampling,
+  createAutomaticSampling,
+  flowFromImportedProject,
+  recommendSampling,
+  resetFlowForReplacement,
+  syncSamplingControls,
+  syncUploadPrepareControls,
+  type SamplingSelection,
+  type SamplingValue,
+  type UploadPrepareFlow,
+} from './features/prepare-workspace/prepareSession';
 import {
   exportPattern,
   generatePattern,
@@ -73,15 +139,41 @@ import {
   parseProjectJsonText,
   ProjectImportError,
 } from './features/project-import/projectImport';
+import {
+  createMobilePicker,
+  createUiSelectPopover,
+  type MobilePickerController,
+  type UiSelectPopoverController,
+} from './features/ui-select/uiSelect';
+import type { UiSelectOption } from './features/ui-select/state';
+import {
+  captureWorkspaceSurfaceFocus,
+  createResponsiveWorkspaceMount,
+  resolveWorkspaceLayout,
+  restoreWorkspaceSurfaceFocus,
+  type ResponsiveWorkspaceMount,
+  type WorkspaceLayoutMode,
+} from './features/workspace-layout/layout';
+import {
+  createWorkspacePanels,
+  type WorkspacePanelsController,
+  type WorkspacePanelsView,
+} from './features/workspace-panels/workspacePanels';
 
 type AppStage = 'upload' | 'prepare' | 'editor' | 'chart';
 type InspectorPanel = 'tools' | 'palette' | 'materials' | 'settings';
+type SelectController = Pick<
+  UiSelectPopoverController | MobilePickerController,
+  'destroy' | 'selectedId' | 'setOptions' | 'setValue'
+>;
 
 interface SelectedImage {
   readonly file: File;
   readonly objectUrl: string;
   readonly width: number;
   readonly height: number;
+  readonly image: HTMLImageElement;
+  readonly mimeType: string;
 }
 
 interface CropPercent {
@@ -122,11 +214,43 @@ const appLive = required(app, '[data-app-live]', HTMLElement);
 const sessionStatus = required(app, '[data-session-status]', HTMLElement);
 const headerContext = required(app, '[data-header-context]', HTMLElement);
 const headerReplace = required(app, '[data-replace-image]', HTMLButtonElement);
+const overlayRoot = required(app, '[data-overlay-root]', HTMLElement);
+const workspaceToolRail = required(patternWorkspace, '[data-tool-rail]', HTMLElement);
+const workspaceInspector = required(patternWorkspace, '[data-workspace-inspector]', HTMLElement);
+const workspaceSheet = required(patternWorkspace, '[data-workspace-sheet]', HTMLElement);
+const workspaceSheetHandle = required(workspaceSheet, '[data-sheet-handle]', HTMLButtonElement);
+const desktopInspectorContent = required(
+  workspaceInspector,
+  '[data-inspector-content]',
+  HTMLElement,
+);
+const mobileSheetContent = required(workspaceSheet, '[data-sheet-content]', HTMLElement);
+const patternCanvasFrame = required(patternWorkspace, '.pattern-canvas-frame', HTMLElement);
+const selectionContextBar = required(patternCanvasFrame, '[data-selection-context]', HTMLElement);
+const selectionDescription = required(
+  selectionContextBar,
+  '[data-selection-description]',
+  HTMLElement,
+);
+const firstUseHint = required(patternWorkspace, '[data-first-use-hint]', HTMLElement);
+const workspaceSurfaceRoots = Object.freeze([workspaceInspector, workspaceSheet]);
+const workspacePanelControllers: readonly WorkspacePanelsController[] = Object.freeze([
+  createWorkspacePanels(desktopInspectorContent),
+  createWorkspacePanels(mobileSheetContent),
+]);
 
 const objectUrls = createObjectUrlStore();
+const recommendationRequests = createLatestSourceRequest();
+const firstUseHintSession = createFirstUseHintSession();
 let appCapabilities: AppCapabilities = FALLBACK_APP_CAPABILITIES;
 let stage: AppStage = 'upload';
+let customerTask: CustomerTask = 'newPattern';
 let mode: ProjectMode = 'photo';
+let prepareState: NewPatternPrepareState | null = null;
+let samplingSelection: SamplingSelection = createAutomaticSampling(
+  'photo',
+  FALLBACK_APP_CAPABILITIES.sampling,
+);
 let selectedImage: SelectedImage | null = null;
 let rotation: ImageRotation = 0;
 let cropPercent: CropPercent = { x: 0, y: 0, width: 100, height: 100 };
@@ -138,7 +262,11 @@ let canvasController: PatternCanvasController | null = null;
 let gridContract: GridDetectionContract | null = null;
 let activePanel: InspectorPanel = 'tools';
 let sheetState: SheetState = 'peek';
+let sheetMotionState: SheetMotionState | null = null;
 let currentSelection: CellSelection | null = null;
+let currentSelectionViewportRect: SelectionViewportRect | null = null;
+let selectionTransferMode: SelectionTransferMode = null;
+let selectionContextPositionFrame = 0;
 let selectedColorId = 'mard:A1';
 let availableColorIds = new Set(getPalette('mard').colorIds);
 let activeTool: EditorTool = 'paint';
@@ -148,19 +276,57 @@ let paletteSeries = '';
 let prepareColorQuery = '';
 let prepareColorSeries = '';
 let recentColorIds: readonly string[] = Object.freeze([]);
-let renderedInspectorPanel: InspectorPanel | null = null;
 let generationController: AbortController | null = null;
-let exportController: AbortController | null = null;
+let exportCompletionState: ExportCompletionState = createExportCompletionState();
+let exportReturnFocus: HTMLElement | null = null;
 let chartMirrorController: AbortController | null = null;
 let chartResultUrl: string | null = null;
 let chartAxis: 'horizontal' | 'vertical' = 'horizontal';
 let loadRevision = 0;
+let preparePresetControls: PreparePresetControlsController | null = null;
+let availableColorGridRenderer: AvailableColorGridRenderer | null = null;
+let availableColorMobilePanelController: AvailableColorMobilePanelController | null = null;
+let boardSelectController: AdaptiveSelectController | null = null;
+let paletteSelectController: AdaptiveSelectController | null = null;
+let availableSeriesSelectController: AdaptiveSelectController | null = null;
+let ditheringSelectController: AdaptiveSelectController | null = null;
+let editorSeriesSelectControllers: readonly SelectController[] = Object.freeze([]);
+let editorDesktopSeriesController: UiSelectPopoverController | null = null;
+let editorMobileSeriesController: MobilePickerController | null = null;
+let workspaceLayoutMode: WorkspaceLayoutMode | null = null;
+let syncingPreparePresetCrop = false;
+
+const exportCoordinator = createExportCoordinator({
+  requestPatternExport: ({ project, format, template, signal }) =>
+    exportPattern(project, format, template, signal),
+  isOnline: () => navigator.onLine,
+  now: () => new Date(),
+  createObjectURL: (blob) => URL.createObjectURL(blob),
+  revokeObjectURL: (objectUrl) => {
+    URL.revokeObjectURL(objectUrl);
+  },
+  triggerDownload: triggerObjectUrlDownload,
+  schedule: (callback) => {
+    window.setTimeout(callback, 0);
+  },
+  onEvent: handleExportEvent,
+});
 
 setupUpload();
 setupPrepare();
 setupPatternWorkspace();
+const responsiveWorkspaceMount: ResponsiveWorkspaceMount = createResponsiveWorkspaceMount({
+  root: patternWorkspace,
+  inspector: workspaceInspector,
+  sheet: workspaceSheet,
+});
+updateWorkspaceLayout();
 const gridController: GridEditorController = setupChartWorkspace();
 setupReplacementActions();
+window.addEventListener('resize', updateWorkspaceLayout);
+window.addEventListener('orientationchange', updateWorkspaceLayout);
+window.visualViewport?.addEventListener('resize', handleVisualViewportChange);
+window.visualViewport?.addEventListener('scroll', handleVisualViewportChange);
 window.addEventListener('beforeunload', cleanup);
 showStage('upload');
 void initializeCapabilities();
@@ -173,9 +339,7 @@ async function initializeCapabilities(): Promise<void> {
   appCapabilities = paletteMismatch ? FALLBACK_APP_CAPABILITIES : resolution.capabilities;
   applyCapabilitiesToInterface();
 
-  const warning = paletteMismatch
-    ? '服务色板版本与应用不一致，已使用内置兼容配置。'
-    : resolution.message;
+  const warning = paletteMismatch ? '在线色板暂不可用，已切换到内置色板。' : resolution.message;
   capabilitiesStatus.textContent = warning ?? '';
   capabilitiesStatus.hidden = warning === null;
 }
@@ -190,18 +354,25 @@ function applyCapabilitiesToInterface(): void {
   required(app, '[data-upload-constraints]', HTMLElement).textContent =
     `${mimeLabels}，最大 ${formatFileSize(appCapabilities.upload.maximumBytes)}`;
 
-  const modeInputs = [...app.querySelectorAll<HTMLInputElement>('input[name="input-mode"]')];
-  for (const input of modeInputs) {
-    input.disabled = !appCapabilities.modes.includes(input.value as ProjectMode);
+  const taskInputs = [...app.querySelectorAll<HTMLInputElement>('input[name="customer-task"]')];
+  const newPatternSupported = appCapabilities.modes.some(
+    (candidate) => candidate === 'photo' || candidate === 'pixelArt',
+  );
+  for (const input of taskInputs) {
+    input.disabled =
+      input.value === 'newPattern'
+        ? !newPatternSupported
+        : !appCapabilities.modes.includes('existingChart');
   }
-  const currentModeInput = modeInputs.find((input) => input.value === mode);
-  if (!currentModeInput || currentModeInput.disabled) {
-    const fallbackMode = modeInputs.find((input) => !input.disabled);
-    if (fallbackMode && isProjectMode(fallbackMode.value)) {
-      fallbackMode.checked = true;
-      mode = fallbackMode.value;
+  const selectedTask = taskInputs.find((input) => input.value === customerTask);
+  if (!selectedTask || selectedTask.disabled) {
+    const fallbackTask = taskInputs.find((input) => !input.disabled);
+    if (fallbackTask && isCustomerTask(fallbackTask.value)) {
+      customerTask = fallbackTask.value;
+      prepareState = null;
     }
   }
+  syncUploadPrepareControls(app, currentUploadPrepareFlow());
 
   applyIntegerLimits(
     required(prepareWorkspace, '[data-columns]', HTMLInputElement),
@@ -234,44 +405,75 @@ function applyCapabilitiesToInterface(): void {
     appCapabilities.boards.custom.maximumColumns,
   );
 
-  const boardSelect = required(prepareWorkspace, '[data-board-preset]', HTMLSelectElement);
-  for (const option of [...boardSelect.options]) {
-    option.disabled =
-      option.value !== 'custom' &&
-      !Object.hasOwn(appCapabilities.boards.fixedPresets, option.value);
-  }
-  if (boardSelect.selectedOptions[0]?.disabled) {
-    const fallback = [...boardSelect.options].find((option) => !option.disabled);
-    if (fallback) {
-      boardSelect.value = fallback.value;
+  const boardOptions = boardSelectOptions().map((option) =>
+    Object.freeze({
+      ...option,
+      disabled:
+        option.id !== 'custom' && !Object.hasOwn(appCapabilities.boards.fixedPresets, option.id),
+    }),
+  );
+  boardSelectController?.setOptions(boardOptions);
+  const currentBoard = selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare');
+  if (boardOptions.find((option) => option.id === currentBoard)?.disabled) {
+    const fallbackBoard = boardOptions.find((option) => !option.disabled);
+    if (fallbackBoard) {
+      boardSelectController?.setValue(fallbackBoard.id);
     }
   }
+  const customBoardFields = required(
+    prepareWorkspace,
+    '[data-custom-board-fields]',
+    HTMLFieldSetElement,
+  );
+  const customBoardSelected =
+    selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare') === 'custom';
+  customBoardFields.hidden = !customBoardSelected;
+  customBoardFields.disabled = !customBoardSelected;
 
   for (const input of prepareWorkspace.querySelectorAll<HTMLInputElement>(
     'input[name="sampling"]',
   )) {
     input.disabled = !appCapabilities.sampling.includes(input.value as 'average' | 'nearest');
   }
-  for (const option of [
-    ...required(prepareWorkspace, '[data-dithering]', HTMLSelectElement).options,
-  ]) {
-    option.disabled = !appCapabilities.dithering.includes(
-      option.value as 'none' | 'floydSteinberg',
+  if (!appCapabilities.sampling.includes(samplingSelection.value)) {
+    samplingSelection = createAutomaticSampling(
+      firstSupportedNewPatternMode(),
+      appCapabilities.sampling,
     );
   }
-  for (const button of patternWorkspace.querySelectorAll<HTMLButtonElement>(
-    '[data-export-format]',
-  )) {
+  syncSamplingControls(prepareWorkspace, samplingSelection);
+  const ditheringOptions = ditheringSelectOptions().map((option) =>
+    Object.freeze({
+      ...option,
+      disabled: !appCapabilities.dithering.includes(option.id as 'none' | 'floydSteinberg'),
+    }),
+  );
+  ditheringSelectController?.setOptions(ditheringOptions);
+  const selectedDithering =
+    ditheringSelectController?.selectedId() ??
+    selectValue(prepareWorkspace, '[data-dithering]', 'none');
+  if (ditheringOptions.find((option) => option.id === selectedDithering)?.disabled) {
+    const fallbackDithering = ditheringOptions.find((option) => !option.disabled);
+    if (fallbackDithering) {
+      ditheringSelectController?.setValue(fallbackDithering.id);
+      preparePresetControls?.setDithering(
+        fallbackDithering.id === 'floydSteinberg' ? 'floydSteinberg' : 'none',
+      );
+    }
+  } else {
+    preparePresetControls?.setDithering(
+      selectedDithering === 'floydSteinberg' ? 'floydSteinberg' : 'none',
+    );
+  }
+  for (const button of queryPatternWorkspaceAll('[data-export-format]', HTMLButtonElement)) {
     const format =
       button.dataset.exportFormat === 'json' ? 'projectJson' : button.dataset.exportFormat;
     button.disabled = !appCapabilities.exports.includes(
       format as 'png' | 'pdf' | 'csv' | 'projectJson',
     );
   }
-  for (const input of patternWorkspace.querySelectorAll<HTMLInputElement>(
-    '[data-export-template]',
-  )) {
-    input.disabled = !appCapabilities.pngTemplates.includes(input.value as AppPngTemplate);
+  for (const input of queryPatternWorkspaceAll('[data-export-template]', HTMLInputElement)) {
+    input.disabled = !appCapabilities.pngTemplates.includes(input.value as ExportPngTemplate);
     if (input.checked && input.disabled) {
       input.checked = false;
     }
@@ -279,37 +481,42 @@ function applyCapabilitiesToInterface(): void {
   const supportedTemplate = appCapabilities.pngTemplates.includes('annotated')
     ? 'annotated'
     : (appCapabilities.pngTemplates[0] ?? 'annotated');
-  const checkedTemplate = patternWorkspace.querySelector<HTMLInputElement>(
-    'input[name="export-template"]:checked',
-  );
-  if (!checkedTemplate) {
-    const fallbackTemplate = patternWorkspace.querySelector<HTMLInputElement>(
-      `[data-export-template="${supportedTemplate}"]`,
-    );
-    if (fallbackTemplate) {
-      fallbackTemplate.checked = true;
+  if (!appCapabilities.pngTemplates.includes(exportCompletionState.pngTemplate)) {
+    exportCompletionState = setExportPngTemplate(exportCompletionState, supportedTemplate);
+  }
+  for (const panel of queryPatternWorkspaceAll('[data-export-completion]', HTMLElement)) {
+    const checkedTemplate = panel.querySelector<HTMLInputElement>('[data-export-template]:checked');
+    if (!checkedTemplate) {
+      const fallbackTemplate = panel.querySelector<HTMLInputElement>(
+        `[data-export-template="${supportedTemplate}"]`,
+      );
+      if (fallbackTemplate) {
+        fallbackTemplate.checked = true;
+      }
     }
   }
-  const includeGrid = patternWorkspace.querySelector<HTMLInputElement>('[data-export-grid]');
-  if (includeGrid) {
-    includeGrid.disabled = appCapabilities.pngTemplates.length < 2;
-    includeGrid.checked =
-      patternWorkspace.querySelector<HTMLInputElement>('input[name="export-template"]:checked')
-        ?.value === 'annotated';
-  }
+  syncExportCompletionUi();
   for (const button of chartWorkspace.querySelectorAll<HTMLButtonElement>('[data-chart-axis]')) {
     button.disabled = !appCapabilities.gridMirrorAxes.includes(
       button.dataset.chartAxis as 'horizontal' | 'vertical',
     );
   }
+  if (prepareState) {
+    applyPrepareModeState();
+  }
 }
 
 function setupUpload(): void {
-  for (const input of app.querySelectorAll<HTMLInputElement>('input[name="input-mode"]')) {
+  for (const input of app.querySelectorAll<HTMLInputElement>('input[name="customer-task"]')) {
     input.addEventListener('change', () => {
-      if (input.checked && isProjectMode(input.value)) {
-        mode = input.value;
-        updateSamplingDefault();
+      if (input.checked && isCustomerTask(input.value)) {
+        customerTask = input.value;
+        recommendationRequests.cancel();
+        prepareState = null;
+        mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
+        samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
+        syncUploadPrepareControls(app, currentUploadPrepareFlow());
+        syncSamplingControls(prepareWorkspace, samplingSelection);
       }
     });
   }
@@ -354,23 +561,24 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     return;
   }
   generationController?.abort();
-  exportController?.abort();
+  exportCoordinator.invalidate();
   chartMirrorController?.abort();
+  recommendationRequests.cancel();
   setFileStatus(`正在读取 ${result.file.name}…`, 'loading');
   objectUrls.revokeAll();
   const objectUrl = objectUrls.create(result.file);
 
   try {
-    const dimensions = await decodeImageFromObjectUrl(objectUrl);
+    const resource = await decodeImageResourceFromObjectUrl(objectUrl);
     if (requestRevision !== loadRevision) {
       objectUrls.revoke(objectUrl);
       return;
     }
-    if (dimensions.width * dimensions.height > appCapabilities.upload.maximumDecodedPixels) {
+    if (resource.width * resource.height > appCapabilities.upload.maximumDecodedPixels) {
       objectUrls.revoke(objectUrl);
       selectedImage = null;
       setFileStatus(
-        `图片解码后共有 ${String(dimensions.width * dimensions.height)} 像素，超过 ${String(
+        `图片解码后共有 ${String(resource.width * resource.height)} 像素，超过 ${String(
           appCapabilities.upload.maximumDecodedPixels,
         )} 像素上限。请缩小图片后重试。`,
         'error',
@@ -380,8 +588,10 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     selectedImage = {
       file: result.file,
       objectUrl,
-      width: dimensions.width,
-      height: dimensions.height,
+      width: resource.width,
+      height: resource.height,
+      image: resource.image,
+      mimeType: result.mimeType,
     };
     rotation = 0;
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
@@ -391,10 +601,26 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     canvasController = null;
     projectFileStatus.textContent = '';
     setFileStatus('图片已载入。', 'ready');
-    if (mode === 'existingChart') {
+    if (customerTask === 'mirrorExistingChart') {
+      mode = 'existingChart';
+      prepareState = null;
+      syncUploadPrepareControls(app, currentUploadPrepareFlow());
       openChartWorkspace();
     } else {
+      const recommendationRequest = recommendationRequests.begin();
+      applyUploadPrepareFlow(
+        beginUploadedImage(currentUploadPrepareFlow(), recommendationRequest.token),
+      );
+      mode = firstSupportedNewPatternMode();
+      samplingSelection = createAutomaticSampling(mode, appCapabilities.sampling);
+      syncSamplingControls(prepareWorkspace, samplingSelection);
       openPrepareWorkspace();
+      void completeImageRecommendation(
+        resource.image,
+        result.mimeType,
+        recommendationRequest.token,
+        recommendationRequest.signal,
+      );
     }
   } catch {
     if (requestRevision !== loadRevision) {
@@ -406,11 +632,92 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
   }
 }
 
+async function completeImageRecommendation(
+  image: HTMLImageElement,
+  mimeType: string,
+  sourceToken: number,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    const result = await recommendDecodedImageMode(
+      { image, mimeType, sourceToken },
+      {
+        maximumDecodedPixels: appCapabilities.upload.maximumDecodedPixels,
+        signal,
+      },
+    );
+    if (!recommendationRequests.isCurrent(sourceToken) || prepareState?.task !== 'newPattern') {
+      return;
+    }
+    prepareState = updateRecommendation(prepareState, result);
+    applyPrepareModeState();
+  } catch (error) {
+    if (signal.aborted || isAbortError(error)) return;
+    if (prepareState?.task === 'newPattern' && prepareState.sourceToken === sourceToken) {
+      required(prepareWorkspace, '[data-mode-recommendation]', HTMLElement).textContent =
+        '暂时无法自动分析这张图片，请在这里选择“自然图片”或“清晰像素”。';
+      const generateButton = required(
+        prepareWorkspace,
+        '[data-generate-pattern]',
+        HTMLButtonElement,
+      );
+      generateButton.disabled = prepareState.preference === 'auto';
+    }
+  }
+}
+
+function applyPrepareModeState(): void {
+  const state = prepareState;
+  if (!state) return;
+  syncUploadPrepareControls(app, currentUploadPrepareFlow());
+  const status = required(prepareWorkspace, '[data-mode-recommendation]', HTMLElement);
+  const generateButton = required(prepareWorkspace, '[data-generate-pattern]', HTMLButtonElement);
+  if (state.recommendationStatus === 'analyzing' && state.resolvedMode === null) {
+    mode = firstSupportedNewPatternMode();
+    status.textContent = state.reason;
+    generateButton.disabled = true;
+    updateSamplingDefault();
+    return;
+  }
+  const requestedMode = state.resolvedMode ?? firstSupportedNewPatternMode();
+  let supportedMode: NewPatternMode;
+  try {
+    supportedMode = resolveSupportedNewPatternMode(
+      state.preference,
+      requestedMode,
+      appCapabilities.modes,
+    );
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : '当前服务暂不支持制作新图纸。';
+    generateButton.disabled = true;
+    return;
+  }
+  mode = supportedMode;
+  const fallbackMessage =
+    supportedMode === requestedMode
+      ? ''
+      : ` 当前服务暂不支持这项处理，生成时将使用${
+          supportedMode === 'photo' ? '自然图片' : '清晰像素'
+        }。`;
+  status.textContent = `${state.reason}${fallbackMessage}`;
+  generateButton.disabled = false;
+  updateSamplingDefault();
+}
+
+function firstSupportedNewPatternMode(): NewPatternMode {
+  return (
+    appCapabilities.modes.find(
+      (candidate): candidate is NewPatternMode => candidate === 'photo' || candidate === 'pixelArt',
+    ) ?? 'photo'
+  );
+}
+
 async function openProjectFile(file: File): Promise<void> {
   const requestRevision = ++loadRevision;
   generationController?.abort();
-  exportController?.abort();
+  exportCoordinator.invalidate();
   chartMirrorController?.abort();
+  recommendationRequests.cancel();
   if (file.size > MAX_PROJECT_JSON_BYTES) {
     projectFileStatus.textContent = `项目文件超过 ${formatFileSize(
       MAX_PROJECT_JSON_BYTES,
@@ -429,6 +736,16 @@ async function openProjectFile(file: File): Promise<void> {
     rotation = project.source.rotation;
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
     mode = project.mode;
+    applyUploadPrepareFlow(flowFromImportedProject(project.mode));
+    samplingSelection = chooseSampling(
+      createAutomaticSampling(
+        project.mode === 'pixelArt' ? 'pixelArt' : 'photo',
+        appCapabilities.sampling,
+      ),
+      project.generation.sampling,
+      'project',
+    );
+    syncSamplingControls(prepareWorkspace, samplingSelection);
     currentProject = project;
     sourceGenerationRevision = null;
     availableColorIds = new Set(project.palette.availableColorIds);
@@ -439,9 +756,9 @@ async function openProjectFile(file: File): Promise<void> {
     history = new MatrixHistory(project.cells, 100, project.revision);
     currentSelection = null;
     openPatternEditor(project);
-    projectFileStatus.textContent = `已打开 ${file.name}，矩阵版本 ${String(project.revision)}。`;
-    sessionStatus.textContent = `已恢复矩阵版本 ${String(project.revision)}`;
-    announce(`项目已恢复，可以继续编辑。当前矩阵版本 ${String(project.revision)}。`);
+    projectFileStatus.textContent = `已打开 ${file.name}，可以继续编辑。`;
+    sessionStatus.textContent = '项目已恢复';
+    announce('项目已恢复，可以继续编辑。');
   } catch (error) {
     if (requestRevision !== loadRevision) {
       return;
@@ -461,8 +778,8 @@ function setupPrepare(): void {
   const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
   const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
   const aspectButton = required(prepareWorkspace, '[data-aspect-lock]', HTMLButtonElement);
-  const boardPreset = required(prepareWorkspace, '[data-board-preset]', HTMLSelectElement);
-  const paletteSelect = required(prepareWorkspace, '[data-palette-id]', HTMLSelectElement);
+  const boardPreset = required(prepareWorkspace, '[data-board-preset]', HTMLButtonElement);
+  const paletteSelect = required(prepareWorkspace, '[data-palette-id]', HTMLButtonElement);
   const maximumColors = required(prepareWorkspace, '[data-maximum-colors]', HTMLInputElement);
   const beadDiameter = required(prepareWorkspace, '[data-bead-diameter]', HTMLInputElement);
   const beadPitch = required(prepareWorkspace, '[data-bead-pitch]', HTMLInputElement);
@@ -488,7 +805,17 @@ function setupPrepare(): void {
   const availableColorSeries = required(
     prepareWorkspace,
     '[data-available-color-series]',
-    HTMLSelectElement,
+    HTMLButtonElement,
+  );
+  const openAvailableColors = required(
+    prepareWorkspace,
+    '[data-open-available-colors]',
+    HTMLButtonElement,
+  );
+  const availableColorFilter = required(
+    prepareWorkspace,
+    '[data-available-color-filter]',
+    HTMLElement,
   );
   const generateButton = required(prepareWorkspace, '[data-generate-pattern]', HTMLButtonElement);
   const returnEditorButton = required(prepareWorkspace, '[data-return-editor]', HTMLButtonElement);
@@ -532,8 +859,10 @@ function setupPrepare(): void {
     aspectButton.setAttribute('aria-label', aspectLocked ? '保持图片比例' : '不保持图片比例');
     if (aspectLocked) {
       updateRowsFromColumns();
+      preparePresetControls?.syncFromFields();
+    } else {
+      updatePrepareSummaries();
     }
-    updatePrepareSummaries();
   });
   columnsInput.addEventListener('input', () => {
     clampNumberInput(
@@ -551,10 +880,6 @@ function setupPrepare(): void {
     if (aspectLocked) {
       updateColumnsFromRows();
     }
-    updatePrepareSummaries();
-  });
-  boardPreset.addEventListener('change', () => {
-    updateCustomBoardVisibility();
     updatePrepareSummaries();
   });
   customBoardRows.addEventListener('input', () => {
@@ -597,35 +922,27 @@ function setupPrepare(): void {
     );
     updatePrepareSummaries();
   });
-  paletteSelect.addEventListener('change', () => {
-    const palette = getPalette(paletteSelect.value);
-    availableColorIds = new Set(palette.colorIds);
-    maximumColors.max = String(palette.colorIds.length);
-    maximumColors.value = String(Math.min(Number(maximumColors.value), palette.colorIds.length));
-    selectedColorId = palette.colorIds[0] ?? selectedColorId;
-    prepareColorSeries = '';
-    initializePrepareColorSeries();
-    renderAvailableColorFilter();
-  });
   availableColorSearch.addEventListener('input', () => {
     prepareColorQuery = availableColorSearch.value;
     renderAvailableColorFilter();
   });
-  availableColorSeries.addEventListener('change', () => {
-    prepareColorSeries = availableColorSeries.value;
-    renderAvailableColorFilter();
-  });
   selectAllColors.addEventListener('click', () => {
-    availableColorIds = new Set(getPalette(paletteSelect.value).colorIds);
+    availableColorIds = new Set(
+      getPalette(selectValue(prepareWorkspace, '[data-palette-id]', 'mard')).colorIds,
+    );
     maximumColors.max = String(availableColorIds.size);
     maximumColors.value = String(
       Math.max(1, Math.min(Number(maximumColors.value), availableColorIds.size)),
     );
+    preparePresetControls?.setAvailableColorCount(availableColorIds.size);
     renderAvailableColorFilter();
     announce('已选中当前色板的全部颜色。');
   });
   clearAllColors.addEventListener('click', () => {
     availableColorIds = new Set();
+    maximumColors.max = '0';
+    maximumColors.value = '0';
+    preparePresetControls?.setAvailableColorCount(0);
     renderAvailableColorFilter();
     announce('已清除颜色选择；生成前请至少选择一种颜色。');
   });
@@ -644,10 +961,8 @@ function setupPrepare(): void {
       availableColorIds.delete(input.dataset.availableColorId);
     }
     maximumColors.max = String(availableColorIds.size);
-    maximumColors.value = String(
-      Math.max(1, Math.min(Number(maximumColors.value), availableColorIds.size)),
-    );
-    updateAvailableColorSummary();
+    preparePresetControls?.setAvailableColorCount(availableColorIds.size);
+    renderAvailableColorFilter();
   });
   generateButton.addEventListener('click', () => {
     void startPatternGeneration();
@@ -655,7 +970,7 @@ function setupPrepare(): void {
   returnEditorButton.addEventListener('click', () => {
     if (currentProject && history) {
       openPatternEditor(currentProject);
-      announce(`已返回矩阵版本 r${String(currentProject.revision)}。`);
+      announce('已返回当前图纸。');
     }
   });
 
@@ -745,11 +1060,122 @@ function setupPrepare(): void {
         width: Number(cropInputs.width.value),
         height: Number(cropInputs.height.value),
       });
-      renderCropSelection();
+      renderCropSelection(input);
       updatePrepareSummaries();
     });
   }
 
+  availableColorGridRenderer = createAvailableColorGridRenderer(availableColorGrid, {
+    searchInput: availableColorSearch,
+    status: required(prepareWorkspace, '[data-available-color-filter-status]', HTMLElement),
+  });
+  const pickerSurface = required(prepareWorkspace, '[data-prepare-picker-surface]', HTMLElement);
+  const pickerPanel = required(prepareWorkspace, '[data-prepare-settings-panel]', HTMLElement);
+  availableColorMobilePanelController = createAvailableColorMobilePanel({
+    sheet: pickerSurface,
+    panel: pickerPanel,
+    content: availableColorFilter,
+    trigger: openAvailableColors,
+    searchInput: availableColorSearch,
+  });
+  boardSelectController = createAdaptiveSelectController({
+    trigger: boardPreset,
+    overlayRoot,
+    id: 'prepare-board',
+    title: '选择拼板',
+    options: boardSelectOptions(),
+    selectedId: selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare'),
+    mobileSurface: pickerSurface,
+    mobilePanel: pickerPanel,
+    onChange() {
+      updateCustomBoardVisibility();
+      updatePrepareSummaries();
+    },
+  });
+  paletteSelectController = createAdaptiveSelectController({
+    trigger: paletteSelect,
+    overlayRoot,
+    id: 'prepare-palette',
+    title: '选择色板',
+    options: paletteSelectOptions(),
+    selectedId: selectValue(prepareWorkspace, '[data-palette-id]', 'mard'),
+    mobileSurface: pickerSurface,
+    mobilePanel: pickerPanel,
+    onChange(selectedId) {
+      applyPreparePalette(selectedId);
+    },
+  });
+  availableSeriesSelectController = createAdaptiveSelectController({
+    trigger: availableColorSeries,
+    overlayRoot,
+    id: 'prepare-color-series',
+    title: '筛选颜色系列',
+    options: [{ id: '', label: '全部系列' }],
+    selectedId: '',
+    mobileSurface: pickerSurface,
+    mobilePanel: pickerPanel,
+    onChange(selectedId) {
+      prepareColorSeries = selectedId;
+      renderAvailableColorFilter();
+    },
+  });
+  const ditheringTrigger = required(prepareWorkspace, '[data-dithering]', HTMLButtonElement);
+  ditheringSelectController = createAdaptiveSelectController({
+    trigger: ditheringTrigger,
+    overlayRoot,
+    id: 'prepare-dithering',
+    title: '选择颜色接近方式',
+    options: ditheringSelectOptions(),
+    selectedId: selectValue(prepareWorkspace, '[data-dithering]', 'none'),
+    mobileSurface: pickerSurface,
+    mobilePanel: pickerPanel,
+    onChange(selectedId) {
+      const dithering = selectedId === 'floydSteinberg' ? 'floydSteinberg' : 'none';
+      preparePresetControls?.setDithering(dithering);
+      updatePrepareSummaries();
+    },
+  });
+  preparePresetControls = mountPreparePresetControls(prepareWorkspace, {
+    initialState: {
+      croppedColumns: 1,
+      croppedRows: 1,
+      columns: 48,
+      rows: 48,
+      beadDiameterMm: 5,
+      beadPitchMm: 5,
+      maximumColors: 24,
+      availableColorCount: availableColorIds.size,
+      dithering: 'none',
+    },
+    onChange() {
+      if (!syncingPreparePresetCrop) {
+        ditheringSelectController?.setValue(
+          selectValue(prepareWorkspace, '[data-dithering]', 'none'),
+        );
+        updatePrepareSummaries();
+      }
+    },
+  });
+  for (const input of prepareWorkspace.querySelectorAll<HTMLInputElement>(
+    'input[name="mode-preference"]',
+  )) {
+    input.addEventListener('change', () => {
+      if (input.checked && isModePreference(input.value) && prepareState?.task === 'newPattern') {
+        prepareState = setModePreference(prepareState, input.value);
+        applyPrepareModeState();
+      }
+    });
+  }
+  for (const input of prepareWorkspace.querySelectorAll<HTMLInputElement>(
+    'input[name="sampling"]',
+  )) {
+    input.addEventListener('change', () => {
+      if (input.checked && isSamplingValue(input.value)) {
+        samplingSelection = chooseSampling(samplingSelection, input.value, 'user');
+        syncSamplingControls(prepareWorkspace, samplingSelection);
+      }
+    });
+  }
   updateCustomBoardVisibility();
   initializePrepareColorSeries();
 
@@ -780,9 +1206,22 @@ function setupPrepare(): void {
   }
 
   function updateCustomBoardVisibility(): void {
-    const isCustom = boardPreset.value === 'custom';
+    const isCustom = boardPreset.dataset.value === 'custom';
     customBoardFields.hidden = !isCustom;
     customBoardFields.disabled = !isCustom;
+  }
+
+  function applyPreparePalette(paletteId: string): void {
+    const palette = getPalette(paletteId);
+    paletteSelectController?.setValue(palette.id);
+    availableColorIds = new Set(palette.colorIds);
+    maximumColors.max = String(palette.colorIds.length);
+    maximumColors.value = String(Math.min(Number(maximumColors.value), palette.colorIds.length));
+    preparePresetControls?.setAvailableColorCount(palette.colorIds.length);
+    selectedColorId = palette.colorIds[0] ?? selectedColorId;
+    prepareColorSeries = '';
+    initializePrepareColorSeries();
+    renderAvailableColorFilter();
   }
 }
 
@@ -790,6 +1229,7 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
   if (!selectedImage) {
     return;
   }
+  availableColorMobilePanelController?.close();
   showStage('prepare');
   const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
   const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
@@ -804,22 +1244,23 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
       height: (project.source.crop.height / dimensions.height) * 100,
     });
     mode = project.mode;
+    if (!prepareState) {
+      applyUploadPrepareFlow(flowFromImportedProject(project.mode));
+    }
     columnsInput.value = String(project.grid.columns);
     rowsInput.value = String(project.grid.rows);
     aspectLocked = project.grid.aspectLocked;
     const aspectButton = required(prepareWorkspace, '[data-aspect-lock]', HTMLButtonElement);
     aspectButton.classList.toggle('is-active', aspectLocked);
     aspectButton.setAttribute('aria-pressed', String(aspectLocked));
-    required(prepareWorkspace, '[data-board-preset]', HTMLSelectElement).value =
-      project.grid.boardPresetId;
+    boardSelectController?.setValue(project.grid.boardPresetId);
     required(prepareWorkspace, '[data-custom-board-rows]', HTMLInputElement).value = String(
       project.grid.boardRows,
     );
     required(prepareWorkspace, '[data-custom-board-columns]', HTMLInputElement).value = String(
       project.grid.boardColumns,
     );
-    required(prepareWorkspace, '[data-palette-id]', HTMLSelectElement).value =
-      project.palette.paletteId;
+    paletteSelectController?.setValue(project.palette.paletteId);
     availableColorIds = new Set(project.palette.availableColorIds);
     required(prepareWorkspace, '[data-maximum-colors]', HTMLInputElement).value = String(
       project.palette.maximumColors ?? project.palette.availableColorIds.length,
@@ -830,36 +1271,52 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
     required(prepareWorkspace, '[data-bead-pitch]', HTMLInputElement).value = String(
       project.grid.beadPitchMm,
     );
-    required(prepareWorkspace, '[data-dithering]', HTMLSelectElement).value =
-      project.generation.dithering;
+    ditheringSelectController?.setValue(project.generation.dithering);
     required(prepareWorkspace, '[data-alpha-threshold]', HTMLInputElement).value = String(
       project.generation.alphaEmptyThreshold,
     );
-    const samplingInput = prepareWorkspace.querySelector<HTMLInputElement>(
-      `input[name="sampling"][value="${project.generation.sampling}"]`,
-    );
-    if (samplingInput) {
-      samplingInput.checked = true;
-    }
-  } else {
-    columnsInput.value =
-      mode === 'pixelArt'
-        ? String(Math.min(128, selectedImage.width, appCapabilities.grid.maximumColumns))
-        : String(Math.min(48, appCapabilities.grid.maximumColumns));
-    rowsInput.value = String(
-      Math.max(
-        appCapabilities.grid.minimumRows,
-        Math.min(
-          appCapabilities.grid.maximumRows,
-          Math.round(Number(columnsInput.value) * (selectedImage.height / selectedImage.width)),
-        ),
+    samplingSelection = chooseSampling(
+      createAutomaticSampling(
+        project.mode === 'pixelArt' ? 'pixelArt' : 'photo',
+        appCapabilities.sampling,
       ),
+      project.generation.sampling,
+      'project',
+    );
+    syncSamplingControls(prepareWorkspace, samplingSelection);
+    const cropDimensions = croppedImageDimensions();
+    preparePresetControls?.hydrate({
+      croppedColumns: cropDimensions.width,
+      croppedRows: cropDimensions.height,
+      columns: project.grid.columns,
+      rows: project.grid.rows,
+      beadDiameterMm: project.grid.beadDiameterMm,
+      beadPitchMm: project.grid.beadPitchMm,
+      maximumColors: project.palette.maximumColors ?? project.palette.availableColorIds.length,
+      availableColorCount: Math.max(1, project.palette.availableColorIds.length),
+      dithering: project.generation.dithering,
+    });
+  } else {
+    const cropDimensions = croppedImageDimensions();
+    const presetDimensions = dimensionsForLongEdge(48, cropDimensions.width, cropDimensions.height);
+    columnsInput.value = String(presetDimensions.columns);
+    rowsInput.value = String(presetDimensions.rows);
+    preparePresetControls?.hydrate(
+      createNewImagePrepareDefaults({
+        croppedColumns: cropDimensions.width,
+        croppedRows: cropDimensions.height,
+        columns: presetDimensions.columns,
+        rows: presetDimensions.rows,
+        availableColorCount: availableColorIds.size,
+      }),
+    );
+    samplingSelection = createAutomaticSampling(
+      mode === 'pixelArt' ? 'pixelArt' : 'photo',
+      appCapabilities.sampling,
     );
     updateSamplingDefault();
   }
-  const palette = getPalette(
-    required(prepareWorkspace, '[data-palette-id]', HTMLSelectElement).value,
-  );
+  const palette = getPalette(selectValue(prepareWorkspace, '[data-palette-id]', 'mard'));
   if (![...availableColorIds].every((colorId) => palette.colorIds.includes(colorId))) {
     availableColorIds = new Set(palette.colorIds);
   }
@@ -869,7 +1326,7 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
     HTMLFieldSetElement,
   );
   const customBoard =
-    required(prepareWorkspace, '[data-board-preset]', HTMLSelectElement).value === 'custom';
+    selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare') === 'custom';
   customFields.hidden = !customBoard;
   customFields.disabled = !customBoard;
   required(prepareWorkspace, '[data-generate-label]', HTMLElement).textContent = currentProject
@@ -878,8 +1335,9 @@ function openPrepareWorkspace(preserveProjectSettings = false): void {
   required(prepareWorkspace, '[data-return-editor]', HTMLButtonElement).hidden =
     currentProject === null;
   required(prepareWorkspace, '[data-generate-status]', HTMLElement).textContent = currentProject
-    ? `当前保留矩阵版本 ${String(currentProject.revision)}；重新生成前会再次确认。`
+    ? '当前图纸会保留到重新生成成功；替换前会再次确认。'
     : '';
+  applyPrepareModeState();
   initializePrepareColorSeries();
   renderAvailableColorFilter();
   drawCropPreview();
@@ -893,52 +1351,44 @@ function drawCropPreview(): void {
   }
   const canvas = required(prepareWorkspace, '[data-crop-canvas]', HTMLCanvasElement);
   const frame = required(prepareWorkspace, '[data-crop-frame]', HTMLElement);
-  const image = new Image();
-  image.onload = () => {
-    const dimensions = rotatedDimensions();
-    const maxDimension = 1400;
-    const scale = Math.min(1, maxDimension / Math.max(dimensions.width, dimensions.height));
-    canvas.width = Math.max(1, Math.round(dimensions.width * scale));
-    canvas.height = Math.max(1, Math.round(dimensions.height * scale));
-    frame.style.aspectRatio = `${String(dimensions.width)} / ${String(dimensions.height)}`;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      return;
-    }
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.save();
-    if (rotation === 90) {
-      context.translate(canvas.width, 0);
-      context.rotate(Math.PI / 2);
-      context.drawImage(image, 0, 0, canvas.height, canvas.width);
-    } else if (rotation === 180) {
-      context.translate(canvas.width, canvas.height);
-      context.rotate(Math.PI);
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    } else if (rotation === 270) {
-      context.translate(0, canvas.height);
-      context.rotate(-Math.PI / 2);
-      context.drawImage(image, 0, 0, canvas.height, canvas.width);
-    } else {
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    }
-    context.restore();
-  };
-  image.src = selectedImage.objectUrl;
+  const image = selectedImage.image;
+  const dimensions = rotatedDimensions();
+  const maxDimension = 1400;
+  const scale = Math.min(1, maxDimension / Math.max(dimensions.width, dimensions.height));
+  canvas.width = Math.max(1, Math.round(dimensions.width * scale));
+  canvas.height = Math.max(1, Math.round(dimensions.height * scale));
+  frame.style.aspectRatio = `${String(dimensions.width)} / ${String(dimensions.height)}`;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.save();
+  if (rotation === 90) {
+    context.translate(canvas.width, 0);
+    context.rotate(Math.PI / 2);
+    context.drawImage(image, 0, 0, canvas.height, canvas.width);
+  } else if (rotation === 180) {
+    context.translate(canvas.width, canvas.height);
+    context.rotate(Math.PI);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  } else if (rotation === 270) {
+    context.translate(0, canvas.height);
+    context.rotate(-Math.PI / 2);
+    context.drawImage(image, 0, 0, canvas.height, canvas.width);
+  } else {
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  }
+  context.restore();
 }
 
-function renderCropSelection(): void {
+function renderCropSelection(editingInput?: HTMLInputElement): void {
   const selection = required(prepareWorkspace, '[data-crop-selection]', HTMLElement);
   selection.style.left = `${String(cropPercent.x)}%`;
   selection.style.top = `${String(cropPercent.y)}%`;
   selection.style.width = `${String(cropPercent.width)}%`;
   selection.style.height = `${String(cropPercent.height)}%`;
-  required(prepareWorkspace, '[data-crop-x]', HTMLInputElement).value = cropPercent.x.toFixed(1);
-  required(prepareWorkspace, '[data-crop-y]', HTMLInputElement).value = cropPercent.y.toFixed(1);
-  required(prepareWorkspace, '[data-crop-width]', HTMLInputElement).value =
-    cropPercent.width.toFixed(1);
-  required(prepareWorkspace, '[data-crop-height]', HTMLInputElement).value =
-    cropPercent.height.toFixed(1);
+  syncCropNumericInputValues(prepareWorkspace, cropPercent, editingInput);
 }
 
 function updatePrepareSummaries(): void {
@@ -948,6 +1398,20 @@ function updatePrepareSummaries(): void {
   const dimensions = rotatedDimensions();
   const cropWidth = Math.max(1, Math.round(dimensions.width * (cropPercent.width / 100)));
   const cropHeight = Math.max(1, Math.round(dimensions.height * (cropPercent.height / 100)));
+  const presetController = preparePresetControls;
+  const presetState = presetController?.getState();
+  if (
+    presetController !== null &&
+    presetState !== undefined &&
+    (presetState.croppedColumns !== cropWidth || presetState.croppedRows !== cropHeight)
+  ) {
+    syncingPreparePresetCrop = true;
+    try {
+      presetController.setCropDimensions(cropWidth, cropHeight);
+    } finally {
+      syncingPreparePresetCrop = false;
+    }
+  }
   const columns = numberValue(prepareWorkspace, '[data-columns]', 48);
   const rows = numberValue(prepareWorkspace, '[data-rows]', 48);
   const board = selectedBoardSize();
@@ -969,57 +1433,27 @@ function updatePrepareSummaries(): void {
 }
 
 function renderAvailableColorFilter(): void {
-  const paletteId = required(prepareWorkspace, '[data-palette-id]', HTMLSelectElement).value;
+  const paletteId = selectValue(prepareWorkspace, '[data-palette-id]', 'mard');
   const palette = getPalette(paletteId);
-  const grid = required(prepareWorkspace, '[data-available-color-grid]', HTMLElement);
-  const fragment = document.createDocumentFragment();
   const paletteColors = PALETTE_COLORS.filter((color) => palette.colorIds.includes(color.id));
-  const filteredColors = filterPaletteColors(paletteColors, {
-    availableColorIds: palette.colorIds,
+  availableColorGridRenderer?.update({
+    colors: paletteColors.map((color) => ({
+      id: color.id,
+      code: color.code,
+      ...(color.name === null ? {} : { name: color.name }),
+      series: color.series,
+      displayHex: color.displayHex,
+      paletteLabel: color.paletteId.toUpperCase(),
+    })),
+    selectedIds: availableColorIds,
     query: prepareColorQuery,
-  }).filter((color) => prepareColorSeries === '' || color.series === prepareColorSeries);
-
-  for (const group of groupPaletteColorsBySeries(filteredColors)) {
-    const section = document.createElement('section');
-    section.className = 'available-color-series-group';
-    section.setAttribute('aria-label', `${group.series} 系列`);
-    const heading = document.createElement('h3');
-    heading.textContent = `${group.series} 系列`;
-    const choices = document.createElement('div');
-    for (const color of group.colors) {
-      const label = document.createElement('label');
-      label.className = 'available-color-choice';
-      label.title = `${color.paletteId.toUpperCase()} ${color.code}${
-        color.name ? ` · ${color.name}` : ''
-      }`;
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = availableColorIds.has(color.id);
-      input.dataset.availableColorId = color.id;
-      input.setAttribute('aria-label', label.title);
-      const swatch = document.createElement('span');
-      swatch.className = 'available-color-swatch';
-      swatch.style.setProperty('--swatch', color.displayHex);
-      swatch.setAttribute('aria-hidden', 'true');
-      const code = document.createElement('small');
-      code.textContent = color.code;
-      label.append(input, swatch, code);
-      choices.append(label);
-    }
-    section.append(heading, choices);
-    fragment.append(section);
-  }
-
-  grid.replaceChildren(fragment);
-  grid.setAttribute(
-    'aria-label',
-    `选择手边有的拼豆颜色，当前显示 ${String(filteredColors.length)} 色`,
-  );
+    series: prepareColorSeries,
+  });
   updateAvailableColorSummary();
 }
 
 function initializePrepareColorSeries(): void {
-  const paletteId = required(prepareWorkspace, '[data-palette-id]', HTMLSelectElement).value;
+  const paletteId = selectValue(prepareWorkspace, '[data-palette-id]', 'mard');
   const palette = getPalette(paletteId);
   const series = [
     ...new Set(
@@ -1033,20 +1467,12 @@ function initializePrepareColorSeries(): void {
   if (prepareColorSeries && !series.includes(prepareColorSeries)) {
     prepareColorSeries = '';
   }
-  const select = required(prepareWorkspace, '[data-available-color-series]', HTMLSelectElement);
-  const fragment = document.createDocumentFragment();
-  const all = document.createElement('option');
-  all.value = '';
-  all.textContent = '全部系列';
-  fragment.append(all);
-  for (const value of series) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = `${value} 系列`;
-    fragment.append(option);
-  }
-  select.replaceChildren(fragment);
-  select.value = prepareColorSeries;
+  const options = [
+    { id: '', label: '全部系列' },
+    ...series.map((value) => ({ id: value, label: `${value} 系列` })),
+  ];
+  availableSeriesSelectController?.setOptions(options);
+  availableSeriesSelectController?.setValue(prepareColorSeries);
   required(prepareWorkspace, '[data-available-color-search]', HTMLInputElement).value =
     prepareColorQuery;
 }
@@ -1061,7 +1487,16 @@ async function startPatternGeneration(): Promise<void> {
   if (!image) {
     return;
   }
-  if (availableColorIds.size === 0) {
+  if (
+    prepareState?.task === 'newPattern' &&
+    prepareState.recommendationStatus === 'analyzing' &&
+    prepareState.resolvedMode === null
+  ) {
+    required(prepareWorkspace, '[data-generate-status]', HTMLElement).textContent =
+      '正在分析图片；也可以在“专业设置”中先选择自然图片或清晰像素。';
+    return;
+  }
+  if (!hasAvailableColorSelection(availableColorIds)) {
     required(prepareWorkspace, '[data-generate-status]', HTMLElement).textContent =
       '请至少选择一种手边有的颜色。';
     announce('生成前请至少选择一种颜色。');
@@ -1071,11 +1506,7 @@ async function startPatternGeneration(): Promise<void> {
     currentProject &&
     sourceGenerationRevision !== null &&
     currentProject.revision !== sourceGenerationRevision &&
-    !window.confirm(
-      `重新生成会替换当前矩阵版本 ${String(
-        currentProject.revision,
-      )} 的全部编辑。请先导出项目 JSON；仍要继续吗？`,
-    )
+    !window.confirm('重新生成会替换当前图纸的全部编辑。建议先保存项目 JSON；仍要继续吗？')
   ) {
     return;
   }
@@ -1121,25 +1552,25 @@ async function startPatternGeneration(): Promise<void> {
     if (generationController === controller) {
       generationController = null;
     }
-    generateButton.disabled = false;
     required(generateButton, '[data-generate-label]', HTMLElement).textContent = currentProject
       ? '重新生成图纸'
       : '生成图纸';
+    if (prepareState) {
+      applyPrepareModeState();
+    } else {
+      generateButton.disabled = false;
+    }
   }
 }
 
 function buildGenerationSettings(): PatternGenerationSettings {
   const dimensions = rotatedDimensions();
-  const paletteId = required(prepareWorkspace, '[data-palette-id]', HTMLSelectElement).value as
+  const paletteId = selectValue(prepareWorkspace, '[data-palette-id]', 'mard') as
     'default' | 'mard';
   const maximumValue = numberValue(prepareWorkspace, '[data-maximum-colors]', 24);
-  const sampling =
-    prepareWorkspace.querySelector<HTMLInputElement>('input[name="sampling"]:checked')?.value ===
-    'nearest'
-      ? 'nearest'
-      : 'average';
+  const sampling = samplingSelection.value;
   const dithering =
-    required(prepareWorkspace, '[data-dithering]', HTMLSelectElement).value === 'floydSteinberg'
+    selectValue(prepareWorkspace, '[data-dithering]', 'none') === 'floydSteinberg'
       ? 'floydSteinberg'
       : 'none';
   const board = selectedBoardSize();
@@ -1160,7 +1591,7 @@ function buildGenerationSettings(): PatternGenerationSettings {
       numberValue(prepareWorkspace, '[data-bead-diameter]', 5),
       numberValue(prepareWorkspace, '[data-bead-pitch]', 5),
     ),
-    boardPresetId: required(prepareWorkspace, '[data-board-preset]', HTMLSelectElement).value as
+    boardPresetId: selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare') as
       'smallSquare' | 'standardSquare' | 'custom',
     boardRows: board.rows,
     boardColumns: board.columns,
@@ -1181,16 +1612,16 @@ function setupPatternWorkspace(): void {
   const canvasJumpForm = required(patternWorkspace, '[data-canvas-jump-form]', HTMLFormElement);
   const canvasJumpRow = required(canvasJumpForm, '[data-canvas-jump-row]', HTMLInputElement);
   const canvasJumpColumn = required(canvasJumpForm, '[data-canvas-jump-column]', HTMLInputElement);
-  const sheet = required(patternWorkspace, '[data-workspace-sheet]', HTMLElement);
-  const sheetHandle = required(patternWorkspace, '[data-sheet-handle]', HTMLButtonElement);
-  const exportPopover = required(patternWorkspace, '[data-export-popover]', HTMLElement);
-  let exportReturnFocus: HTMLButtonElement | null = null;
+  const sheetDragRegion = required(workspaceSheet, '[data-sheet-drag-region]', HTMLElement);
   let suppressSheetClick = false;
   let sheetGesture: {
     readonly pointerId: number;
     readonly startY: number;
     readonly startHeight: number;
     currentHeight: number;
+    lastY: number;
+    lastTime: number;
+    pointerVelocityY: number;
     moved: boolean;
   } | null = null;
 
@@ -1221,11 +1652,15 @@ function setupPatternWorkspace(): void {
     }
     const selectionAction = target.closest<HTMLButtonElement>('[data-selection-action]');
     if (selectionAction?.dataset.selectionAction === 'move') {
-      canvasController?.moveSelection(0, 1);
+      canvasController?.beginSelectionTransfer('move');
       return;
     }
     if (selectionAction?.dataset.selectionAction === 'copy') {
-      canvasController?.copySelection(0, 1);
+      canvasController?.beginSelectionTransfer('copy');
+      return;
+    }
+    if (selectionAction?.dataset.selectionAction === 'cancel') {
+      canvasController?.cancelSelection();
       return;
     }
     if (
@@ -1233,6 +1668,24 @@ function setupPatternWorkspace(): void {
       target.closest('[data-clear-selection]')
     ) {
       canvasController?.clearSelection();
+      return;
+    }
+    if (target.closest('[data-toggle-canvas-jump]')) {
+      setCanvasJumpOpen(true);
+      return;
+    }
+    if (target.closest('[data-canvas-jump-cancel]')) {
+      setCanvasJumpOpen(false, true);
+      return;
+    }
+    if (target.closest('[data-dismiss-first-use-hint]')) {
+      firstUseHintSession.dismiss();
+      syncFirstUseHint();
+      return;
+    }
+    if (target.closest('[data-sheet-open-tools]')) {
+      setActiveInspectorPanel('tools');
+      setSheetState('half');
       return;
     }
     if (target.closest('[data-return-prepare]')) {
@@ -1244,40 +1697,38 @@ function setupPatternWorkspace(): void {
       return;
     }
     if (target.closest('[data-close-export]')) {
-      exportPopover.hidden = true;
-      exportReturnFocus?.focus();
+      closeExportSurface();
       return;
     }
-    const exportButton = target.closest<HTMLButtonElement>('[data-export-format]');
-    if (exportButton?.dataset.exportFormat) {
-      void downloadExport(exportButton.dataset.exportFormat);
+    const exportTaskButton = target.closest<HTMLButtonElement>('[data-export-task]');
+    if (
+      exportTaskButton?.dataset.exportTask &&
+      isExportTaskId(exportTaskButton.dataset.exportTask)
+    ) {
+      exportCompletionState = selectExportTask(
+        exportCompletionState,
+        exportTaskButton.dataset.exportTask,
+      );
+      syncExportCompletionUi();
+      return;
+    }
+    if (target.closest('[data-export-run]')) {
+      void startSelectedExport();
       return;
     }
   });
   patternWorkspace.addEventListener('keydown', (event) => {
-    if (event.key === 'Tab' && !exportPopover.hidden) {
-      const focusable = [
-        ...exportPopover.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        ),
-      ];
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (first && last) {
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
+    if (event.key === 'Escape' && exportCompletionState.phase === 'open') {
+      event.preventDefault();
+      closeExportSurface();
       return;
     }
-    if (event.key === 'Escape' && !exportPopover.hidden) {
+    if (
+      event.key === 'Escape' &&
+      !required(patternWorkspace, '[data-canvas-jump-form]', HTMLFormElement).hidden
+    ) {
       event.preventDefault();
-      exportPopover.hidden = true;
-      exportReturnFocus?.focus();
+      setCanvasJumpOpen(false, true);
       return;
     }
     const tab =
@@ -1327,17 +1778,10 @@ function setupPatternWorkspace(): void {
   });
   patternWorkspace.addEventListener('change', (event) => {
     const target = event.target;
-    if (target instanceof HTMLSelectElement && target.matches('[data-color-series-filter]')) {
-      paletteSeries = target.value;
-      syncPaletteControls(target);
-      applyPaletteFilters();
-      return;
-    }
-    if (
-      target instanceof HTMLInputElement &&
-      (target.matches('[data-export-template]') || target.matches('[data-export-grid]'))
-    ) {
-      syncExportTemplateControls(target);
+    if (target instanceof HTMLInputElement && target.matches('[data-export-template]')) {
+      const template = target.value === 'pure' ? 'pure' : 'annotated';
+      exportCompletionState = setExportPngTemplate(exportCompletionState, template);
+      syncExportCompletionUi();
     }
   });
 
@@ -1386,37 +1830,47 @@ function setupPatternWorkspace(): void {
     canvasJumpRow.value = String(row);
     canvasJumpColumn.value = String(column);
     canvasController.jumpToCell(row - 1, column - 1);
+    setCanvasJumpOpen(false);
   });
   for (const selector of ['[data-open-export]', '[data-mobile-export]']) {
     const opener = required(patternWorkspace, selector, HTMLButtonElement);
     opener.addEventListener('click', () => {
-      exportReturnFocus = opener;
-      exportPopover.hidden = false;
-      const firstFormat = exportPopover.querySelector<HTMLButtonElement>('[data-export-format]');
-      firstFormat?.focus();
+      openExportSurface(opener);
     });
   }
 
-  sheetHandle.addEventListener('click', () => {
+  workspaceSheetHandle.addEventListener('click', () => {
     if (suppressSheetClick) {
       suppressSheetClick = false;
       return;
     }
     setSheetState(sheetState === 'peek' ? 'half' : sheetState === 'half' ? 'full' : 'peek');
   });
-  sheetHandle.addEventListener('pointerdown', (event) => {
+  sheetDragRegion.addEventListener('pointerdown', (event) => {
+    const target = event.target;
+    const interactive =
+      target instanceof Element
+        ? target.closest('button, input, textarea, select, a, [role="button"]')
+        : null;
+    if (interactive && !workspaceSheetHandle.contains(interactive)) {
+      return;
+    }
+    const currentHeight = sheetMotionState?.height ?? workspaceSheet.getBoundingClientRect().height;
     sheetGesture = {
       pointerId: event.pointerId,
       startY: event.clientY,
-      startHeight: sheet.getBoundingClientRect().height,
-      currentHeight: sheet.getBoundingClientRect().height,
+      startHeight: currentHeight,
+      currentHeight,
+      lastY: event.clientY,
+      lastTime: event.timeStamp,
+      pointerVelocityY: 0,
       moved: false,
     };
-    sheet.dataset.sheetDragging = 'true';
-    sheetHandle.setPointerCapture(event.pointerId);
+    workspaceSheet.dataset.sheetDragging = 'true';
+    sheetDragRegion.setPointerCapture(event.pointerId);
     event.preventDefault();
   });
-  sheetHandle.addEventListener('pointermove', (event) => {
+  sheetDragRegion.addEventListener('pointermove', (event) => {
     if (!sheetGesture || sheetGesture.pointerId !== event.pointerId) {
       return;
     }
@@ -1426,32 +1880,105 @@ function setupPatternWorkspace(): void {
       pointerY: event.clientY,
       snapPoints: sheetSnapPoints(),
     });
+    const elapsed = event.timeStamp - sheetGesture.lastTime;
+    if (elapsed > 0) {
+      sheetGesture.pointerVelocityY = (event.clientY - sheetGesture.lastY) / elapsed;
+    }
+    sheetGesture.lastY = event.clientY;
+    sheetGesture.lastTime = event.timeStamp;
     sheetGesture.currentHeight = height;
     sheetGesture.moved ||= Math.abs(event.clientY - sheetGesture.startY) > 4;
-    sheet.style.setProperty('--sheet-height', `${String(height)}px`);
+    sheetMotionState = reduceSheetMotion(
+      sheetMotionState ?? createSheetMotionState(sheetState, sheetSnapPoints()),
+      { type: 'drag', height },
+    );
+    workspaceSheet.style.setProperty('--sheet-height', `${String(height)}px`);
     event.preventDefault();
   });
-  sheetHandle.addEventListener('pointerup', (event) => {
+  sheetDragRegion.addEventListener('pointerup', (event) => {
     if (!sheetGesture || sheetGesture.pointerId !== event.pointerId) {
       return;
     }
-    const result = snapSheetHeight(sheetGesture.currentHeight, sheetSnapPoints());
+    const elapsed = event.timeStamp - sheetGesture.lastTime;
+    if (elapsed > 0) {
+      sheetGesture.pointerVelocityY = (event.clientY - sheetGesture.lastY) / elapsed;
+    }
+    sheetGesture.currentHeight = dragSheetHeight({
+      startHeight: sheetGesture.startHeight,
+      startPointerY: sheetGesture.startY,
+      pointerY: event.clientY,
+      snapPoints: sheetSnapPoints(),
+    });
+    const motion = reduceSheetMotion(
+      sheetMotionState ?? createSheetMotionState(sheetState, sheetSnapPoints()),
+      {
+        type: 'pointerup',
+        height: sheetGesture.currentHeight,
+        pointerVelocityY: sheetGesture.pointerVelocityY,
+      },
+    );
     suppressSheetClick = sheetGesture.moved;
     sheetGesture = null;
-    sheet.style.removeProperty('--sheet-height');
-    delete sheet.dataset.sheetDragging;
-    setSheetState(result.state);
-    if (sheetHandle.hasPointerCapture(event.pointerId)) {
-      sheetHandle.releasePointerCapture(event.pointerId);
+    sheetMotionState = motion;
+    workspaceSheet.style.removeProperty('--sheet-height');
+    delete workspaceSheet.dataset.sheetDragging;
+    applySheetState(motion.stableState);
+    if (sheetDragRegion.hasPointerCapture(event.pointerId)) {
+      sheetDragRegion.releasePointerCapture(event.pointerId);
     }
     event.preventDefault();
   });
-  sheetHandle.addEventListener('pointercancel', () => {
+  sheetDragRegion.addEventListener('pointercancel', () => {
+    const motion = reduceSheetMotion(
+      sheetMotionState ?? createSheetMotionState(sheetState, sheetSnapPoints()),
+      { type: 'pointercancel' },
+    );
     sheetGesture = null;
-    sheet.style.removeProperty('--sheet-height');
-    delete sheet.dataset.sheetDragging;
-    setSheetState(sheetState);
+    sheetMotionState = motion;
+    workspaceSheet.style.removeProperty('--sheet-height');
+    delete workspaceSheet.dataset.sheetDragging;
+    applySheetState(motion.stableState);
   });
+
+  const seriesTriggers = queryPatternWorkspaceAll('[data-color-series-filter]', HTMLButtonElement);
+  const desktopSeriesTrigger = seriesTriggers.find(
+    (trigger) => trigger.closest('[data-palette-controls="desktop"]') !== null,
+  );
+  const mobileSeriesTrigger = seriesTriggers.find(
+    (trigger) => trigger.closest('[data-palette-controls="mobile"]') !== null,
+  );
+  const controllers: SelectController[] = [];
+  if (desktopSeriesTrigger) {
+    editorDesktopSeriesController = createUiSelectPopover({
+      trigger: desktopSeriesTrigger,
+      overlayRoot,
+      id: 'editor-series-desktop',
+      options: [{ id: '', label: '全部系列' }],
+      selectedId: '',
+      onChange: selectEditorSeries,
+    });
+    controllers.push(editorDesktopSeriesController);
+  }
+  if (mobileSeriesTrigger) {
+    editorMobileSeriesController = createMobilePicker({
+      sheet: workspaceSheet,
+      panel: mobileSheetContent,
+      trigger: mobileSeriesTrigger,
+      id: 'editor-series-mobile',
+      title: '筛选颜色系列',
+      options: [{ id: '', label: '全部系列' }],
+      selectedId: '',
+      onChange: selectEditorSeries,
+    });
+    controllers.push(editorMobileSeriesController);
+  }
+  editorSeriesSelectControllers = Object.freeze(controllers);
+
+  function selectEditorSeries(selectedId: string): void {
+    paletteSeries = selectedId;
+    syncPaletteControls();
+    applyPaletteFilters();
+  }
 }
 
 function openPatternEditor(project: BeadProject): void {
@@ -1474,7 +2001,7 @@ function openPatternEditor(project: BeadProject): void {
       if (!currentProject || !history) {
         return;
       }
-      abortActiveExport('图纸已修改，之前的导出已取消。');
+      abortActiveExport();
       const snapshot = history.commitChanges(cells, changes);
       currentProject = withProjectCells(
         currentProject,
@@ -1496,19 +2023,32 @@ function openPatternEditor(project: BeadProject): void {
       currentSelection = selection;
       updateSelectionActions();
     },
+    onSelectionViewportRectChange(rect) {
+      currentSelectionViewportRect = rect;
+      scheduleSelectionContextPosition();
+    },
+    onSelectionTransferModeChange(nextMode) {
+      selectionTransferMode = nextMode;
+      updateSelectionActions();
+    },
+    onSuccessfulGesture(gesture) {
+      handleSuccessfulFirstUseGesture(gesture);
+    },
   });
   canvasController.setTool(activeTool);
   canvasController.setColor(selectedColorId);
   canvasController.resetPerformanceMetrics();
   activePanel = 'tools';
-  renderedInspectorPanel = null;
   currentSelection = null;
+  currentSelectionViewportRect = null;
+  selectionTransferMode = null;
   sheetState = 'peek';
   setSheetState('peek');
-  required(patternWorkspace, '[data-export-popover]', HTMLElement).hidden = true;
-  for (const button of patternWorkspace.querySelectorAll<HTMLButtonElement>(
-    '[data-return-prepare]',
-  )) {
+  setCanvasJumpOpen(false);
+  firstUseHintSession.enterEditor();
+  syncFirstUseHint();
+  resetExportSurface();
+  for (const button of queryPatternWorkspaceAll('[data-return-prepare]', HTMLButtonElement)) {
     button.disabled = selectedImage === null;
     button.title = selectedImage
       ? '保留当前矩阵并返回生成设置'
@@ -1516,7 +2056,7 @@ function openPatternEditor(project: BeadProject): void {
   }
   updateHistoryButtons();
   updateSelectionActions();
-  renderInspector(true);
+  renderInspector();
   schedulePerformanceCapture();
   sessionStatus.textContent = '图纸已生成';
 }
@@ -1524,7 +2064,7 @@ function openPatternEditor(project: BeadProject): void {
 function setActiveTool(tool: EditorTool): void {
   activeTool = tool;
   canvasController?.setTool(tool);
-  for (const button of patternWorkspace.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
+  for (const button of queryPatternWorkspaceAll('[data-tool]', HTMLButtonElement)) {
     const isActive = button.dataset.tool === tool;
     button.classList.toggle('is-active', isActive);
     button.setAttribute('aria-pressed', String(isActive));
@@ -1549,7 +2089,7 @@ function mirrorProject(axis: 'horizontal' | 'vertical'): void {
   if (!currentProject || !history) {
     return;
   }
-  abortActiveExport('图纸已修改，之前的导出已取消。');
+  abortActiveExport();
   const cells = mirrorCells(currentProject.cells, axis);
   const snapshot = history.commit(cells);
   currentProject = withProjectCells(
@@ -1574,7 +2114,7 @@ function undo(): void {
     announce('没有可撤销的操作。');
     return;
   }
-  abortActiveExport('图纸版本已变化，之前的导出已取消。');
+  abortActiveExport();
   currentProject = withProjectCells(
     currentProject,
     snapshot.cells,
@@ -1597,7 +2137,7 @@ function redo(): void {
     announce('没有可重做的操作。');
     return;
   }
-  abortActiveExport('图纸版本已变化，之前的导出已取消。');
+  abortActiveExport();
   currentProject = withProjectCells(
     currentProject,
     snapshot.cells,
@@ -1619,19 +2159,147 @@ function updateHistoryButtons(): void {
 
 function updateSelectionActions(): void {
   const active = currentSelection !== null;
-  for (const group of patternWorkspace.querySelectorAll<HTMLElement>('[data-selection-actions]')) {
-    group.dataset.selectionActive = String(active);
+  selectionContextBar.hidden = !active;
+  selectionContextBar.dataset.transferMode = selectionTransferMode ?? '';
+  if (currentSelection) {
+    selectionDescription.textContent = describeSelection(currentSelection).label;
   }
-  for (const button of patternWorkspace.querySelectorAll<HTMLButtonElement>(
-    '[data-selection-action]',
-  )) {
+  for (const button of queryPatternWorkspaceAll('[data-selection-action]', HTMLButtonElement)) {
     button.disabled = !active;
+    if (button.dataset.selectionAction === 'copy' || button.dataset.selectionAction === 'move') {
+      button.setAttribute(
+        'aria-pressed',
+        String(button.dataset.selectionAction === selectionTransferMode),
+      );
+    }
   }
-  for (const button of patternWorkspace.querySelectorAll<HTMLButtonElement>(
+  for (const button of queryPatternWorkspaceAll(
     '[data-clear-selection]:not([data-selection-action])',
+    HTMLButtonElement,
   )) {
     button.disabled = !active;
   }
+  scheduleSelectionContextPosition();
+}
+
+function scheduleSelectionContextPosition(): void {
+  if (selectionContextPositionFrame !== 0) {
+    return;
+  }
+  selectionContextPositionFrame = window.requestAnimationFrame(() => {
+    selectionContextPositionFrame = 0;
+    positionSelectionContext();
+  });
+}
+
+function positionSelectionContext(): void {
+  if (!currentSelection || !currentSelectionViewportRect || stage !== 'editor') {
+    selectionContextBar.hidden = true;
+    return;
+  }
+  selectionContextBar.hidden = false;
+  selectionContextBar.style.visibility = 'hidden';
+  const frameRect = patternCanvasFrame.getBoundingClientRect();
+  const canvas = required(patternCanvasFrame, '[data-pattern-canvas]', HTMLCanvasElement);
+  const canvasRect = canvas.getBoundingClientRect();
+  const barRect = selectionContextBar.getBoundingClientRect();
+  if (frameRect.width <= 0 || frameRect.height <= 0 || barRect.width <= 0 || barRect.height <= 0) {
+    selectionContextBar.hidden = true;
+    selectionContextBar.style.removeProperty('visibility');
+    return;
+  }
+
+  const selectionRect: ViewportRect = Object.freeze({
+    left: canvasRect.left - frameRect.left + currentSelectionViewportRect.left,
+    top: canvasRect.top - frameRect.top + currentSelectionViewportRect.top,
+    width: currentSelectionViewportRect.width,
+    height: currentSelectionViewportRect.height,
+  });
+  const occlusions: ViewportRect[] = [];
+  if (workspaceSheet.isConnected && workspaceLayoutMode !== 'desktop') {
+    const sheetOcclusion = relativeIntersection(frameRect, workspaceSheet.getBoundingClientRect());
+    if (sheetOcclusion) {
+      occlusions.push(sheetOcclusion);
+    }
+  }
+  const jumpForm = required(patternCanvasFrame, '[data-canvas-jump-form]', HTMLFormElement);
+  if (!jumpForm.hidden) {
+    const jumpOcclusion = relativeIntersection(frameRect, jumpForm.getBoundingClientRect());
+    if (jumpOcclusion) {
+      occlusions.push(jumpOcclusion);
+    }
+  }
+  const visualViewport = window.visualViewport;
+  if (visualViewport) {
+    const visibleBottom = visualViewport.offsetTop + visualViewport.height;
+    if (visibleBottom < frameRect.bottom) {
+      occlusions.push({
+        left: 0,
+        top: Math.max(0, visibleBottom - frameRect.top),
+        width: frameRect.width,
+        height: Math.max(0, frameRect.bottom - visibleBottom),
+      });
+    }
+  }
+
+  try {
+    const position = positionSelectionContextBar({
+      viewport: { left: 0, top: 0, width: frameRect.width, height: frameRect.height },
+      selection: selectionRect,
+      bar: { width: barRect.width, height: barRect.height },
+      safeArea: { top: 8, right: 8, bottom: 8, left: 8 },
+      occlusions,
+    });
+    selectionContextBar.style.left = `${String(position.left)}px`;
+    selectionContextBar.style.top = `${String(position.top)}px`;
+    selectionContextBar.dataset.placement = position.placement;
+    delete selectionContextBar.dataset.placementUnavailable;
+    selectionContextBar.style.removeProperty('visibility');
+  } catch {
+    selectionContextBar.hidden = true;
+    selectionContextBar.dataset.placementUnavailable = 'true';
+    selectionContextBar.style.removeProperty('visibility');
+  }
+}
+
+function relativeIntersection(container: DOMRect, candidate: DOMRect): ViewportRect | null {
+  const left = Math.max(container.left, candidate.left);
+  const top = Math.max(container.top, candidate.top);
+  const right = Math.min(container.right, candidate.right);
+  const bottom = Math.min(container.bottom, candidate.bottom);
+  return right > left && bottom > top
+    ? Object.freeze({
+        left: left - container.left,
+        top: top - container.top,
+        width: right - left,
+        height: bottom - top,
+      })
+    : null;
+}
+
+function setCanvasJumpOpen(open: boolean, restoreFocus = false): void {
+  const form = required(patternWorkspace, '[data-canvas-jump-form]', HTMLFormElement);
+  const toggle = required(patternWorkspace, '[data-toggle-canvas-jump]', HTMLButtonElement);
+  form.hidden = !open;
+  toggle.setAttribute('aria-expanded', String(open));
+  if (open) {
+    required(form, '[data-canvas-jump-row]', HTMLInputElement).focus({
+      preventScroll: true,
+    });
+  } else if (restoreFocus) {
+    toggle.focus({ preventScroll: true });
+  }
+  scheduleSelectionContextPosition();
+}
+
+function handleSuccessfulFirstUseGesture(gesture: FirstUseGesture): void {
+  if (firstUseHintSession.recordSuccessfulGesture(gesture)) {
+    syncFirstUseHint();
+  }
+}
+
+function syncFirstUseHint(): void {
+  firstUseHint.hidden = stage !== 'editor' || !firstUseHintSession.visible;
 }
 
 function schedulePerformanceCapture(): void {
@@ -1655,157 +2323,30 @@ function setActiveInspectorPanel(panel: InspectorPanel, sourceTab?: HTMLButtonEl
   renderInspector();
 }
 
-function renderInspector(force = false): void {
+function renderInspector(): void {
   const project = currentProject;
   if (!project) {
     return;
   }
-  if (force || renderedInspectorPanel !== activePanel) {
-    const markup = panelMarkup(project, activePanel);
-    required(patternWorkspace, '[data-inspector-content]', HTMLElement).innerHTML = markup;
-    required(patternWorkspace, '[data-sheet-content]', HTMLElement).innerHTML = markup;
-    renderedInspectorPanel = activePanel;
-  }
 
-  for (const tab of patternWorkspace.querySelectorAll<HTMLButtonElement>(
-    '[role="tab"][data-panel-tab]',
-  )) {
+  for (const tab of queryPatternWorkspaceAll('[role="tab"][data-panel-tab]', HTMLButtonElement)) {
     const isActive = tab.dataset.panelTab === activePanel;
     tab.setAttribute('aria-selected', String(isActive));
     tab.classList.toggle('is-active', isActive);
     tab.tabIndex = isActive ? 0 : -1;
   }
-  for (const panel of patternWorkspace.querySelectorAll<HTMLElement>('[data-tabpanel-surface]')) {
+  for (const panel of queryPatternWorkspaceAll('[data-tabpanel-surface]', HTMLElement)) {
     const surface = panel.dataset.tabpanelSurface === 'mobile' ? 'mobile' : 'desktop';
     panel.setAttribute('aria-labelledby', `inspector-${surface}-tab-${activePanel}`);
   }
-  for (const controls of patternWorkspace.querySelectorAll<HTMLElement>(
-    '[data-palette-controls]',
-  )) {
+  for (const controls of queryPatternWorkspaceAll('[data-palette-controls]', HTMLElement)) {
     controls.hidden = activePanel !== 'palette';
   }
 
+  updateInspectorDynamicContent();
   if (activePanel === 'palette') {
     initializePaletteControls();
   }
-  updateInspectorDynamicContent();
-}
-
-function panelMarkup(project: BeadProject, panel: InspectorPanel): string {
-  if (panel === 'palette') {
-    const paletteColors = PALETTE_COLORS.filter((color) =>
-      project.palette.availableColorIds.includes(color.id),
-    );
-    const groups = groupPaletteColorsBySeries(paletteColors);
-    return `
-      <div class="panel-heading">
-        <div>
-          <span class="eyebrow">当前颜色</span>
-          <h2 data-current-color-heading>选择颜色</h2>
-        </div>
-        <span class="selected-swatch" data-current-color-swatch aria-hidden="true"></span>
-      </div>
-      <p class="panel-note">只显示生成时选定的可用颜色；屏幕颜色是近似预览，备料请以实物为准。</p>
-      <div class="palette-grid" role="list" aria-label="项目可用拼豆颜色">
-        ${groups
-          .map(
-            (group) => `
-              <section
-                class="palette-series-group"
-                data-palette-series-group="${group.series}"
-                aria-label="${group.series} 系列"
-              >
-                <h3>${group.series} 系列</h3>
-                <div role="group">
-                  ${group.colors
-                    .map(
-                      (color) => `
-                        <button
-                          class="palette-swatch"
-                          type="button"
-                          data-color-id="${color.id}"
-                          data-color-series="${color.series}"
-                          style="--swatch:${color.displayHex}"
-                          aria-label="色号 ${color.paletteId.toUpperCase()} ${color.code}${
-                            color.name ? `，${color.name}` : ''
-                          }"
-                        >
-                          <span aria-hidden="true"></span>
-                          <small>${color.code}</small>
-                        </button>
-                      `,
-                    )
-                    .join('')}
-                </div>
-              </section>
-            `,
-          )
-          .join('')}
-      </div>
-    `;
-  }
-
-  if (panel === 'materials') {
-    return `
-      <div class="panel-heading">
-        <div><span class="eyebrow">材料清单</span><h2 data-material-heading></h2></div>
-      </div>
-      <dl class="material-summary">
-        <div><dt>成品大小</dt><dd data-material-size></dd></div>
-        <div><dt>拼板</dt><dd data-material-boards></dd></div>
-        <div><dt>空格</dt><dd data-material-blanks></dd></div>
-      </dl>
-      <ul class="material-list" data-material-list></ul>
-    `;
-  }
-
-  if (panel === 'settings') {
-    return `
-      <div class="panel-heading">
-        <div><span class="eyebrow">图纸设置</span><h2 data-settings-heading></h2></div>
-      </div>
-      <dl class="settings-list">
-        <div><dt>色板</dt><dd data-settings-palette></dd></div>
-        <div><dt>最多颜色</dt><dd data-settings-maximum></dd></div>
-        <div><dt>格子取色</dt><dd data-settings-sampling></dd></div>
-        <div><dt>颜色过渡</dt><dd data-settings-dithering></dd></div>
-        <div><dt>成品大小</dt><dd data-settings-size></dd></div>
-      </dl>
-      <div class="panel-actions">
-        <button class="secondary-button" type="button" data-matrix-mirror="horizontal">
-          <i class="ph ph-arrows-left-right" aria-hidden="true"></i>左右镜像
-        </button>
-        <button class="secondary-button" type="button" data-matrix-mirror="vertical">
-          <i class="ph ph-arrows-down-up" aria-hidden="true"></i>上下镜像
-        </button>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="panel-heading">
-      <div><span class="eyebrow">编辑工具</span><h2 data-tool-heading></h2></div>
-    </div>
-    <div class="current-color-row">
-      <span class="selected-swatch" data-current-color-swatch aria-hidden="true"></span>
-      <span>
-        <strong data-current-color-label></strong>
-        <small data-current-color-name></small>
-      </span>
-      <button class="text-button" type="button" data-panel-tab="palette">换颜色</button>
-    </div>
-    <div class="mobile-tool-grid">
-      ${toolButtonMarkup('paint', '画笔', 'ph-pencil-simple')}
-      ${toolButtonMarkup('erase', '橡皮', 'ph-eraser')}
-      ${toolButtonMarkup('eyedropper', '吸管', 'ph-eyedropper')}
-      ${toolButtonMarkup('fill', '填充', 'ph-paint-bucket')}
-      ${toolButtonMarkup('select', '选择', 'ph-selection')}
-    </div>
-    <button class="secondary-button full-width" type="button" data-clear-selection>
-      <i class="ph ph-trash" aria-hidden="true"></i>清空选中区域
-    </button>
-    <p class="panel-note">画笔可连续拖动；选择后可拖动移动，按住 Option / Alt 拖动复制。键盘方向键定位，空格应用工具。</p>
-  `;
 }
 
 function updateInspectorDynamicContent(): void {
@@ -1813,90 +2354,94 @@ function updateInspectorDynamicContent(): void {
   if (!project) {
     return;
   }
-  const selected = PALETTE_COLORS.find((color) => color.id === selectedColorId);
-  setTextAll('[data-tool-heading]', toolCustomerLabel(activeTool));
-  setTextAll(
-    '[data-current-color-heading]',
-    selected ? `色号 ${selected.paletteId.toUpperCase()} ${selected.code}` : '选择颜色',
-  );
-  setTextAll(
-    '[data-current-color-label]',
-    selected ? `${selected.paletteId.toUpperCase()} ${selected.code}` : '尚未选择颜色',
-  );
-  setTextAll('[data-current-color-name]', selected?.name ?? '点击“颜色”选择拼豆色号');
-  for (const swatch of patternWorkspace.querySelectorAll<HTMLElement>(
-    '[data-current-color-swatch]',
-  )) {
-    swatch.style.setProperty('--swatch', selected?.displayHex ?? 'transparent');
+  const view = createWorkspacePanelsView(project);
+  for (const controller of workspacePanelControllers) {
+    controller.update(view);
   }
-  for (const swatch of patternWorkspace.querySelectorAll<HTMLButtonElement>('[data-color-id]')) {
-    const isSelected = swatch.dataset.colorId === selectedColorId;
-    swatch.classList.toggle('is-selected', isSelected);
-    swatch.setAttribute('aria-pressed', String(isSelected));
-  }
-  for (const button of patternWorkspace.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
-    const isActive = button.dataset.tool === activeTool;
-    button.classList.toggle('is-active', isActive);
-    button.setAttribute('aria-pressed', String(isActive));
-  }
-
-  const statistics = calculateStatistics(project.cells);
-  const layout = calculatePhysicalLayout(project);
-  setTextAll(
-    '[data-material-heading]',
-    `${String(statistics.nonEmptyBeadCount)} 颗 · ${String(statistics.usedColorCount)} 色`,
-  );
-  setTextAll(
-    '[data-material-size]',
-    `${(layout.widthMm / 10).toFixed(1)} × ${(layout.heightMm / 10).toFixed(1)} cm`,
-  );
-  setTextAll('[data-material-boards]', `${String(layout.boardCount)} 块`);
-  setTextAll('[data-material-blanks]', `${String(statistics.blankCount)} 格`);
-  const materialRows = Object.entries(statistics.perColorCounts)
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .map(([colorId, count]) => {
-      const color = PALETTE_COLORS.find((entry) => entry.id === colorId);
-      return color
-        ? `
-            <li>
-              <span class="material-swatch" style="--swatch:${color.displayHex}" aria-hidden="true"></span>
-              <span>
-                <strong>${color.paletteId.toUpperCase()} ${color.code}</strong>
-                <small>${color.name ?? '实物颜色以拼豆为准'}</small>
-              </span>
-              <b>${String(count)} 颗</b>
-            </li>
-          `
-        : '';
-    })
-    .join('');
-  for (const list of patternWorkspace.querySelectorAll<HTMLElement>('[data-material-list]')) {
-    if (list.innerHTML !== materialRows) {
-      list.innerHTML = materialRows;
-    }
-  }
-
-  setTextAll(
-    '[data-settings-heading]',
-    `${String(project.grid.columns)} 列 × ${String(project.grid.rows)} 行`,
-  );
-  setTextAll('[data-settings-palette]', project.palette.paletteId.toUpperCase());
-  setTextAll('[data-settings-maximum]', String(project.palette.maximumColors ?? '不限'));
-  setTextAll(
-    '[data-settings-sampling]',
-    project.generation.sampling === 'average' ? '平均取色' : '保留像素',
-  );
-  setTextAll(
-    '[data-settings-dithering]',
-    project.generation.dithering === 'none' ? '干净色块' : '细腻过渡',
-  );
-  setTextAll(
-    '[data-settings-size]',
-    `${(layout.widthMm / 10).toFixed(1)} × ${(layout.heightMm / 10).toFixed(1)} cm`,
-  );
+  syncSheetPeekSummary(view);
   updateSelectionActions();
   if (activePanel === 'palette') {
     applyPaletteFilters();
+  }
+}
+
+function createWorkspacePanelsView(project: BeadProject): WorkspacePanelsView {
+  const selected = PALETTE_COLORS.find((color) => color.id === selectedColorId);
+  const statistics = calculateStatistics(project.cells);
+  const layout = calculatePhysicalLayout(project);
+  const size = `${(layout.widthMm / 10).toFixed(1)} × ${(layout.heightMm / 10).toFixed(1)} cm`;
+  const paletteColors = PALETTE_COLORS.filter((color) =>
+    project.palette.availableColorIds.includes(color.id),
+  ).map((color) =>
+    Object.freeze({
+      id: color.id,
+      paletteLabel: color.paletteId.toUpperCase(),
+      series: color.series,
+      code: color.code,
+      name: color.name,
+      displayHex: color.displayHex,
+    }),
+  );
+  const materials = Object.entries(statistics.perColorCounts)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .flatMap(([colorId, count]) => {
+      const color = PALETTE_COLORS.find((entry) => entry.id === colorId);
+      return color
+        ? [
+            Object.freeze({
+              id: color.id,
+              paletteLabel: color.paletteId.toUpperCase(),
+              code: color.code,
+              name: color.name,
+              displayHex: color.displayHex,
+              count,
+            }),
+          ]
+        : [];
+    });
+
+  return Object.freeze({
+    activePanel,
+    activeTool,
+    activeToolLabel: toolCustomerLabel(activeTool),
+    selectionActive: currentSelection !== null,
+    selectedColor: selected
+      ? Object.freeze({
+          id: selected.id,
+          label: `${selected.paletteId.toUpperCase()} ${selected.code}`,
+          name: selected.name ?? '实物颜色以拼豆为准',
+          displayHex: selected.displayHex,
+        })
+      : null,
+    paletteColors: Object.freeze(paletteColors),
+    materials: Object.freeze(materials),
+    materialHeading: `${String(statistics.nonEmptyBeadCount)} 颗 · ${String(
+      statistics.usedColorCount,
+    )} 色`,
+    materialSize: size,
+    materialBoards: `${String(layout.boardCount)} 块`,
+    materialBlanks: `${String(statistics.blankCount)} 格`,
+    settingsHeading: `${String(project.grid.columns)} 列 × ${String(project.grid.rows)} 行`,
+    settingsPalette: project.palette.paletteId.toUpperCase(),
+    settingsMaximum: String(project.palette.maximumColors ?? '不限'),
+    settingsSampling: project.generation.sampling === 'average' ? '平均取色' : '保留像素',
+    settingsDithering: project.generation.dithering === 'none' ? '干净色块' : '细腻过渡',
+    settingsSize: size,
+  });
+}
+
+function syncSheetPeekSummary(view: WorkspacePanelsView): void {
+  required(workspaceSheet, '[data-sheet-current-tool]', HTMLElement).textContent =
+    view.activeToolLabel;
+  required(workspaceSheet, '[data-sheet-current-color]', HTMLElement).textContent =
+    view.selectedColor?.label ?? '未选颜色';
+  required(workspaceSheet, '[data-sheet-current-color-swatch]', HTMLElement).style.setProperty(
+    '--swatch',
+    view.selectedColor?.displayHex ?? 'transparent',
+  );
+  const icon = workspaceSheet.querySelector<HTMLElement>('[data-sheet-peek-summary] > span i');
+  if (icon) {
+    icon.className = `ph ${toolIconName(activeTool)}`;
   }
 }
 
@@ -1917,41 +2462,39 @@ function initializePaletteControls(): void {
   if (paletteSeries && !series.includes(paletteSeries)) {
     paletteSeries = '';
   }
-  for (const select of patternWorkspace.querySelectorAll<HTMLSelectElement>(
-    '[data-color-series-filter]',
-  )) {
-    const fragment = document.createDocumentFragment();
-    const all = document.createElement('option');
-    all.value = '';
-    all.textContent = '全部系列';
-    fragment.append(all);
-    for (const value of series) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = `${value} 系列`;
-      fragment.append(option);
-    }
-    select.replaceChildren(fragment);
+  const options = [
+    { id: '', label: '全部系列' },
+    ...series.map((value) => ({ id: value, label: `${value} 系列` })),
+  ];
+  for (const controller of editorSeriesSelectControllers) {
+    controller.setOptions(options);
+    controller.setValue(paletteSeries);
   }
   syncPaletteControls();
   applyPaletteFilters();
 }
 
-function syncPaletteControls(source?: HTMLInputElement | HTMLSelectElement): void {
-  for (const input of patternWorkspace.querySelectorAll<HTMLInputElement>('[data-color-search]')) {
+function syncPaletteControls(source?: HTMLInputElement): void {
+  for (const input of queryPatternWorkspaceAll('[data-color-search]', HTMLInputElement)) {
     if (input !== source) {
       input.value = paletteQuery;
     }
   }
-  for (const input of patternWorkspace.querySelectorAll<HTMLInputElement>('[data-color-filter]')) {
+  for (const input of queryPatternWorkspaceAll('[data-color-filter]', HTMLInputElement)) {
     input.checked = input.value === paletteScope;
   }
-  for (const select of patternWorkspace.querySelectorAll<HTMLSelectElement>(
-    '[data-color-series-filter]',
-  )) {
-    if (select !== source) {
-      select.value = paletteSeries;
-    }
+  for (const controller of editorSeriesSelectControllers) {
+    controller.setValue(paletteSeries);
+  }
+  const mobileTrigger = workspaceSheet.querySelector<HTMLButtonElement>(
+    '[data-palette-controls="mobile"] [data-color-series-filter]',
+  );
+  if (mobileTrigger) {
+    setSelectTriggerValue(
+      mobileTrigger,
+      paletteSeries,
+      paletteSeries === '' ? '全部系列' : `${paletteSeries} 系列`,
+    );
   }
 }
 
@@ -1969,12 +2512,10 @@ function applyPaletteFilters(): void {
     recentColorIds,
   }).filter((color) => paletteSeries === '' || color.series === paletteSeries);
   const visibleIds = new Set(filtered.map((color) => color.id));
-  for (const swatch of patternWorkspace.querySelectorAll<HTMLButtonElement>('[data-color-id]')) {
+  for (const swatch of queryPatternWorkspaceAll('[data-color-id]', HTMLButtonElement)) {
     swatch.hidden = !visibleIds.has(swatch.dataset.colorId ?? '');
   }
-  for (const group of patternWorkspace.querySelectorAll<HTMLElement>(
-    '[data-palette-series-group]',
-  )) {
+  for (const group of queryPatternWorkspaceAll('[data-palette-series-group]', HTMLElement)) {
     group.hidden = ![...group.querySelectorAll<HTMLButtonElement>('[data-color-id]')].some(
       (swatch) => !swatch.hidden,
     );
@@ -1986,120 +2527,164 @@ function applyPaletteFilters(): void {
 }
 
 function setTextAll(selector: string, text: string): void {
-  for (const element of patternWorkspace.querySelectorAll<HTMLElement>(selector)) {
+  for (const element of queryPatternWorkspaceAll(selector, HTMLElement)) {
     element.textContent = text;
   }
 }
 
-async function downloadExport(format: string): Promise<void> {
-  if (!currentProject || !['png', 'pdf', 'csv', 'json'].includes(format)) {
+async function startSelectedExport(): Promise<void> {
+  if (!currentProject) {
     return;
   }
-  const capabilityFormat = format === 'json' ? 'projectJson' : format;
-  if (
-    !appCapabilities.exports.includes(capabilityFormat as 'png' | 'pdf' | 'csv' | 'projectJson')
-  ) {
+  const task = exportCompletionState.selectedTask;
+  const definition = exportTaskDefinition(task);
+  const capabilityFormat = definition.format === 'json' ? 'projectJson' : definition.format;
+  if (!appCapabilities.exports.includes(capabilityFormat)) {
     announce('当前服务不支持这种导出格式。');
     return;
   }
-  const project = captureProjectRevision(currentProject);
-  const statusElements = patternWorkspace.querySelectorAll<HTMLElement>(
-    '[data-export-inline-status], [data-export-status]',
-  );
-  const setStatus = (message: string): void => {
-    for (const status of statusElements) {
-      status.textContent = message;
-    }
-  };
-  exportController?.abort();
-  const controller = new AbortController();
-  exportController = controller;
-  setStatus(`正在准备矩阵版本 r${String(project.revision)} 的下载文件…`);
-  const baseName = safeDownloadBaseName(project.source.fileName);
-  const template =
-    patternWorkspace.querySelector<HTMLInputElement>('input[name="export-template"]:checked')
-      ?.value === 'pure'
-      ? 'pure'
-      : 'annotated';
-
-  try {
-    let blob: Blob;
-    const extension = format;
-    if (format === 'json') {
-      blob = new Blob([exportProjectJson(project)], { type: 'application/json;charset=utf-8' });
-    } else if (format === 'csv' && !navigator.onLine) {
-      blob = new Blob([exportProjectCsv(project)], { type: 'text/csv;charset=utf-8' });
-    } else {
-      try {
-        blob = await exportPattern(
-          project,
-          format as 'png' | 'pdf' | 'csv',
-          template,
-          controller.signal,
-        );
-      } catch (error) {
-        if (
-          format === 'csv' &&
-          error instanceof PatternApiError &&
-          error.code === 'SERVICE_UNREACHABLE'
-        ) {
-          blob = new Blob([exportProjectCsv(project)], { type: 'text/csv;charset=utf-8' });
-        } else {
-          throw error;
-        }
-      }
-    }
-    if (controller.signal.aborted) {
-      return;
-    }
-    downloadBlob(blob, `${baseName}-pattern-r${String(project.revision)}.${extension}`);
-    setStatus(`矩阵版本 r${String(project.revision)} 的下载已开始。`);
-    announce(
-      `${extension.toUpperCase()} 文件已准备完成，内容来自矩阵版本 r${String(project.revision)}。`,
-    );
-  } catch (error) {
-    if (controller.signal.aborted || isAbortError(error)) {
-      setStatus('导出已取消。');
-      return;
-    }
-    setStatus(error instanceof PatternApiError ? error.message : '导出失败，请稍后重试。');
-  } finally {
-    if (exportController === controller) {
-      exportController = null;
-    }
-  }
+  await exportCoordinator.start({
+    project: currentProject,
+    task,
+    pngTemplate: exportCompletionState.pngTemplate,
+  });
 }
 
-function abortActiveExport(message: string): void {
-  if (!exportController) {
+function openExportSurface(opener: HTMLButtonElement): void {
+  if (!currentProject) {
     return;
   }
-  exportController.abort();
-  exportController = null;
-  for (const status of patternWorkspace.querySelectorAll<HTMLElement>(
-    '[data-export-inline-status], [data-export-status]',
-  )) {
-    status.textContent = message;
+  const mobile = opener.matches('[data-mobile-export]');
+  const content = mobile ? mobileSheetContent : desktopInspectorContent;
+  exportReturnFocus = opener;
+  exportCompletionState = openExportCompletion(exportCompletionState, {
+    panel: activePanel,
+    sheetState,
+    triggerKey: mobile ? 'mobile-export' : 'desktop-export',
+    scrollTop: content.scrollTop,
+  });
+  if (mobile) {
+    setSheetState('full');
+  }
+  setExportSurfacesOpen(true);
+  syncExportCompletionUi();
+  const surfaceRoot = mobile ? workspaceSheet : workspaceInspector;
+  surfaceRoot
+    .querySelector<HTMLButtonElement>(`[data-export-task="${exportCompletionState.selectedTask}"]`)
+    ?.focus();
+}
+
+function closeExportSurface(restoreFocus = true): void {
+  const returnContext = exportCompletionState.returnContext;
+  exportCoordinator.invalidate();
+  exportCompletionState = closeExportCompletion(exportCompletionState);
+  setExportSurfacesOpen(false);
+  if (returnContext) {
+    activePanel = isInspectorPanel(returnContext.panel) ? returnContext.panel : activePanel;
+    setSheetState(returnContext.sheetState);
+    renderInspector();
+    const content =
+      returnContext.triggerKey === 'mobile-export' ? mobileSheetContent : desktopInspectorContent;
+    content.scrollTop = returnContext.scrollTop;
+  }
+  if (restoreFocus) {
+    exportReturnFocus?.focus();
+  }
+  exportReturnFocus = null;
+}
+
+function resetExportSurface(): void {
+  exportCoordinator.invalidate();
+  exportCompletionState = createExportCompletionState();
+  setExportSurfacesOpen(false);
+  exportReturnFocus = null;
+}
+
+function setExportSurfacesOpen(open: boolean): void {
+  for (const panel of queryPatternWorkspaceAll('[data-export-completion]', HTMLElement)) {
+    const surface = panel.dataset.exportSurface;
+    const container = panel.parentElement;
+    if (!container) {
+      continue;
+    }
+    for (const element of container.querySelectorAll<HTMLElement>(
+      '[data-tab-surface], [data-palette-controls], [data-tabpanel-surface], .inspector-primary, .sheet-primary',
+    )) {
+      if (!panel.contains(element)) {
+        element.hidden = open;
+      }
+    }
+    panel.hidden = !open;
+    if (!open && surface) {
+      panel.removeAttribute('aria-busy');
+    }
   }
 }
 
-function syncExportTemplateControls(source: HTMLInputElement): void {
-  const template: AppPngTemplate = source.matches('[data-export-grid]')
-    ? source.checked
-      ? 'annotated'
-      : 'pure'
-    : source.value === 'pure'
-      ? 'pure'
-      : 'annotated';
-  for (const input of patternWorkspace.querySelectorAll<HTMLInputElement>(
-    '[data-export-template]',
-  )) {
-    input.checked = input.value === template;
+function syncExportCompletionUi(): void {
+  const definition = exportTaskDefinition(exportCompletionState.selectedTask);
+  const project = currentProject;
+  const statistics = project ? calculateStatistics(project.cells) : null;
+  for (const panel of queryPatternWorkspaceAll('[data-export-completion]', HTMLElement)) {
+    for (const button of panel.querySelectorAll<HTMLButtonElement>('[data-export-task]')) {
+      const selected = button.dataset.exportTask === exportCompletionState.selectedTask;
+      button.classList.toggle('is-active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    }
+    const templates = required(panel, '[data-export-template-options]', HTMLFieldSetElement);
+    templates.hidden = exportCompletionState.selectedTask !== 'shareImage';
+    for (const input of panel.querySelectorAll<HTMLInputElement>('[data-export-template]')) {
+      input.checked = input.value === exportCompletionState.pngTemplate;
+    }
+    const runButton = required(panel, '[data-export-run]', HTMLButtonElement);
+    runButton.textContent =
+      exportCompletionState.selectedTask === 'saveProject'
+        ? '保存项目文件'
+        : `下载${definition.label}`;
+    runButton.disabled =
+      exportCompletionState.status.phase === 'running' ||
+      !appCapabilities.exports.includes(
+        definition.format === 'json' ? 'projectJson' : definition.format,
+      );
+    required(panel, '[data-export-summary]', HTMLElement).textContent =
+      statistics === null
+        ? '当前没有可导出的图纸。'
+        : `${String(statistics.nonEmptyBeadCount)} 颗拼豆 · ${String(
+            statistics.usedColorCount,
+          )} 色 · ${String(project?.grid.columns ?? 0)} × ${String(project?.grid.rows ?? 0)} 格`;
+    panel.setAttribute('aria-busy', String(exportCompletionState.status.phase === 'running'));
+    required(panel, '[data-export-status]', HTMLElement).textContent = exportStatusMessage();
   }
-  const includeGrid = patternWorkspace.querySelector<HTMLInputElement>('[data-export-grid]');
-  if (includeGrid) {
-    includeGrid.checked = template === 'annotated';
+}
+
+function exportStatusMessage(): string {
+  const status = exportCompletionState.status;
+  if (status.phase === 'idle') {
+    return '';
   }
+  if (status.phase === 'running') {
+    return `正在准备${exportTaskDefinition(status.task).label}…`;
+  }
+  if (status.phase === 'success') {
+    return `${exportTaskDefinition(status.task).label}已下载。`;
+  }
+  return status.message;
+}
+
+function handleExportEvent(event: ExportCoordinatorEvent): void {
+  if (event.phase === 'running') {
+    exportCompletionState = beginExport(exportCompletionState, event.token, event.task);
+  } else if (event.phase === 'success') {
+    exportCompletionState = completeExport(exportCompletionState, event.token, event.fileName);
+  } else {
+    exportCompletionState = failExport(exportCompletionState, event.token, event.message);
+  }
+  syncExportCompletionUi();
+  announce(event.message);
+}
+
+function abortActiveExport(): void {
+  exportCoordinator.invalidate('图纸已更新，请重新导出');
 }
 
 function setupChartWorkspace(): GridEditorController {
@@ -2230,8 +2815,10 @@ function confirmReplaceImage(): void {
 function resetToUpload(): void {
   loadRevision += 1;
   generationController?.abort();
-  exportController?.abort();
+  exportCoordinator.invalidate();
   chartMirrorController?.abort();
+  recommendationRequests.cancel();
+  availableColorMobilePanelController?.close();
   canvasController?.destroy();
   canvasController = null;
   history = null;
@@ -2239,9 +2826,14 @@ function resetToUpload(): void {
   sourceGenerationRevision = null;
   selectedImage = null;
   currentSelection = null;
-  renderedInspectorPanel = null;
+  currentSelectionViewportRect = null;
+  selectionTransferMode = null;
   recentColorIds = Object.freeze([]);
   gridContract = null;
+  applyUploadPrepareFlow(resetFlowForReplacement(currentUploadPrepareFlow()));
+  mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
+  samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
+  syncSamplingControls(prepareWorkspace, samplingSelection);
   clearChartResult();
   objectUrls.revokeAll();
   fileInput.value = '';
@@ -2253,6 +2845,14 @@ function resetToUpload(): void {
 }
 
 function showStage(nextStage: AppStage): void {
+  if (stage === 'editor' && nextStage !== 'editor') {
+    editorDesktopSeriesController?.close();
+    editorMobileSeriesController?.cancel();
+    firstUseHintSession.dismiss();
+    syncFirstUseHint();
+    setCanvasJumpOpen(false);
+    resetExportSurface();
+  }
   stage = nextStage;
   shell.dataset.stage = nextStage;
   uploadWorkspace.hidden = nextStage !== 'upload';
@@ -2272,12 +2872,91 @@ function showStage(nextStage: AppStage): void {
   required(app, '#main-workspace', HTMLElement).focus({ preventScroll: true });
 }
 
+function updateWorkspaceLayout(): void {
+  const viewportWidth = Math.max(
+    1,
+    document.documentElement.clientWidth || window.innerWidth || 320,
+  );
+  const nextLayout = resolveWorkspaceLayout(viewportWidth);
+  const crossingDesktopBoundary =
+    workspaceLayoutMode !== null &&
+    (workspaceLayoutMode === 'desktop') !== (nextLayout.mode === 'desktop');
+  const activeElement = document.activeElement;
+  const sourceUsesDesktopSurface = workspaceLayoutMode === 'desktop';
+  const focusWasInSourceSurface =
+    activeElement !== null &&
+    (sourceUsesDesktopSurface
+      ? workspaceInspector.contains(activeElement) || workspaceToolRail.contains(activeElement)
+      : workspaceSheet.contains(activeElement));
+  const sourceSeriesController = sourceUsesDesktopSurface
+    ? editorDesktopSeriesController
+    : editorMobileSeriesController;
+  const sourceSeriesWasOpen = sourceSeriesController?.isOpen() ?? false;
+  const sourceFocusRoot = sourceUsesDesktopSurface ? patternWorkspace : workspaceSheet;
+  const sourceSeriesTrigger = sourceFocusRoot.querySelector<HTMLElement>(
+    '[data-color-series-filter]',
+  );
+  const focusSnapshot = crossingDesktopBoundary
+    ? captureWorkspaceSurfaceFocus(
+        sourceFocusRoot,
+        sourceSeriesWasOpen ? sourceSeriesTrigger : focusWasInSourceSurface ? activeElement : null,
+        activePanel,
+      )
+    : null;
+
+  if (crossingDesktopBoundary) {
+    editorDesktopSeriesController?.close();
+    editorMobileSeriesController?.cancel();
+  }
+
+  const layout = responsiveWorkspaceMount.update(viewportWidth);
+  workspaceLayoutMode = layout.mode;
+  patternWorkspace.style.setProperty(
+    '--workspace-tool-rail-width',
+    `${String(layout.toolRailWidth)}px`,
+  );
+  patternWorkspace.style.setProperty(
+    '--workspace-inspector-width',
+    `${String(layout.inspectorWidth)}px`,
+  );
+  recalculateSheetMotion();
+  scheduleSelectionContextPosition();
+
+  if (exportCompletionState.phase === 'open') {
+    const attachedSurface = layout.attachInspector ? workspaceInspector : workspaceSheet;
+    exportReturnFocus = required(
+      attachedSurface,
+      layout.attachInspector ? '[data-open-export]' : '[data-mobile-export]',
+      HTMLButtonElement,
+    );
+    setExportSurfacesOpen(true);
+    syncExportCompletionUi();
+    if (crossingDesktopBoundary && focusWasInSourceSurface) {
+      attachedSurface
+        .querySelector<HTMLButtonElement>(
+          `[data-export-task="${exportCompletionState.selectedTask}"]`,
+        )
+        ?.focus({ preventScroll: true });
+    }
+  } else if (crossingDesktopBoundary) {
+    restoreWorkspaceSurfaceFocus(
+      layout.attachInspector ? patternWorkspace : workspaceSheet,
+      focusSnapshot,
+    );
+  }
+}
+
 function setSheetState(nextState: SheetState): void {
+  const snapPoints = sheetSnapPoints();
+  applySheetSnapPointVariables(snapPoints);
+  sheetMotionState = createSheetMotionState(nextState, snapPoints);
+  applySheetState(nextState);
+}
+
+function applySheetState(nextState: SheetState): void {
   sheetState = nextState;
-  const sheet = required(patternWorkspace, '[data-workspace-sheet]', HTMLElement);
-  const handle = required(patternWorkspace, '[data-sheet-handle]', HTMLButtonElement);
-  sheet.dataset.sheetState = nextState;
-  handle.setAttribute(
+  workspaceSheet.dataset.sheetState = nextState;
+  workspaceSheetHandle.setAttribute(
     'aria-label',
     nextState === 'peek'
       ? '展开控制面板'
@@ -2285,16 +2964,35 @@ function setSheetState(nextState: SheetState): void {
         ? '展开全部控制面板'
         : '收起控制面板',
   );
+  scheduleSelectionContextPosition();
+}
+
+function recalculateSheetMotion(): void {
+  const snapPoints = sheetSnapPoints();
+  applySheetSnapPointVariables(snapPoints);
+  sheetMotionState = sheetMotionState
+    ? reduceSheetMotion(sheetMotionState, { type: 'recalculate', snapPoints })
+    : createSheetMotionState(sheetState, snapPoints);
+  workspaceSheet.style.removeProperty('--sheet-height');
+  delete workspaceSheet.dataset.sheetDragging;
+  applySheetState(sheetMotionState.stableState);
+}
+
+function handleVisualViewportChange(): void {
+  recalculateSheetMotion();
+  scheduleSelectionContextPosition();
+}
+
+function applySheetSnapPointVariables(snapPoints: SheetSnapPoints): void {
+  workspaceSheet.style.setProperty('--sheet-peek-height', `${String(snapPoints.peek)}px`);
+  workspaceSheet.style.setProperty('--sheet-half-height', `${String(snapPoints.half)}px`);
+  workspaceSheet.style.setProperty('--sheet-full-height', `${String(snapPoints.full)}px`);
 }
 
 function updateSamplingDefault(): void {
-  const value = mode === 'pixelArt' ? 'nearest' : 'average';
-  const input = prepareWorkspace.querySelector<HTMLInputElement>(
-    `input[name="sampling"][value="${value}"]`,
-  );
-  if (input) {
-    input.checked = true;
-  }
+  if (mode === 'existingChart') return;
+  samplingSelection = recommendSampling(samplingSelection, mode, appCapabilities.sampling);
+  syncSamplingControls(prepareWorkspace, samplingSelection);
 }
 
 function setFileStatus(message: string, state: 'ready' | 'loading' | 'error'): void {
@@ -2360,7 +3058,7 @@ function resizeCrop(
 }
 
 function selectedBoardSize(): { readonly rows: number; readonly columns: number } {
-  const presetId = required(prepareWorkspace, '[data-board-preset]', HTMLSelectElement).value;
+  const presetId = selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare');
   if (presetId === 'custom') {
     return Object.freeze({
       rows: numberValue(
@@ -2385,11 +3083,22 @@ function selectedBoardSize(): { readonly rows: number; readonly columns: number 
 }
 
 function sheetSnapPoints(): SheetSnapPoints {
-  const availableHeight = Math.max(240, patternWorkspace.clientHeight || window.innerHeight);
-  const full = Math.max(220, availableHeight - 8);
-  const peek = Math.min(112, Math.max(72, full * 0.28));
-  const half = Math.min(full - 1, Math.max(peek + 1, full * 0.48));
-  return Object.freeze({ peek, half, full });
+  const viewportHeight = Math.max(240, patternWorkspace.clientHeight || window.innerHeight || 240);
+  const visualViewport = window.visualViewport;
+  const rawKeyboardHeight = visualViewport
+    ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
+    : 0;
+  const keyboardHeight = Math.min(viewportHeight - 160, rawKeyboardHeight);
+  const header = required(workspaceSheet, '[data-sheet-drag-region]', HTMLElement);
+  const primary = required(workspaceSheet, '.sheet-primary', HTMLElement);
+  const peekContentHeight = Math.max(112, header.scrollHeight + primary.scrollHeight);
+  return calculateSheetSnapPoints({
+    viewportHeight,
+    peekContentHeight,
+    keyboardHeight,
+    topGap: 8,
+    halfRatio: 0.48,
+  });
 }
 
 function applyIntegerLimits(input: HTMLInputElement, minimum: number, maximum: number): void {
@@ -2404,14 +3113,50 @@ function applyDecimalLimits(input: HTMLInputElement, minimum: number, maximum: n
   clampDecimalInput(input, minimum, maximum);
 }
 
-function toolButtonMarkup(tool: EditorTool, label: string, icon: string): string {
-  return `
-    <button class="tool-button ${tool === activeTool ? 'is-active' : ''}" type="button" data-tool="${tool}" aria-pressed="${String(
-      tool === activeTool,
-    )}">
-      <i class="ph ${icon}" aria-hidden="true"></i><span>${label}</span>
-    </button>
-  `;
+function boardSelectOptions(): readonly UiSelectOption[] {
+  return Object.freeze([
+    Object.freeze({ id: 'standardSquare', label: '29 × 29 标准方板' }),
+    Object.freeze({ id: 'smallSquare', label: '14 × 14 小方板' }),
+    Object.freeze({ id: 'custom', label: '自定义拼板' }),
+  ]);
+}
+
+function paletteSelectOptions(): readonly UiSelectOption[] {
+  return Object.freeze(
+    PALETTES.map((palette) =>
+      Object.freeze({
+        id: palette.id,
+        label: `${palette.label} · ${String(palette.colorIds.length)} 色`,
+      }),
+    ),
+  );
+}
+
+function ditheringSelectOptions(): readonly UiSelectOption[] {
+  return Object.freeze([
+    Object.freeze({ id: 'none', label: '干净色块' }),
+    Object.freeze({ id: 'floydSteinberg', label: '细腻过渡' }),
+  ]);
+}
+
+function selectValue(root: ParentNode, selector: string, fallback: string): string {
+  return root.querySelector<HTMLButtonElement>(selector)?.dataset.value ?? fallback;
+}
+
+function setSelectTriggerValue(trigger: HTMLButtonElement, value: string, label: string): void {
+  trigger.dataset.value = value;
+  const labelElement = trigger.querySelector<HTMLElement>('[data-select-label]');
+  if (labelElement && labelElement.textContent !== label) {
+    labelElement.textContent = label;
+  }
+}
+
+function croppedImageDimensions(): { readonly width: number; readonly height: number } {
+  const dimensions = rotatedDimensions();
+  return Object.freeze({
+    width: Math.max(1, Math.round(dimensions.width * (cropPercent.width / 100))),
+    height: Math.max(1, Math.round(dimensions.height * (cropPercent.height / 100))),
+  });
 }
 
 function toolCustomerLabel(tool: EditorTool): string {
@@ -2423,6 +3168,17 @@ function toolCustomerLabel(tool: EditorTool): string {
     select: '选择区域',
   };
   return labels[tool];
+}
+
+function toolIconName(tool: EditorTool): string {
+  const icons: Record<EditorTool, string> = {
+    paint: 'ph-pencil-simple',
+    erase: 'ph-eraser',
+    eyedropper: 'ph-eyedropper',
+    fill: 'ph-paint-bucket',
+    select: 'ph-selection',
+  };
+  return icons[tool];
 }
 
 function normalizeRotation(value: number): ImageRotation {
@@ -2452,8 +3208,26 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function isProjectMode(value: string): value is ProjectMode {
-  return value === 'photo' || value === 'pixelArt' || value === 'existingChart';
+function isCustomerTask(value: string): value is CustomerTask {
+  return value === 'newPattern' || value === 'mirrorExistingChart';
+}
+
+function isModePreference(value: string): value is ModePreference {
+  return value === 'auto' || value === 'photo' || value === 'pixelArt';
+}
+
+function isSamplingValue(value: string): value is SamplingValue {
+  return value === 'average' || value === 'nearest';
+}
+
+function currentUploadPrepareFlow(): UploadPrepareFlow {
+  return Object.freeze({ customerTask, prepareState });
+}
+
+function applyUploadPrepareFlow(flow: UploadPrepareFlow): void {
+  customerTask = flow.customerTask;
+  prepareState = flow.prepareState;
+  syncUploadPrepareControls(app, flow);
 }
 
 function isCropArrowKey(value: string): value is CropArrowKey {
@@ -2468,21 +3242,21 @@ function isInspectorPanel(value: string): value is InspectorPanel {
   return ['tools', 'palette', 'materials', 'settings'].includes(value);
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+function isExportTaskId(value: string): value is ExportTaskId {
+  return ['shareImage', 'printMaking', 'materialsList', 'saveProject'].includes(value);
 }
 
-function downloadBlob(blob: Blob, fileName: string): void {
-  const objectUrl = URL.createObjectURL(blob);
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function triggerObjectUrlDownload(objectUrl: string, fileName: string): void {
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
   anchor.download = fileName;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(objectUrl);
-  }, 0);
 }
 
 function clearChartResult(): void {
@@ -2501,12 +3275,54 @@ function clearChartResult(): void {
 }
 
 function cleanup(): void {
+  window.removeEventListener('resize', updateWorkspaceLayout);
+  window.removeEventListener('orientationchange', updateWorkspaceLayout);
+  window.visualViewport?.removeEventListener('resize', handleVisualViewportChange);
+  window.visualViewport?.removeEventListener('scroll', handleVisualViewportChange);
+  if (selectionContextPositionFrame !== 0) {
+    window.cancelAnimationFrame(selectionContextPositionFrame);
+    selectionContextPositionFrame = 0;
+  }
   generationController?.abort();
-  exportController?.abort();
+  exportCoordinator.destroy();
   chartMirrorController?.abort();
+  recommendationRequests.cancel();
   canvasController?.destroy();
+  preparePresetControls?.destroy();
+  availableColorGridRenderer?.destroy();
+  availableColorMobilePanelController?.destroy();
+  boardSelectController?.destroy();
+  paletteSelectController?.destroy();
+  availableSeriesSelectController?.destroy();
+  ditheringSelectController?.destroy();
+  for (const controller of editorSeriesSelectControllers) controller.destroy();
+  responsiveWorkspaceMount.destroy();
+  for (const controller of workspacePanelControllers) controller.destroy();
   clearChartResult();
   objectUrls.revokeAll();
+}
+
+function queryPatternWorkspaceAll<ElementType extends Element>(
+  selector: string,
+  elementType: { new (): ElementType },
+): readonly ElementType[] {
+  const matches = new Set<ElementType>();
+  for (const element of patternWorkspace.querySelectorAll(selector)) {
+    if (element instanceof elementType) {
+      matches.add(element);
+    }
+  }
+  for (const root of workspaceSurfaceRoots) {
+    if (root.matches(selector) && root instanceof elementType) {
+      matches.add(root);
+    }
+    for (const element of root.querySelectorAll(selector)) {
+      if (element instanceof elementType) {
+        matches.add(element);
+      }
+    }
+  }
+  return [...matches];
 }
 
 function required<ElementType extends Element>(
