@@ -45,6 +45,7 @@ export function renderApp(): string {
         ${renderChartWorkspace()}
       </main>
 
+      ${renderConfirmationSurface()}
       <div class="app-overlay-root" data-overlay-root></div>
       <p
         class="app-live visually-hidden"
@@ -94,8 +95,8 @@ function renderUploadWorkspace(): string {
         <label class="secondary-upload" for="project-file-input" data-open-project>
           <i class="ph ph-brackets-curly" aria-hidden="true"></i>
           <span>
-            <strong>打开项目 JSON</strong>
-            <small>继续编辑之前导出的图纸</small>
+            <strong>打开已保存项目</strong>
+            <small>支持豆图项目文件（JSON）</small>
           </span>
         </label>
       </div>
@@ -535,12 +536,29 @@ function renderPrepareWorkspace(): string {
                 </span>
                   ${renderSelectTrigger('data-dithering', 'none', '干净色块', '选择颜色接近方式')}
                 </div>
-              <label class="field-row">
+              <label class="field-row transparency-control">
                 <span>
                   <strong>透明区域</strong>
-                  <small>透明像素会保留为空格</small>
+                  <small id="alpha-threshold-help" data-alpha-threshold-description>
+                    推荐：保留主体，同时去除轻微透明边缘
+                  </small>
                 </span>
-                <input type="range" min="0" max="1" step="0.05" value="0.1" data-alpha-threshold />
+                <span class="range-control">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value="0.1"
+                    aria-describedby="alpha-threshold-help"
+                    data-alpha-threshold
+                  />
+                  <span class="range-labels" aria-hidden="true">
+                    <span>低</span>
+                    <strong data-alpha-threshold-label>推荐</strong>
+                    <span>高</span>
+                  </span>
+                </span>
               </label>
                 <fieldset class="custom-bead-fields" data-custom-bead-fields hidden disabled>
                   <legend>自定义拼豆尺寸</legend>
@@ -578,21 +596,23 @@ function renderPrepareWorkspace(): string {
             </div>
           </details>
 
-          <div class="prepare-completion-actions">
-            <button class="secondary-button" type="button" data-return-editor hidden>
-              返回编辑
-            </button>
-            <button
-              class="primary-button prepare-primary"
-              type="button"
-              data-generate-pattern
-              data-regenerate-pattern
-            >
-              <span data-generate-label>生成图纸</span>
-              <i class="ph ph-arrow-right" aria-hidden="true"></i>
-            </button>
+          <div class="prepare-action-dock">
+            <div class="prepare-completion-actions">
+              <button class="secondary-button" type="button" data-return-editor hidden>
+                返回编辑
+              </button>
+              <button
+                class="primary-button prepare-primary"
+                type="button"
+                data-generate-pattern
+                data-regenerate-pattern
+              >
+                <span data-generate-label>生成图纸</span>
+                <i class="ph ph-arrow-right" aria-hidden="true"></i>
+              </button>
+            </div>
+            <p class="inline-status" data-generate-status role="status"></p>
           </div>
-          <p class="inline-status" data-generate-status role="status"></p>
           </div>
         </aside>
       </div>
@@ -761,7 +781,12 @@ function renderPatternWorkspace(): string {
                 <i class="ph ph-arrows-out-simple" aria-hidden="true"></i>
                 <span>移动</span>
               </button>
-              <button type="button" data-selection-action="clear" data-clear-selection>
+              <button
+                class="selection-destructive"
+                type="button"
+                data-selection-action="clear"
+                data-clear-selection
+              >
                 <i class="ph ph-trash" aria-hidden="true"></i>
                 <span>清空</span>
               </button>
@@ -1052,6 +1077,7 @@ function renderChartWorkspace(): string {
         <div>
           <span class="eyebrow">已有图纸</span>
           <h1>确认拼豆网格</h1>
+          <p>只调整红色网格范围；网格外的坐标、标题和图例不会改变。</p>
         </div>
         <div class="chart-actions">
           <button class="secondary-button" type="button" data-chart-redetect>重新识别</button>
@@ -1131,10 +1157,53 @@ function renderChartWorkspace(): string {
           智能镜像图纸
         </button>
         <button class="secondary-button" type="button" data-chart-download hidden disabled>
-          下载 PNG
+          下载镜像图纸
         </button>
       </div>
       <p class="visually-hidden" role="status" aria-live="polite" data-editor-live></p>
+    </section>
+  `;
+}
+
+function renderConfirmationSurface(): string {
+  return `
+    <section
+      class="app-confirmation"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="confirmation-title"
+      aria-describedby="confirmation-description"
+      data-confirmation-surface
+      hidden
+    >
+      <div
+        class="confirmation-backdrop"
+        data-confirmation-cancel
+        aria-hidden="true"
+      ></div>
+      <div class="confirmation-panel">
+        <div class="confirmation-heading">
+          <span class="confirmation-icon" aria-hidden="true">
+            <i class="ph ph-shield-check"></i>
+          </span>
+          <div>
+            <span class="eyebrow">尚未保存的修改</span>
+            <h2 id="confirmation-title" data-confirmation-title>要继续吗？</h2>
+          </div>
+        </div>
+        <p id="confirmation-description" data-confirmation-description></p>
+        <p class="inline-status" role="status" aria-live="polite" data-confirmation-status></p>
+        <div class="confirmation-actions">
+          <button class="secondary-button" type="button" data-confirmation-save>
+            <i class="ph ph-export" aria-hidden="true"></i>
+            先保存项目
+          </button>
+          <button class="danger-button" type="button" data-confirmation-continue>
+            放弃修改并继续
+          </button>
+          <button class="text-button" type="button" data-confirmation-cancel>取消</button>
+        </div>
+      </div>
     </section>
   `;
 }

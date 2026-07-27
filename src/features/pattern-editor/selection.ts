@@ -22,6 +22,12 @@ export interface SelectionCellSnapshot {
 
 export type SelectionTransferOperation = 'copy' | 'move';
 
+export interface BoundedSelectionTranslation {
+  readonly deltaRow: number;
+  readonly deltaColumn: number;
+  readonly wasBounded: boolean;
+}
+
 interface SelectionCell {
   readonly rowOffset: number;
   readonly columnOffset: number;
@@ -145,6 +151,33 @@ export function moveSelectedCells(
   return translateSelectedCells(cells, selection, deltaRow, deltaColumn, true);
 }
 
+export function boundSelectionTranslation(
+  cells: readonly (readonly BeadCell[])[],
+  selection: CellSelection,
+  deltaRow: number,
+  deltaColumn: number,
+): BoundedSelectionTranslation {
+  const normalized = clipSelection(selection, cells);
+  if (!normalized) {
+    return Object.freeze({ deltaRow: 0, deltaColumn: 0, wasBounded: true });
+  }
+  const rows = cells.length;
+  const columns = cells[0]?.length ?? 0;
+  const boundedRow = Math.min(
+    rows - 1 - normalized.endRow,
+    Math.max(-normalized.startRow, deltaRow),
+  );
+  const boundedColumn = Math.min(
+    columns - 1 - normalized.endColumn,
+    Math.max(-normalized.startColumn, deltaColumn),
+  );
+  return Object.freeze({
+    deltaRow: boundedRow,
+    deltaColumn: boundedColumn,
+    wasBounded: boundedRow !== deltaRow || boundedColumn !== deltaColumn,
+  });
+}
+
 function translateSelectedCells(
   cells: readonly (readonly BeadCell[])[],
   selection: CellSelection,
@@ -158,20 +191,7 @@ function translateSelectedCells(
   }
 
   const source = snapshotSelection(cells, normalized);
-  const hasValidDestination = source.some((entry) =>
-    isInBounds(
-      cells,
-      normalized.startRow + entry.rowOffset + deltaRow,
-      normalized.startColumn + entry.columnOffset + deltaColumn,
-    ),
-  );
-  if (!hasValidDestination) {
-    return Object.freeze({
-      cells,
-      changes: Object.freeze([]),
-      selection: normalized,
-    });
-  }
+  const bounded = boundSelectionTranslation(cells, normalized, deltaRow, deltaColumn);
 
   const draft = new MatrixDraft(cells);
   if (clearSource) {
@@ -186,12 +206,10 @@ function translateSelectedCells(
 
   const destinationPoints: Array<{ readonly row: number; readonly column: number }> = [];
   for (const entry of source) {
-    const row = normalized.startRow + entry.rowOffset + deltaRow;
-    const column = normalized.startColumn + entry.columnOffset + deltaColumn;
-    if (isInBounds(cells, row, column)) {
-      draft.setCell(row, column, entry.cell);
-      destinationPoints.push(Object.freeze({ row, column }));
-    }
+    const row = normalized.startRow + entry.rowOffset + bounded.deltaRow;
+    const column = normalized.startColumn + entry.columnOffset + bounded.deltaColumn;
+    draft.setCell(row, column, entry.cell);
+    destinationPoints.push(Object.freeze({ row, column }));
   }
 
   const result = draft.finish();
@@ -266,8 +284,4 @@ function selectionFromPoints(
     endRow,
     endColumn,
   });
-}
-
-function isInBounds(cells: readonly (readonly BeadCell[])[], row: number, column: number): boolean {
-  return row >= 0 && column >= 0 && row < cells.length && column < (cells[row]?.length ?? 0);
 }

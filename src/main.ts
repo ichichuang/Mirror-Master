@@ -183,6 +183,12 @@ interface CropPercent {
   readonly height: number;
 }
 
+interface ConfirmationRequest {
+  readonly title: string;
+  readonly description: string;
+  readonly onContinue: () => void;
+}
+
 const appElement = document.querySelector<HTMLDivElement>('#app');
 if (!appElement) {
   throw new Error(`${brandConfig.productName}启动失败：缺少应用容器。`);
@@ -200,6 +206,8 @@ document
 app.innerHTML = renderApp();
 
 const shell = required(app, '[data-app-shell]', HTMLElement);
+const appHeader = required(app, '.app-header', HTMLElement);
+const mainWorkspace = required(app, '[data-app-shell] > .main-workspace', HTMLElement);
 const uploadWorkspace = required(app, '[data-upload-workspace]', HTMLElement);
 const prepareWorkspace = required(app, '[data-prepare-workspace]', HTMLElement);
 const patternWorkspace = required(app, '[data-pattern-workspace]', HTMLElement);
@@ -215,6 +223,32 @@ const sessionStatus = required(app, '[data-session-status]', HTMLElement);
 const headerContext = required(app, '[data-header-context]', HTMLElement);
 const headerReplace = required(app, '[data-replace-image]', HTMLButtonElement);
 const overlayRoot = required(app, '[data-overlay-root]', HTMLElement);
+const confirmationSurface = required(app, '[data-confirmation-surface]', HTMLElement);
+const confirmationTitle = required(
+  confirmationSurface,
+  '[data-confirmation-title]',
+  HTMLElement,
+);
+const confirmationDescription = required(
+  confirmationSurface,
+  '[data-confirmation-description]',
+  HTMLElement,
+);
+const confirmationStatus = required(
+  confirmationSurface,
+  '[data-confirmation-status]',
+  HTMLElement,
+);
+const confirmationSave = required(
+  confirmationSurface,
+  '[data-confirmation-save]',
+  HTMLButtonElement,
+);
+const confirmationContinue = required(
+  confirmationSurface,
+  '[data-confirmation-continue]',
+  HTMLButtonElement,
+);
 const workspaceToolRail = required(patternWorkspace, '[data-tool-rail]', HTMLElement);
 const workspaceInspector = required(patternWorkspace, '[data-workspace-inspector]', HTMLElement);
 const workspaceSheet = required(patternWorkspace, '[data-workspace-sheet]', HTMLElement);
@@ -295,6 +329,9 @@ let editorDesktopSeriesController: UiSelectPopoverController | null = null;
 let editorMobileSeriesController: MobilePickerController | null = null;
 let workspaceLayoutMode: WorkspaceLayoutMode | null = null;
 let syncingPreparePresetCrop = false;
+let confirmationRequest: ConfirmationRequest | null = null;
+let confirmationReturnFocus: HTMLElement | null = null;
+let confirmationSaving = false;
 
 const exportCoordinator = createExportCoordinator({
   requestPatternExport: ({ project, format, template, signal }) =>
@@ -323,6 +360,7 @@ const responsiveWorkspaceMount: ResponsiveWorkspaceMount = createResponsiveWorks
 updateWorkspaceLayout();
 const gridController: GridEditorController = setupChartWorkspace();
 setupReplacementActions();
+setupConfirmationSurface();
 window.addEventListener('resize', updateWorkspaceLayout);
 window.addEventListener('orientationchange', updateWorkspaceLayout);
 window.visualViewport?.addEventListener('resize', handleVisualViewportChange);
@@ -722,10 +760,12 @@ async function openProjectFile(file: File): Promise<void> {
     projectFileStatus.textContent = `项目文件超过 ${formatFileSize(
       MAX_PROJECT_JSON_BYTES,
     )} 上限，无法安全打开。`;
+    projectFileStatus.dataset.state = 'error';
     return;
   }
 
   projectFileStatus.textContent = `正在打开 ${file.name}…`;
+  projectFileStatus.dataset.state = 'loading';
   try {
     const project = parseProjectJsonText(await file.text());
     if (requestRevision !== loadRevision) {
@@ -757,6 +797,7 @@ async function openProjectFile(file: File): Promise<void> {
     currentSelection = null;
     openPatternEditor(project);
     projectFileStatus.textContent = `已打开 ${file.name}，可以继续编辑。`;
+    projectFileStatus.dataset.state = 'ready';
     sessionStatus.textContent = '项目已恢复';
     announce('项目已恢复，可以继续编辑。');
   } catch (error) {
@@ -768,6 +809,7 @@ async function openProjectFile(file: File): Promise<void> {
         ? error.message
         : '无法读取项目文件，请确认文件没有损坏。';
     projectFileStatus.textContent = message;
+    projectFileStatus.dataset.state = 'error';
   }
 }
 
@@ -781,6 +823,11 @@ function setupPrepare(): void {
   const boardPreset = required(prepareWorkspace, '[data-board-preset]', HTMLButtonElement);
   const paletteSelect = required(prepareWorkspace, '[data-palette-id]', HTMLButtonElement);
   const maximumColors = required(prepareWorkspace, '[data-maximum-colors]', HTMLInputElement);
+  const alphaThreshold = required(
+    prepareWorkspace,
+    '[data-alpha-threshold]',
+    HTMLInputElement,
+  );
   const beadDiameter = required(prepareWorkspace, '[data-bead-diameter]', HTMLInputElement);
   const beadPitch = required(prepareWorkspace, '[data-bead-pitch]', HTMLInputElement);
   const customBoardFields = required(
@@ -835,7 +882,7 @@ function setupPrepare(): void {
     readonly handle: 'move' | 'nw' | 'ne' | 'sw' | 'se';
   } | null = null;
 
-  prepareReplace.addEventListener('click', confirmReplaceImage);
+  prepareReplace.addEventListener('click', handleReplaceImageClick);
   rotateLeft.addEventListener('click', () => {
     rotation = normalizeRotation(rotation - 90);
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
@@ -922,6 +969,7 @@ function setupPrepare(): void {
     );
     updatePrepareSummaries();
   });
+  alphaThreshold.addEventListener('input', syncAlphaThresholdCopy);
   availableColorSearch.addEventListener('input', () => {
     prepareColorQuery = availableColorSearch.value;
     renderAvailableColorFilter();
@@ -1178,6 +1226,7 @@ function setupPrepare(): void {
   }
   updateCustomBoardVisibility();
   initializePrepareColorSeries();
+  syncAlphaThresholdCopy();
 
   function updateRowsFromColumns(): void {
     const dimensions = rotatedDimensions();
@@ -1430,6 +1479,29 @@ function updatePrepareSummaries(): void {
     ).toFixed(1)} cm`;
   required(prepareWorkspace, '[data-board-summary]', HTMLElement).textContent =
     `约需 ${String(boardCount)} 块拼板`;
+  syncAlphaThresholdCopy();
+}
+
+function syncAlphaThresholdCopy(): void {
+  const threshold = numberValue(prepareWorkspace, '[data-alpha-threshold]', 0.1);
+  const label = required(prepareWorkspace, '[data-alpha-threshold-label]', HTMLElement);
+  const description = required(
+    prepareWorkspace,
+    '[data-alpha-threshold-description]',
+    HTMLElement,
+  );
+  if (threshold <= 0.05) {
+    label.textContent = '低';
+    description.textContent = '低：保留更多半透明内容';
+    return;
+  }
+  if (threshold <= 0.25) {
+    label.textContent = '推荐';
+    description.textContent = '推荐：保留主体，同时去除轻微透明边缘';
+    return;
+  }
+  label.textContent = '高';
+  description.textContent = '高：更积极去除透明边缘';
 }
 
 function renderAvailableColorFilter(): void {
@@ -1482,7 +1554,7 @@ function updateAvailableColorSummary(): void {
     availableColorIds.size === 0 ? '尚未选择颜色' : `已选择 ${String(availableColorIds.size)} 色`;
 }
 
-async function startPatternGeneration(): Promise<void> {
+async function startPatternGeneration(replacementConfirmed = false): Promise<void> {
   const image = selectedImage;
   if (!image) {
     return;
@@ -1503,11 +1575,18 @@ async function startPatternGeneration(): Promise<void> {
     return;
   }
   if (
+    !replacementConfirmed &&
     currentProject &&
     sourceGenerationRevision !== null &&
-    currentProject.revision !== sourceGenerationRevision &&
-    !window.confirm('重新生成会替换当前图纸的全部编辑。建议先保存项目 JSON；仍要继续吗？')
+    currentProject.revision !== sourceGenerationRevision
   ) {
+    openConfirmation({
+      title: '重新生成会替换当前编辑',
+      description: '新图纸生成成功后，当前逐格修改和撤销记录将被替换。你可以先保存项目，之后再继续。',
+      onContinue() {
+        void startPatternGeneration(true);
+      },
+    });
     return;
   }
   generationController?.abort();
@@ -1692,7 +1771,7 @@ function setupPatternWorkspace(): void {
       if (selectedImage) {
         openPrepareWorkspace(true);
       } else {
-        announce('项目 JSON 不包含源图片，无法重新生成；你仍可继续编辑和导出。');
+        announce('已保存项目不包含源图片，无法重新生成；你仍可继续编辑和导出。');
       }
       return;
     }
@@ -2052,7 +2131,7 @@ function openPatternEditor(project: BeadProject): void {
     button.disabled = selectedImage === null;
     button.title = selectedImage
       ? '保留当前矩阵并返回生成设置'
-      : '项目 JSON 不包含源图片，无法重新生成';
+      : '已保存项目不包含源图片，无法重新生成';
   }
   updateHistoryButtons();
   updateSelectionActions();
@@ -2798,15 +2877,142 @@ async function generateChartMirror(): Promise<void> {
 }
 
 function setupReplacementActions(): void {
-  headerReplace.addEventListener('click', confirmReplaceImage);
+  headerReplace.addEventListener('click', handleReplaceImageClick);
 }
 
-function confirmReplaceImage(): void {
+function handleReplaceImageClick(): void {
+  confirmReplaceImage();
+}
+
+function setupConfirmationSurface(): void {
+  confirmationSurface.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (target.closest('[data-confirmation-cancel]')) {
+      closeConfirmation(true);
+      return;
+    }
+    if (target.closest('[data-confirmation-continue]')) {
+      const request = confirmationRequest;
+      if (!request || confirmationSaving) {
+        return;
+      }
+      closeConfirmation(false);
+      request.onContinue();
+      return;
+    }
+    if (target.closest('[data-confirmation-save]')) {
+      void saveBeforeConfirmation();
+    }
+  });
+  confirmationSurface.addEventListener('keydown', (event) => {
+    if (event.key === 'Tab') {
+      const focusable = [
+        ...confirmationSurface.querySelectorAll<HTMLButtonElement>(
+          'button:not(:disabled):not([tabindex="-1"])',
+        ),
+      ].filter((button) => !button.hidden);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+    if (event.key !== 'Escape' || confirmationSaving) {
+      return;
+    }
+    event.preventDefault();
+    closeConfirmation(true);
+  });
+}
+
+function openConfirmation(request: ConfirmationRequest): void {
+  if (confirmationRequest || confirmationSaving) {
+    return;
+  }
+  confirmationRequest = request;
+  confirmationReturnFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  confirmationTitle.textContent = request.title;
+  confirmationDescription.textContent = request.description;
+  confirmationStatus.textContent = '';
+  confirmationSurface.hidden = false;
+  shell.dataset.confirmationOpen = 'true';
+  appHeader.inert = true;
+  mainWorkspace.inert = true;
+  confirmationContinue.focus();
+}
+
+function closeConfirmation(restoreFocus: boolean): void {
+  if (confirmationSaving) {
+    return;
+  }
+  confirmationSurface.hidden = true;
+  delete shell.dataset.confirmationOpen;
+  appHeader.inert = false;
+  mainWorkspace.inert = false;
+  confirmationRequest = null;
+  confirmationStatus.textContent = '';
+  confirmationSave.disabled = false;
+  confirmationContinue.disabled = false;
+  if (restoreFocus) {
+    confirmationReturnFocus?.focus();
+  }
+  confirmationReturnFocus = null;
+}
+
+async function saveBeforeConfirmation(): Promise<void> {
+  const project = currentProject;
+  const request = confirmationRequest;
+  if (!project || !request || confirmationSaving) {
+    return;
+  }
+  confirmationSaving = true;
+  confirmationSave.disabled = true;
+  confirmationContinue.disabled = true;
+  confirmationStatus.textContent = '正在保存项目…';
+  const result = await exportCoordinator.start({
+    project,
+    task: 'saveProject',
+    pngTemplate: 'annotated',
+  });
+  confirmationSaving = false;
+  if (result.outcome === 'downloaded') {
+    confirmationStatus.textContent = '项目已保存，正在继续…';
+    closeConfirmation(false);
+    request.onContinue();
+    return;
+  }
+  confirmationSave.disabled = false;
+  confirmationContinue.disabled = false;
+  confirmationStatus.textContent =
+    result.outcome === 'failed' ? result.message : '保存已取消，请重试或选择其他操作。';
+  confirmationSave.focus();
+}
+
+function confirmReplaceImage(replacementConfirmed = false): void {
   if (
+    !replacementConfirmed &&
     currentProject &&
-    (sourceGenerationRevision === null || currentProject.revision !== sourceGenerationRevision) &&
-    !window.confirm('更换图片会结束当前编辑。请先导出项目 JSON，以便以后继续。确定更换吗？')
+    (sourceGenerationRevision === null || currentProject.revision !== sourceGenerationRevision)
   ) {
+    openConfirmation({
+      title: '更换图片会结束当前编辑',
+      description: '当前图纸、逐格修改和撤销记录都会从工作区移除。你可以先保存项目，之后再回来继续。',
+      onContinue() {
+        confirmReplaceImage(true);
+      },
+    });
     return;
   }
   resetToUpload();
@@ -2998,6 +3204,10 @@ function updateSamplingDefault(): void {
 function setFileStatus(message: string, state: 'ready' | 'loading' | 'error'): void {
   fileStatus.textContent = message;
   fileStatus.dataset.state = state;
+  dropZone.dataset.state = state;
+  dropZone.setAttribute('aria-busy', String(state === 'loading'));
+  fileInput.disabled = state === 'loading';
+  projectFileInput.disabled = state === 'loading';
 }
 
 function announce(message: string): void {

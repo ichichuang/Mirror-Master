@@ -41,7 +41,6 @@ export function createAvailableColorMobilePanel({
   let surface: HTMLElement | null = null;
   let placeholder: Comment | null = null;
   let surfaceSnapshot: readonly SurfaceElementState[] = Object.freeze([]);
-  let seriesFieldState: SurfaceElementState | null = null;
   let returnButton: HTMLButtonElement | null = null;
   let destroyed = false;
 
@@ -83,18 +82,6 @@ export function createAvailableColorMobilePanel({
       state.element.hidden = true;
       state.element.inert = true;
     }
-    const seriesField = content
-      .querySelector<HTMLElement>('[data-available-color-series]')
-      ?.closest<HTMLElement>('.selector-field');
-    if (seriesField) {
-      seriesFieldState = Object.freeze({
-        element: seriesField,
-        hidden: seriesField.hidden,
-        inert: seriesField.inert,
-      });
-      seriesField.hidden = true;
-      seriesField.inert = true;
-    }
     const picker = document.createElement('section');
     const heading = document.createElement('div');
     const title = document.createElement('h2');
@@ -133,11 +120,6 @@ export function createAvailableColorMobilePanel({
     surface.remove();
     surface = null;
     returnButton = null;
-    if (seriesFieldState) {
-      seriesFieldState.element.hidden = seriesFieldState.hidden;
-      seriesFieldState.element.inert = seriesFieldState.inert;
-      seriesFieldState = null;
-    }
     for (const state of surfaceSnapshot) {
       state.element.hidden = state.hidden;
       state.element.inert = state.inert;

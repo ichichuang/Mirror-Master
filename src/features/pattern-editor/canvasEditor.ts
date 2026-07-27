@@ -13,6 +13,7 @@ import {
   type RenderPlan,
 } from './renderState';
 import {
+  boundSelectionTranslation,
   clearSelectedCells,
   copySelectedCells,
   createSelectionCellSnapshot,
@@ -609,11 +610,17 @@ export function mountPatternCanvas(
         active.transferMode === 'copy' || (active.transferMode === null && copySelectionModifier);
       const source = active.selectionBefore;
       if (source) {
+        const bounded = boundSelectionTranslation(
+          cells,
+          source,
+          point.row - active.start.row,
+          point.column - active.start.column,
+        );
         setSelection(
           translateSelectionRect(
             source,
-            point.row - active.start.row,
-            point.column - active.start.column,
+            bounded.deltaRow,
+            bounded.deltaColumn,
           ),
         );
       }
@@ -643,13 +650,33 @@ export function mountPatternCanvas(
       const transactionStartedAt = now();
       const deltaRow = active.last.row - active.start.row;
       const deltaColumn = active.last.column - active.start.column;
+      const bounded = boundSelectionTranslation(
+        cells,
+        active.selectionBefore,
+        deltaRow,
+        deltaColumn,
+      );
       const result = active.copySelection
-        ? copySelectedCells(cells, active.selectionBefore, deltaRow, deltaColumn)
-        : moveSelectedCells(cells, active.selectionBefore, deltaRow, deltaColumn);
+        ? copySelectedCells(
+            cells,
+            active.selectionBefore,
+            bounded.deltaRow,
+            bounded.deltaColumn,
+          )
+        : moveSelectedCells(
+            cells,
+            active.selectionBefore,
+            bounded.deltaRow,
+            bounded.deltaColumn,
+          );
       setSelectionTransferMode(null);
       applySelectionResult(
         result,
-        active.copySelection ? '已复制选中区域。' : '已移动选中区域。',
+        bounded.wasBounded
+          ? '已放到画布边缘，选中内容完整保留。'
+          : active.copySelection
+            ? '已复制选中区域。'
+            : '已移动选中区域。',
         transactionStartedAt,
       );
     }
@@ -771,13 +798,23 @@ export function mountPatternCanvas(
       return;
     }
     const transactionStartedAt = now();
+    const bounded = boundSelectionTranslation(
+      cells,
+      selection,
+      deltaRow,
+      deltaColumn,
+    );
     const result =
       operation === 'copy'
-        ? copySelectedCells(cells, selection, deltaRow, deltaColumn)
-        : moveSelectedCells(cells, selection, deltaRow, deltaColumn);
+        ? copySelectedCells(cells, selection, bounded.deltaRow, bounded.deltaColumn)
+        : moveSelectedCells(cells, selection, bounded.deltaRow, bounded.deltaColumn);
     applySelectionResult(
       result,
-      operation === 'copy' ? '已复制选中区域。' : '已移动选中区域。',
+      bounded.wasBounded
+        ? '已放到画布边缘，选中内容完整保留。'
+        : operation === 'copy'
+          ? '已复制选中区域。'
+          : '已移动选中区域。',
       transactionStartedAt,
     );
   }
@@ -1231,6 +1268,15 @@ export function mountPatternCanvas(
 
   function drawCell(row: number, column: number): void {
     const active = toolGesture;
+    const bounded =
+      active?.kind === 'select-move' && active.selectionBefore
+        ? boundSelectionTranslation(
+            cells,
+            active.selectionBefore,
+            active.last.row - active.start.row,
+            active.last.column - active.start.column,
+          )
+        : null;
     const cell =
       active?.draft?.getCell(row, column) ??
       (active?.kind === 'select-move' && active.selectionSnapshot
@@ -1238,8 +1284,8 @@ export function mountPatternCanvas(
             cells,
             active.selectionSnapshot,
             active.copySelection ? 'copy' : 'move',
-            active.last.row - active.start.row,
-            active.last.column - active.start.column,
+            bounded?.deltaRow ?? 0,
+            bounded?.deltaColumn ?? 0,
             row,
             column,
           )
