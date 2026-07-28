@@ -11,26 +11,38 @@ const vaadinThemeCss = readFileSync(
   'utf8',
 );
 
-test('upload starts with exactly two customer tasks and keeps project JSON secondary', () => {
+test('start workspace exposes one dominant image entry and demotes every other task', () => {
   assert.match(markup, /id="image-file-input"[\s\S]*data-file-input/u);
   assert.match(markup, /id="project-file-input"[\s\S]*accept="application\/json,\.json"/u);
   assert.match(markup, /data-project-file-input/u);
   assert.match(markup, /data-project-file-status/u);
   assert.match(markup, /data-upload-constraints/u);
 
-  const upload = sectionMarkup('data-upload-workspace', 'data-prepare-workspace');
-  assert.deepEqual(valuesInVaadinGroup(upload, 'data-customer-task'), [
-    'newPattern',
-    'mirrorExistingChart',
-  ]);
-  assert.match(upload, /data-customer-task[\s\S]*value="newPattern"/u);
-  assert.match(upload, /制作新图纸/u);
-  assert.match(upload, /镜像已有图纸/u);
-  assert.doesNotMatch(upload, /value="photo"/u);
-  assert.doesNotMatch(upload, /value="pixelArt"/u);
+  const start = sectionMarkup('data-start-workspace', 'data-preview-workspace');
+  assert.match(start, /把图片变成可制作的拼豆图纸/u);
+  assert.match(start, /自动匹配色号、计算材料，还可以继续修改。/u);
+  assert.match(start, /data-new-pattern-entry/u);
+  assert.match(start, /选择图片/u);
+  assert.match(start, /data-open-project/u);
+  assert.match(start, /打开已保存项目/u);
+  assert.match(start, /图片只用于生成当前图纸，不会发送给第三方图片服务。/u);
+  assert.doesNotMatch(start, /data-customer-task/u);
+  assert.doesNotMatch(start, /<vaadin-radio-group\b/u);
+  assert.doesNotMatch(start, /value="photo"/u);
+  assert.doesNotMatch(start, /value="pixelArt"/u);
+  assert.doesNotMatch(start, /最近项目/u);
+  assert.doesNotMatch(start, /空白画布/u);
+  assert.doesNotMatch(start, /导入图案数据/u);
+
+  const moreWays = start.match(/<details\b[^>]*data-more-ways[^>]*>([\s\S]*?)<\/details>/u)?.[0];
+  assert.ok(moreWays);
+  assert.match(moreWays, /更多制作方式/u);
+  assert.match(moreWays, /data-mirror-existing-chart/u);
+  assert.match(moreWays, /镜像已有图纸/u);
+  assert.match(moreWays, /只翻转拼豆格，保留坐标和图例。/u);
 });
 
-test('prepare workspace keeps one collapsed professional surface for every expert control', () => {
+test('preview workspace keeps one collapsed professional surface for every expert control', () => {
   for (const hook of [
     'data-custom-board-columns',
     'data-custom-board-rows',
@@ -49,19 +61,19 @@ test('prepare workspace keeps one collapsed professional surface for every exper
   assert.match(markup, /id="crop-keyboard-help"[\s\S]*方向键/u);
   assert.match(markup, /max="12"[\s\S]*data-bead-pitch/u);
 
-  const prepare = sectionMarkup('data-prepare-workspace', 'data-pattern-workspace');
-  const professional = prepare.match(
+  const preview = sectionMarkup('data-preview-workspace', 'data-pattern-workspace');
+  const professional = preview.match(
     /<details\b[^>]*data-professional-settings[^>]*>([\s\S]*?)<\/details>/u,
   )?.[0];
   assert.ok(professional);
   assert.doesNotMatch(professional.match(/^<details\b[^>]*>/u)?.[0] ?? '', /\bopen\b/u);
-  assert.equal(countMatches(prepare, /<details\b/g), 1);
+  assert.equal(countMatches(preview, /<details\b/g), 1);
   for (const selector of [
     'data-mode-preference',
     'data-board-preset',
     'data-custom-board-columns',
     'data-custom-board-rows',
-    'data-maximum-colors',
+    'data-bead-size-preset',
     'data-available-color-grid',
     'data-available-color-search',
     'data-available-color-series',
@@ -70,20 +82,81 @@ test('prepare workspace keeps one collapsed professional surface for every exper
     'data-alpha-threshold',
     'data-bead-pitch',
     'data-mode-recommendation',
+    'data-crop-x',
   ]) {
     assert.match(professional, new RegExp(selector, 'u'));
   }
+  assert.doesNotMatch(professional, /data-maximum-colors/u);
 });
 
-test('prepare default surface exposes approved customer presets and one generation action', () => {
-  const prepare = sectionMarkup('data-prepare-workspace', 'data-pattern-workspace');
-  assert.deepEqual(valuesForRadioGroup(prepare, 'pattern-size-preset'), ['29', '48', '72']);
-  assert.deepEqual(valuesForRadioGroup(prepare, 'bead-size-preset'), ['5', '2.6', 'custom']);
-  assert.deepEqual(valuesForRadioGroup(prepare, 'color-count-preset'), ['12', '24', '48']);
-  assert.deepEqual(valuesForRadioGroup(prepare, 'processing-preset'), ['easy', 'gradient']);
-  assert.equal(countMatches(prepare, /data-generate-pattern/g), 1);
-  assert.match(prepare, /data-physical-size/u);
-  assert.match(prepare, /data-palette-id/u);
+test('preview default surface holds exactly the four customer setting groups in order', () => {
+  const preview = sectionMarkup('data-preview-workspace', 'data-pattern-workspace');
+  const groupOrder = [
+    preview.indexOf('data-pattern-size-preset'),
+    preview.indexOf('data-color-count-preset'),
+    preview.indexOf('data-visual-style-preset'),
+    preview.indexOf('data-palette-id'),
+  ];
+  assert.ok(groupOrder.every((index) => index >= 0));
+  assert.deepEqual(
+    [...groupOrder].sort((left, right) => left - right),
+    groupOrder,
+  );
+  assert.match(preview, /图案大小/u);
+  assert.match(preview, /颜色数量/u);
+  assert.match(preview, /效果风格/u);
+  assert.match(preview, /拼豆品牌/u);
+  assert.deepEqual(valuesForRadioGroup(preview, 'pattern-size-preset'), [
+    '29',
+    '48',
+    '72',
+    'custom',
+  ]);
+  assert.deepEqual(valuesForRadioGroup(preview, 'color-count-preset'), [
+    '12',
+    '24',
+    '48',
+    'custom',
+  ]);
+  assert.deepEqual(valuesForRadioGroup(preview, 'visual-style-preset'), [
+    'clearBlocks',
+    'natural',
+    'vivid',
+    'smoothGradient',
+  ]);
+  assert.match(preview, /清晰色块/u);
+  assert.match(preview, /自然还原/u);
+  assert.match(preview, /鲜艳突出/u);
+  assert.match(preview, /细腻渐变/u);
+  assert.match(preview, /data-dimension-inputs[^>]*hidden/u);
+  assert.match(preview, /data-maximum-colors-field[^>]*hidden/u);
+  assert.match(preview, /data-color-count-estimate/u);
+  assert.match(preview, /data-palette-availability/u);
+});
+
+test('preview is result-first with comparison controls and no generation button', () => {
+  const preview = sectionMarkup('data-preview-workspace', 'data-pattern-workspace');
+  assert.doesNotMatch(preview, /data-generate-pattern/u);
+  assert.doesNotMatch(preview, /data-regenerate-pattern/u);
+  assert.doesNotMatch(preview, /生成图纸/u);
+  assert.equal(countMatches(preview, /data-edit-pattern/g), 1);
+  assert.match(preview, /编辑图纸/u);
+  assert.match(preview, /data-preview-canvas/u);
+  assert.match(preview, /data-preview-summary[^>]*hidden/u);
+  assert.match(preview, /data-preview-status[^>]*role="status"[^>]*aria-live="polite"/u);
+  assert.match(preview, /data-preview-badge[^>]*hidden/u);
+  assert.match(preview, /data-compare-switch/u);
+  assert.match(preview, /value="original"[^>]*label="原图"|label="原图"/u);
+  assert.match(preview, /label="拼豆"[^>]*checked|checked[^>]*label="拼豆"/u);
+  assert.match(preview, /data-hold-original/u);
+  assert.match(preview, /按住看原图/u);
+  assert.match(preview, /data-preview-original-view[^>]*hidden/u);
+  assert.match(preview, /data-crop-canvas/u);
+  assert.match(preview, /data-rotate-left/u);
+  assert.match(preview, /data-rotate-right/u);
+  assert.match(preview, /data-preview-inspector/u);
+  assert.match(preview, /data-preview-panel-body/u);
+  assert.match(preview, /data-preview-panel-toggle[^>]*aria-expanded="true"/u);
 });
 
 test('renderApp uses Vaadin selectors and dialogs without legacy overlay or mobile hosts', () => {
@@ -91,11 +164,13 @@ test('renderApp uses Vaadin selectors and dialogs without legacy overlay or mobi
   assert.match(markup, /<vaadin-select\b/u);
   assert.match(markup, /data-available-color-dialog/u);
   assert.match(markup, /data-confirmation-dialog/u);
-  assert.match(markup, /data-prepare-settings-panel/u);
+  assert.match(markup, /data-preview-controls-panel/u);
   assert.doesNotMatch(markup, /data-overlay-root/u);
   assert.doesNotMatch(markup, /data-mobile-stage-host/u);
   assert.doesNotMatch(markup, /data-prepare-picker-surface/u);
   assert.doesNotMatch(markup, /data-mobile-picker-panel/u);
+  assert.doesNotMatch(markup, /data-prepare-workspace/u);
+  assert.doesNotMatch(markup, /data-upload-workspace/u);
   assert.equal(countMatches(markup, /data-board-preset/g), 1);
   assert.equal(countMatches(markup, /data-palette-id/g), 1);
   assert.equal(countMatches(markup, /data-available-color-series/g), 1);
@@ -163,7 +238,7 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.equal(countMatches(markup, /data-export-template="pure"/g), 2);
   assert.equal(countMatches(markup, /data-export-template="annotated"/g), 2);
   assert.match(markup, /data-return-prepare/u);
-  assert.match(markup, /data-regenerate-pattern/u);
+  assert.match(markup, /data-edit-pattern/u);
   assert.match(markup, /data-return-editor/u);
   assert.match(markup, /data-selection-action="move"/u);
   assert.match(markup, /data-selection-action="copy"/u);
@@ -294,17 +369,4 @@ function valuesForRadioGroup(value: string, name: string): string[] {
   return [
     ...value.matchAll(new RegExp(`data-choice-group="${name}"[\\s\\S]*?value="([^"]+)"`, 'gu')),
   ].map((match) => match[1] ?? '');
-}
-
-function valuesInVaadinGroup(value: string, hook: string): string[] {
-  const group = value.match(
-    new RegExp(
-      `<vaadin-radio-group[\\s\\S]*?${hook}[\\s\\S]*?>([\\s\\S]*?)<\\/vaadin-radio-group>`,
-      'u',
-    ),
-  )?.[1];
-  assert.ok(group);
-  return [...group.matchAll(/<vaadin-radio-button[\s\S]*?value="([^"]+)"/gu)].map(
-    (match) => match[1] ?? '',
-  );
 }

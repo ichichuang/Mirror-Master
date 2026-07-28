@@ -21,7 +21,6 @@ export interface SamplingSelection {
 }
 
 export interface UploadPrepareRadioControllers {
-  readonly customerTask: VaadinRadioGroupController;
   readonly modePreference: VaadinRadioGroupController;
 }
 
@@ -54,7 +53,6 @@ export function syncUploadPrepareControls(
   controllers: UploadPrepareRadioControllers,
   flow: UploadPrepareFlow,
 ): void {
-  controllers.customerTask.setValue(flow.customerTask);
   controllers.modePreference.setValue(flow.prepareState?.preference ?? 'auto');
 }
 

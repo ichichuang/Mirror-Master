@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 from fastapi import UploadFile
-from PIL import Image
+from PIL import Image, ImageEnhance
 from pydantic import ValidationError
 
 from app.errors import ApiError
@@ -87,6 +87,8 @@ async def create_pattern_project(
                 crop.y + crop.height,
             )
         )
+        if settings.color_boost == "vivid":
+            cropped = _apply_vivid_boost(cropped)
         cells = generate_cells(cropped, settings)
         statistics = calculate_statistics(cells)
         timestamp = datetime.now(UTC).isoformat()
@@ -529,6 +531,11 @@ def _ciede2000(reference: np.ndarray, palette: np.ndarray) -> np.ndarray:
         + (delta_h / s_h) ** 2
         + r_t * (delta_c / s_c) * (delta_h / s_h)
     )
+
+
+def _apply_vivid_boost(source: Image.Image) -> Image.Image:
+    enhanced = ImageEnhance.Color(source).enhance(1.15)
+    return ImageEnhance.Contrast(enhanced).enhance(1.08)
 
 
 def _rotate_clockwise(

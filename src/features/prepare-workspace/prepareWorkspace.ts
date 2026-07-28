@@ -7,16 +7,19 @@ import {
   beadDimensionsForPreset,
   dimensionsForLongEdge,
   physicalDimensionsForGrid,
-  processingSettingsForPreset,
   resolveBeadSizePreset,
   resolveColorCountPreset,
   resolveColorLimit,
   resolvePatternSizePreset,
-  resolveProcessingPreset,
+  resolveVisualStylePreset,
+  visualStyleSettingsForPreset,
   type BeadSizePreset,
+  type ColorBoostMode,
   type ColorCountPreset,
   type PatternSizePreset,
-  type ProcessingPreset,
+  type VisualStyleDithering,
+  type VisualStylePreset,
+  type VisualStyleSampling,
 } from '../customer-flow/presets';
 
 export interface PrepareWorkspaceState {
@@ -31,8 +34,10 @@ export interface PrepareWorkspaceState {
   readonly maximumColors: number;
   readonly availableColorCount: number;
   readonly colorCountPreset: ColorCountPreset;
-  readonly dithering: 'none' | 'floydSteinberg';
-  readonly processingPreset: ProcessingPreset;
+  readonly sampling: VisualStyleSampling;
+  readonly dithering: VisualStyleDithering;
+  readonly colorBoost: ColorBoostMode;
+  readonly visualStylePreset: VisualStylePreset;
   readonly physicalSizeMm: {
     readonly widthMm: number;
     readonly heightMm: number;
@@ -48,7 +53,9 @@ export interface CreatePrepareWorkspaceStateInput {
   readonly beadPitchMm: number;
   readonly maximumColors: number;
   readonly availableColorCount: number;
-  readonly dithering: 'none' | 'floydSteinberg';
+  readonly sampling: VisualStyleSampling;
+  readonly dithering: VisualStyleDithering;
+  readonly colorBoost: ColorBoostMode;
 }
 
 export interface CreateNewImagePrepareDefaultsInput {
@@ -62,7 +69,7 @@ export interface CreateNewImagePrepareDefaultsInput {
 export type PrepareWorkspaceAction =
   | {
       readonly type: 'selectPatternSize';
-      readonly preset: Exclude<PatternSizePreset, 'custom'>;
+      readonly preset: PatternSizePreset;
     }
   | {
       readonly type: 'setDimensions';
@@ -85,7 +92,7 @@ export type PrepareWorkspaceAction =
     }
   | {
       readonly type: 'selectColorCount';
-      readonly preset: Exclude<ColorCountPreset, 'custom'>;
+      readonly preset: ColorCountPreset;
     }
   | {
       readonly type: 'setMaximumColors';
@@ -96,12 +103,20 @@ export type PrepareWorkspaceAction =
       readonly count: number;
     }
   | {
-      readonly type: 'selectProcessing';
-      readonly preset: ProcessingPreset;
+      readonly type: 'selectVisualStyle';
+      readonly preset: Exclude<VisualStylePreset, 'custom'>;
+    }
+  | {
+      readonly type: 'setSampling';
+      readonly sampling: VisualStyleSampling;
     }
   | {
       readonly type: 'setDithering';
-      readonly dithering: 'none' | 'floydSteinberg';
+      readonly dithering: VisualStyleDithering;
+    }
+  | {
+      readonly type: 'setColorBoost';
+      readonly colorBoost: ColorBoostMode;
     };
 
 export function createPrepareWorkspaceState(
@@ -122,7 +137,9 @@ export function createNewImagePrepareDefaults(
     beadPitchMm: 5,
     maximumColors: Math.min(24, input.availableColorCount),
     availableColorCount: input.availableColorCount,
+    sampling: 'average',
     dithering: 'none',
+    colorBoost: 'none',
   });
 }
 
@@ -154,6 +171,9 @@ export function reducePrepareWorkspaceState(
 ): PrepareWorkspaceState {
   switch (action.type) {
     case 'selectPatternSize': {
+      if (action.preset === 'custom') {
+        return finalizePrepareWorkspaceState(state, { patternSizePreset: 'custom' });
+      }
       const dimensions = dimensionsForLongEdge(
         action.preset,
         state.croppedColumns,
@@ -203,7 +223,10 @@ export function reducePrepareWorkspaceState(
         beadDiameterMm: action.beadDiameterMm,
         beadPitchMm: action.beadPitchMm,
       });
-    case 'selectColorCount':
+    case 'selectColorCount': {
+      if (action.preset === 'custom') {
+        return finalizePrepareWorkspaceState(state, { colorCountPreset: 'custom' });
+      }
       return finalizePrepareWorkspaceState(
         {
           ...state,
@@ -214,6 +237,7 @@ export function reducePrepareWorkspaceState(
         },
         { colorCountPreset: action.preset },
       );
+    }
     case 'setMaximumColors':
       return finalizePrepareWorkspaceState({
         ...state,
@@ -235,15 +259,19 @@ export function reducePrepareWorkspaceState(
         { colorCountPreset: state.colorCountPreset },
       );
     }
-    case 'selectProcessing': {
-      const settings = processingSettingsForPreset(action.preset);
+    case 'selectVisualStyle': {
+      const settings = visualStyleSettingsForPreset(action.preset);
       return finalizePrepareWorkspaceState(
         { ...state, ...settings },
-        { processingPreset: action.preset },
+        { visualStylePreset: action.preset },
       );
     }
+    case 'setSampling':
+      return finalizePrepareWorkspaceState({ ...state, sampling: action.sampling });
     case 'setDithering':
       return finalizePrepareWorkspaceState({ ...state, dithering: action.dithering });
+    case 'setColorBoost':
+      return finalizePrepareWorkspaceState({ ...state, colorBoost: action.colorBoost });
   }
 }
 
@@ -252,7 +280,7 @@ function finalizePrepareWorkspaceState(
   overrides: Partial<
     Pick<
       PrepareWorkspaceState,
-      'patternSizePreset' | 'beadSizePreset' | 'colorCountPreset' | 'processingPreset'
+      'patternSizePreset' | 'beadSizePreset' | 'colorCountPreset' | 'visualStylePreset'
     >
   > = {},
 ): PrepareWorkspaceState {
@@ -284,8 +312,16 @@ function finalizePrepareWorkspaceState(
       (availableColorCount === 0
         ? 'custom'
         : resolveColorCountPreset(maximumColors, availableColorCount)),
+    sampling: input.sampling,
     dithering: input.dithering,
-    processingPreset: overrides.processingPreset ?? resolveProcessingPreset(input.dithering),
+    colorBoost: input.colorBoost,
+    visualStylePreset:
+      overrides.visualStylePreset ??
+      resolveVisualStylePreset({
+        sampling: input.sampling,
+        dithering: input.dithering,
+        colorBoost: input.colorBoost,
+      }),
     physicalSizeMm: physicalDimensionsForGrid({
       columns,
       rows,
@@ -319,7 +355,7 @@ export interface PreparePresetRadioGroupControllers {
   readonly patternSize: VaadinRadioGroupController;
   readonly beadSize: VaadinRadioGroupController;
   readonly colorCount: VaadinRadioGroupController;
-  readonly processing: VaadinRadioGroupController;
+  readonly visualStyle: VaadinRadioGroupController;
 }
 
 export interface PreparePresetControlsController {
@@ -327,7 +363,9 @@ export interface PreparePresetControlsController {
   readonly hydrate: (input: CreatePrepareWorkspaceStateInput) => void;
   readonly setCropDimensions: (croppedColumns: number, croppedRows: number) => void;
   readonly setAvailableColorCount: (count: number) => void;
-  readonly setDithering: (dithering: 'none' | 'floydSteinberg') => void;
+  readonly setSampling: (sampling: VisualStyleSampling) => void;
+  readonly setDithering: (dithering: VisualStyleDithering) => void;
+  readonly setColorBoost: (colorBoost: ColorBoostMode) => void;
   readonly syncFromFields: () => void;
   readonly destroy: () => void;
 }
@@ -343,7 +381,7 @@ export function mountPreparePresetControls(
     options.radioGroups.patternSize.subscribe(selectPatternSize),
     options.radioGroups.beadSize.subscribe(selectBeadSize),
     options.radioGroups.colorCount.subscribe(selectColorCount),
-    options.radioGroups.processing.subscribe(selectProcessing),
+    options.radioGroups.visualStyle.subscribe(selectVisualStyle),
   ];
   root.addEventListener('input', onInput);
   render();
@@ -361,8 +399,14 @@ export function mountPreparePresetControls(
     setAvailableColorCount(count: number) {
       update({ type: 'setAvailableColorCount', count });
     },
-    setDithering(dithering: 'none' | 'floydSteinberg') {
+    setSampling(sampling: VisualStyleSampling) {
+      update({ type: 'setSampling', sampling });
+    },
+    setDithering(dithering: VisualStyleDithering) {
       update({ type: 'setDithering', dithering });
+    },
+    setColorBoost(colorBoost: ColorBoostMode) {
+      update({ type: 'setColorBoost', colorBoost });
     },
     syncFromFields,
     destroy() {
@@ -375,6 +419,11 @@ export function mountPreparePresetControls(
 
   function selectPatternSize(value: string): void {
     if (syncingPresetGroups) return;
+    if (value === 'custom') {
+      if (state.patternSizePreset !== 'custom')
+        update({ type: 'selectPatternSize', preset: 'custom' });
+      return;
+    }
     const preset = Number(value);
     if ((preset === 29 || preset === 48 || preset === 72) && preset !== state.patternSizePreset) {
       update({ type: 'selectPatternSize', preset });
@@ -394,16 +443,27 @@ export function mountPreparePresetControls(
 
   function selectColorCount(value: string): void {
     if (syncingPresetGroups) return;
+    if (value === 'custom') {
+      if (state.colorCountPreset !== 'custom')
+        update({ type: 'selectColorCount', preset: 'custom' });
+      return;
+    }
     const preset = Number(value);
     if ((preset === 12 || preset === 24 || preset === 48) && preset !== state.colorCountPreset) {
       update({ type: 'selectColorCount', preset });
     }
   }
 
-  function selectProcessing(value: string): void {
+  function selectVisualStyle(value: string): void {
     if (syncingPresetGroups) return;
-    if ((value === 'easy' || value === 'gradient') && value !== state.processingPreset) {
-      update({ type: 'selectProcessing', preset: value });
+    if (
+      (value === 'clearBlocks' ||
+        value === 'natural' ||
+        value === 'vivid' ||
+        value === 'smoothGradient') &&
+      value !== state.visualStylePreset
+    ) {
+      update({ type: 'selectVisualStyle', preset: value });
     }
   }
 
@@ -471,8 +531,12 @@ export function mountPreparePresetControls(
     setPresetValue(options.radioGroups.patternSize, state.patternSizePreset);
     setPresetValue(options.radioGroups.beadSize, state.beadSizePreset);
     setPresetValue(options.radioGroups.colorCount, state.colorCountPreset);
-    setPresetValue(options.radioGroups.processing, state.processingPreset);
+    setPresetValue(options.radioGroups.visualStyle, state.visualStylePreset);
     syncingPresetGroups = false;
+    for (const element of root.querySelectorAll<HTMLElement>('[data-grid-summary]')) {
+      const nextText = `${String(state.columns)} × ${String(state.rows)} 颗`;
+      if (element.textContent !== nextText) element.textContent = nextText;
+    }
     for (const element of root.querySelectorAll<HTMLElement>('[data-physical-size]')) {
       const nextText =
         `约 ${(state.physicalSizeMm.widthMm / 10).toFixed(1)} × ` +
@@ -483,24 +547,25 @@ export function mountPreparePresetControls(
     if (maximumColors) {
       maximumColors.disabled = state.availableColorCount === 0;
       maximumColors.min = state.availableColorCount === 0 ? '0' : '1';
+      maximumColors.max = String(state.availableColorCount);
+    }
+    const maximumColorsField = root.querySelector<HTMLElement>('[data-maximum-colors-field]');
+    if (maximumColorsField) {
+      maximumColorsField.hidden = state.colorCountPreset !== 'custom';
+    }
+    const dimensionInputs = root.querySelector<HTMLElement>('[data-dimension-inputs]');
+    if (dimensionInputs) {
+      dimensionInputs.hidden = state.patternSizePreset !== 'custom';
+    }
+    const visualStyleCustom = root.querySelector<HTMLElement>('[data-visual-style-custom]');
+    if (visualStyleCustom) {
+      visualStyleCustom.hidden = state.visualStylePreset !== 'custom';
     }
     const customBeadFields = root.querySelector<HTMLFieldSetElement>('[data-custom-bead-fields]');
     if (customBeadFields) {
       const custom = state.beadSizePreset === 'custom';
       customBeadFields.hidden = !custom;
       customBeadFields.disabled = !custom;
-    }
-    const customPatternState = root.querySelector<HTMLElement>('[data-pattern-size-custom]');
-    if (customPatternState) {
-      const custom = state.patternSizePreset === 'custom';
-      customPatternState.hidden = !custom;
-      const dimensions = customPatternState.querySelector<HTMLElement>(
-        '[data-custom-pattern-size]',
-      );
-      const nextText = `${String(state.columns)} × ${String(state.rows)} 颗`;
-      if (dimensions && dimensions.textContent !== nextText) {
-        dimensions.textContent = nextText;
-      }
     }
   }
 }
@@ -716,7 +781,7 @@ function setInputValue(root: ParentNode, selector: string, value: number): void 
 
 function setPresetValue(
   controller: VaadinRadioGroupController,
-  value: PatternSizePreset | BeadSizePreset | ColorCountPreset | ProcessingPreset,
+  value: PatternSizePreset | BeadSizePreset | ColorCountPreset | VisualStylePreset,
 ): void {
   controller.setValue(String(value));
 }

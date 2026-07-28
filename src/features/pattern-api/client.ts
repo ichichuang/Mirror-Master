@@ -32,6 +32,7 @@ export interface PatternGenerationSettings {
   readonly sampling: SamplingMode;
   readonly dithering: DitheringMode;
   readonly alphaEmptyThreshold: number;
+  readonly colorBoost?: 'none' | 'vivid';
 }
 
 export interface PatternGenerationResult {

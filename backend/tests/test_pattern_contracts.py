@@ -152,6 +152,21 @@ def test_custom_board_dimensions_are_preserved() -> None:
     assert settings.board_columns == 10
 
 
+def test_color_boost_defaults_to_none() -> None:
+    settings = PatternGenerationSettings.model_validate(generation_payload())
+
+    assert settings.color_boost == "none"
+
+
+@pytest.mark.parametrize("color_boost", ["ultra", "VIVID", 1])
+def test_color_boost_rejects_non_contract_values(color_boost) -> None:
+    payload = generation_payload()
+    payload["colorBoost"] = color_boost
+
+    with pytest.raises(ValidationError):
+        PatternGenerationSettings.model_validate(payload)
+
+
 @pytest.mark.parametrize(
     ("preset", "board_rows", "board_columns"),
     [

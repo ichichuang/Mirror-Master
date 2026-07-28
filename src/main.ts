@@ -16,6 +16,7 @@ import {
   type BeadProject,
   type ImageRotation,
   type ProjectMode,
+  type ProjectStatistics,
 } from './domain/project';
 import { PALETTE_COLORS, PALETTE_SOURCE_VERSION, PALETTES } from './generated/palettes';
 import {
@@ -23,11 +24,7 @@ import {
   loadAppCapabilities,
   type AppCapabilities,
 } from './features/app-capabilities/capabilities';
-import {
-  applyCropKeyboardStep,
-  normalizeCropPercent,
-  type CropArrowKey,
-} from './features/crop-controls/cropControls';
+import { normalizeCropPercent } from './features/crop-controls/cropControls';
 import {
   mirrorGrid,
   MirrorMasterApiError,
@@ -118,7 +115,6 @@ import {
   hasAvailableColorSelection,
   mountPreparePresetControls,
   resolveSupportedNewPatternMode,
-  syncCropNumericInputValues,
   type AvailableColorGridRenderer,
   type PreparePresetControlsController,
   type PreparePresetRadioGroupControllers,
@@ -140,9 +136,25 @@ import {
 import {
   exportPattern,
   generatePattern,
-  PatternApiError,
   type PatternGenerationSettings,
 } from './features/pattern-api/client';
+import {
+  createPreviewCoordinator,
+  PREVIEW_STATUS_TEXT,
+  type PreviewCoordinator,
+  type PreviewCoordinatorEvent,
+  type PreviewStatusKind,
+} from './features/preview-workspace/previewCoordinator';
+import {
+  drawRotatedCropPreview,
+  mountCropInteractions,
+  renderCropSelectionOverlay,
+} from './features/preview-workspace/previewCrop';
+import { formatPreviewDoneStatus } from './features/preview-workspace/previewSummary';
+import {
+  createPreviewView,
+  type PreviewViewController,
+} from './features/preview-workspace/previewView';
 import {
   MAX_PROJECT_JSON_BYTES,
   parseProjectJsonText,
@@ -170,7 +182,7 @@ import {
   type WorkspacePanelsView,
 } from './features/workspace-panels/workspacePanels';
 
-type AppStage = 'upload' | 'prepare' | 'editor' | 'chart';
+type AppStage = 'start' | 'preview' | 'editor' | 'chart';
 type InspectorPanel = 'tools' | 'palette' | 'materials' | 'settings';
 interface SelectedImage {
   readonly file: File;
@@ -192,6 +204,7 @@ interface ConfirmationRequest {
   readonly title: string;
   readonly description: string;
   readonly onContinue: () => void;
+  readonly onCancel?: () => void;
 }
 
 const appElement = document.querySelector<HTMLDivElement>('#app');
@@ -211,8 +224,8 @@ document
 app.innerHTML = renderApp();
 
 const shell = required(app, '[data-app-shell]', HTMLElement);
-const uploadWorkspace = required(app, '[data-upload-workspace]', HTMLElement);
-const prepareWorkspace = required(app, '[data-prepare-workspace]', HTMLElement);
+const startWorkspace = required(app, '[data-start-workspace]', HTMLElement);
+const previewWorkspace = required(app, '[data-preview-workspace]', HTMLElement);
 const patternWorkspace = required(app, '[data-pattern-workspace]', HTMLElement);
 const chartWorkspace = required(app, '[data-chart-workspace]', HTMLElement);
 const fileInput = required(app, '[data-file-input]', HTMLInputElement);
@@ -259,10 +272,16 @@ let workspacePanelControllers: readonly WorkspacePanelsController[] = Object.fre
 const objectUrls = createObjectUrlStore();
 const recommendationRequests = createLatestSourceRequest();
 const firstUseHintSession = createFirstUseHintSession();
+const previewColorHexById: ReadonlyMap<string, string> = new Map(
+  PALETTE_COLORS.map((color) => [color.id, color.displayHex]),
+);
 let firstUseHintTimer: number | null = null;
 let appCapabilities: AppCapabilities = FALLBACK_APP_CAPABILITIES;
-let stage: AppStage = 'upload';
+let capabilitiesDegraded = false;
+let stage: AppStage = 'start';
 let customerTask: CustomerTask = 'newPattern';
+let mirrorChartIntent = false;
+let newPatternEntrySupported = true;
 let mode: ProjectMode = 'photo';
 let prepareState: NewPatternPrepareState | null = null;
 let samplingSelection: SamplingSelection = createAutomaticSampling(
@@ -275,6 +294,13 @@ let cropPercent: CropPercent = { x: 0, y: 0, width: 100, height: 100 };
 let aspectLocked = true;
 let currentProject: BeadProject | null = null;
 let sourceGenerationRevision: number | null = null;
+let previewProject: BeadProject | null = null;
+let previewStatistics: ProjectStatistics | null = null;
+let previewClobberAcknowledged = false;
+let firstPreviewGenerationStarted = false;
+let previewRegenerationTimer: number | null = null;
+let hydratingPreviewControls = false;
+let holdOriginalActive = false;
 let history: MatrixHistory | null = null;
 let canvasController: PatternCanvasController | null = null;
 let gridContract: GridDetectionContract | null = null;
@@ -294,7 +320,6 @@ let paletteSeries = '';
 let prepareColorQuery = '';
 let prepareColorSeries = '';
 let recentColorIds: readonly string[] = Object.freeze([]);
-let generationController: AbortController | null = null;
 let exportCompletionState: ExportCompletionState = createExportCompletionState();
 let exportReturnFocus: HTMLElement | null = null;
 let chartMirrorController: AbortController | null = null;
@@ -317,6 +342,7 @@ let confirmationDialogController: ConfirmationDialogController | null = null;
 let uploadPrepareRadioControllers: UploadPrepareRadioControllers;
 let preparePresetRadioGroupControllers: PreparePresetRadioGroupControllers;
 let samplingRadioController: VaadinRadioGroupController;
+let previewCompareRadioController: VaadinRadioGroupController;
 let paletteScopeRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let exportTemplateRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let responsiveWorkspaceMount: ResponsiveWorkspaceMount;
@@ -338,6 +364,20 @@ const exportCoordinator = createExportCoordinator({
   onEvent: handleExportEvent,
 });
 
+const previewCoordinator: PreviewCoordinator = createPreviewCoordinator({
+  generate: ({ file, settings }, signal) => generatePattern(file, settings, signal),
+  onEvent: handlePreviewCoordinatorEvent,
+});
+
+const previewView: PreviewViewController = createPreviewView({
+  root: previewWorkspace,
+  colorHexById: previewColorHexById,
+  onShowOriginal() {
+    drawCropPreview();
+    renderCropSelection();
+  },
+});
+
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
@@ -347,8 +387,8 @@ async function bootstrap(): Promise<void> {
     createWorkspacePanels(desktopInspectorContent),
     createWorkspacePanels(mobileSheetContent),
   ]);
-  setupUpload();
-  setupPrepare();
+  setupStart();
+  setupPreview();
   setupPatternWorkspace();
   responsiveWorkspaceMount = createResponsiveWorkspaceMount({
     root: patternWorkspace,
@@ -359,6 +399,7 @@ async function bootstrap(): Promise<void> {
   gridController = setupChartWorkspace();
   setupReplacementActions();
   setupConfirmationSurface();
+  setupPreviewCanvasResize();
   window.addEventListener('resize', updateWorkspaceLayout);
   window.addEventListener('orientationchange', updateWorkspaceLayout);
   window.visualViewport?.addEventListener('resize', handleVisualViewportChange);
@@ -366,7 +407,7 @@ async function bootstrap(): Promise<void> {
   window.addEventListener('beforeunload', cleanup);
   syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
   syncSamplingControls(samplingRadioController, samplingSelection);
-  showStage('upload');
+  showStage('start');
   await initializeCapabilities();
 }
 
@@ -386,40 +427,40 @@ async function waitForVaadinDefinitions(): Promise<void> {
 }
 
 async function initializeRadioGroupControllers(): Promise<void> {
-  const customerTaskGroup = requiredVaadinElement(
-    app,
-    '[data-customer-task]',
-    'vaadin-radio-group',
-  );
   const modePreferenceGroup = requiredVaadinElement(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-mode-preference]',
     'vaadin-radio-group',
   );
   const samplingGroup = requiredVaadinElement(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-sampling]',
+    'vaadin-radio-group',
+  );
+  const compareGroup = requiredVaadinElement(
+    previewWorkspace,
+    '[data-compare-switch]',
     'vaadin-radio-group',
   );
   const presetGroups = {
     patternSize: requiredVaadinElement(
-      prepareWorkspace,
+      previewWorkspace,
       '[data-pattern-size-preset]',
       'vaadin-radio-group',
     ),
     beadSize: requiredVaadinElement(
-      prepareWorkspace,
+      previewWorkspace,
       '[data-bead-size-preset]',
       'vaadin-radio-group',
     ),
     colorCount: requiredVaadinElement(
-      prepareWorkspace,
+      previewWorkspace,
       '[data-color-count-preset]',
       'vaadin-radio-group',
     ),
-    processing: requiredVaadinElement(
-      prepareWorkspace,
-      '[data-processing-preset]',
+    visualStyle: requiredVaadinElement(
+      previewWorkspace,
+      '[data-visual-style-preset]',
       'vaadin-radio-group',
     ),
   };
@@ -430,20 +471,16 @@ async function initializeRadioGroupControllers(): Promise<void> {
   );
 
   const [
-    customerTaskController,
     modePreferenceController,
     nextSamplingController,
+    compareController,
     patternSizeController,
     beadSizeController,
     colorCountController,
-    processingController,
+    visualStyleController,
     nextPaletteControllers,
     nextExportControllers,
   ] = await Promise.all([
-    createVaadinRadioGroupController({
-      element: customerTaskGroup,
-      initialValue: customerTask,
-    }),
     createVaadinRadioGroupController({
       element: modePreferenceGroup,
       initialValue: 'auto',
@@ -451,6 +488,10 @@ async function initializeRadioGroupControllers(): Promise<void> {
     createVaadinRadioGroupController({
       element: samplingGroup,
       initialValue: samplingSelection.value,
+    }),
+    createVaadinRadioGroupController({
+      element: compareGroup,
+      initialValue: 'pattern',
     }),
     createVaadinRadioGroupController({
       element: presetGroups.patternSize,
@@ -465,8 +506,8 @@ async function initializeRadioGroupControllers(): Promise<void> {
       initialValue: '24',
     }),
     createVaadinRadioGroupController({
-      element: presetGroups.processing,
-      initialValue: 'easy',
+      element: presetGroups.visualStyle,
+      initialValue: 'natural',
     }),
     Promise.all(
       paletteGroups.map((element) =>
@@ -484,15 +525,15 @@ async function initializeRadioGroupControllers(): Promise<void> {
   ]);
 
   uploadPrepareRadioControllers = Object.freeze({
-    customerTask: customerTaskController,
     modePreference: modePreferenceController,
   });
   samplingRadioController = nextSamplingController;
+  previewCompareRadioController = compareController;
   preparePresetRadioGroupControllers = Object.freeze({
     patternSize: patternSizeController,
     beadSize: beadSizeController,
     colorCount: colorCountController,
-    processing: processingController,
+    visualStyle: visualStyleController,
   });
   paletteScopeRadioControllers = Object.freeze(nextPaletteControllers);
   exportTemplateRadioControllers = Object.freeze(nextExportControllers);
@@ -504,6 +545,7 @@ async function initializeCapabilities(): Promise<void> {
     resolution.source === 'remote' &&
     resolution.capabilities.paletteSourceVersion !== PALETTE_SOURCE_VERSION;
   appCapabilities = paletteMismatch ? FALLBACK_APP_CAPABILITIES : resolution.capabilities;
+  capabilitiesDegraded = paletteMismatch || resolution.source === 'fallback';
   applyCapabilitiesToInterface();
 
   const warning = paletteMismatch ? '在线色板暂不可用，已切换到内置色板。' : resolution.message;
@@ -521,58 +563,43 @@ function applyCapabilitiesToInterface(): void {
   required(app, '[data-upload-constraints]', HTMLElement).textContent =
     `${mimeLabels}，最大 ${formatFileSize(appCapabilities.upload.maximumBytes)}`;
 
-  const taskGroup = requiredVaadinElement(app, '[data-customer-task]', 'vaadin-radio-group');
-  const taskOptions = [
-    ...taskGroup.querySelectorAll<HTMLElementTagNameMap['vaadin-radio-button']>(
-      'vaadin-radio-button',
-    ),
-  ];
-  const newPatternSupported = appCapabilities.modes.some(
+  newPatternEntrySupported = appCapabilities.modes.some(
     (candidate) => candidate === 'photo' || candidate === 'pixelArt',
   );
-  for (const option of taskOptions) {
-    option.disabled =
-      option.value === 'newPattern'
-        ? !newPatternSupported
-        : !appCapabilities.modes.includes('existingChart');
-  }
-  const selectedTask = taskOptions.find((option) => option.value === customerTask);
-  if (!selectedTask || selectedTask.disabled) {
-    const fallbackTask = taskOptions.find((option) => !option.disabled);
-    if (fallbackTask && isCustomerTask(fallbackTask.value)) {
-      customerTask = fallbackTask.value;
-      prepareState = null;
-    }
-  }
+  const newPatternEntry = required(app, '[data-new-pattern-entry]', HTMLLabelElement);
+  newPatternEntry.classList.toggle('is-disabled', !newPatternEntrySupported);
+  newPatternEntry.setAttribute('aria-disabled', String(!newPatternEntrySupported));
+  required(app, '[data-mirror-existing-chart]', HTMLButtonElement).disabled =
+    !appCapabilities.modes.includes('existingChart');
   syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
 
   applyIntegerLimits(
-    required(prepareWorkspace, '[data-columns]', HTMLInputElement),
+    required(previewWorkspace, '[data-columns]', HTMLInputElement),
     appCapabilities.grid.minimumColumns,
     appCapabilities.grid.maximumColumns,
   );
   applyIntegerLimits(
-    required(prepareWorkspace, '[data-rows]', HTMLInputElement),
+    required(previewWorkspace, '[data-rows]', HTMLInputElement),
     appCapabilities.grid.minimumRows,
     appCapabilities.grid.maximumRows,
   );
   applyDecimalLimits(
-    required(prepareWorkspace, '[data-bead-diameter]', HTMLInputElement),
+    required(previewWorkspace, '[data-bead-diameter]', HTMLInputElement),
     appCapabilities.beads.minimumDiameterMm,
     appCapabilities.beads.maximumDiameterMm,
   );
   applyDecimalLimits(
-    required(prepareWorkspace, '[data-bead-pitch]', HTMLInputElement),
+    required(previewWorkspace, '[data-bead-pitch]', HTMLInputElement),
     appCapabilities.beads.minimumPitchMm,
     appCapabilities.beads.maximumPitchMm,
   );
   applyIntegerLimits(
-    required(prepareWorkspace, '[data-custom-board-rows]', HTMLInputElement),
+    required(previewWorkspace, '[data-custom-board-rows]', HTMLInputElement),
     appCapabilities.boards.custom.minimumRows,
     appCapabilities.boards.custom.maximumRows,
   );
   applyIntegerLimits(
-    required(prepareWorkspace, '[data-custom-board-columns]', HTMLInputElement),
+    required(previewWorkspace, '[data-custom-board-columns]', HTMLInputElement),
     appCapabilities.boards.custom.minimumColumns,
     appCapabilities.boards.custom.maximumColumns,
   );
@@ -585,7 +612,7 @@ function applyCapabilitiesToInterface(): void {
     }),
   );
   boardSelectController?.setOptions(boardOptions);
-  const currentBoard = selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare');
+  const currentBoard = selectValue(previewWorkspace, '[data-board-preset]', 'standardSquare');
   if (boardOptions.find((option) => option.id === currentBoard)?.disabled) {
     const fallbackBoard = boardOptions.find((option) => !option.disabled);
     if (fallbackBoard) {
@@ -593,17 +620,17 @@ function applyCapabilitiesToInterface(): void {
     }
   }
   const customBoardFields = required(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-custom-board-fields]',
     HTMLFieldSetElement,
   );
   const customBoardSelected =
-    selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare') === 'custom';
+    selectValue(previewWorkspace, '[data-board-preset]', 'standardSquare') === 'custom';
   customBoardFields.hidden = !customBoardSelected;
   customBoardFields.disabled = !customBoardSelected;
 
   const samplingGroup = requiredVaadinElement(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-sampling]',
     'vaadin-radio-group',
   );
@@ -612,6 +639,15 @@ function applyCapabilitiesToInterface(): void {
   )) {
     option.disabled = !appCapabilities.sampling.includes(option.value as 'average' | 'nearest');
   }
+  const nearestSamplingSupported = appCapabilities.sampling.includes('nearest');
+  const gradientDitheringSupported = appCapabilities.dithering.includes('floydSteinberg');
+  for (const option of previewWorkspace.querySelectorAll<
+    HTMLElementTagNameMap['vaadin-radio-button']
+  >('[data-visual-style-preset] vaadin-radio-button')) {
+    option.disabled =
+      (option.value === 'clearBlocks' && !nearestSamplingSupported) ||
+      (option.value === 'smoothGradient' && !gradientDitheringSupported);
+  }
   if (!appCapabilities.sampling.includes(samplingSelection.value)) {
     samplingSelection = createAutomaticSampling(
       firstSupportedNewPatternMode(),
@@ -619,6 +655,7 @@ function applyCapabilitiesToInterface(): void {
     );
   }
   syncSamplingControls(samplingRadioController, samplingSelection);
+  preparePresetControls?.setSampling(samplingSelection.value);
   const ditheringOptions = ditheringSelectOptions().map((option) =>
     Object.freeze({
       ...option,
@@ -628,7 +665,7 @@ function applyCapabilitiesToInterface(): void {
   ditheringSelectController?.setOptions(ditheringOptions);
   const selectedDithering =
     ditheringSelectController?.selectedId() ??
-    selectValue(prepareWorkspace, '[data-dithering]', 'none');
+    selectValue(previewWorkspace, '[data-dithering]', 'none');
   if (ditheringOptions.find((option) => option.id === selectedDithering)?.disabled) {
     const fallbackDithering = ditheringOptions.find((option) => !option.disabled);
     if (fallbackDithering) {
@@ -675,16 +712,18 @@ function applyCapabilitiesToInterface(): void {
   }
 }
 
-function setupUpload(): void {
-  uploadPrepareRadioControllers.customerTask.subscribe((selectedTask) => {
-    if (!isCustomerTask(selectedTask) || selectedTask === customerTask) return;
-    customerTask = selectedTask;
-    recommendationRequests.cancel();
-    prepareState = null;
-    mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
-    samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
-    syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
-    syncSamplingControls(samplingRadioController, samplingSelection);
+function setupStart(): void {
+  const newPatternEntry = required(app, '[data-new-pattern-entry]', HTMLLabelElement);
+  newPatternEntry.addEventListener('click', (event) => {
+    mirrorChartIntent = false;
+    if (!newPatternEntrySupported) {
+      event.preventDefault();
+      setFileStatus('当前服务暂不支持制作新图纸，请稍后再试。', 'error');
+    }
+  });
+  required(app, '[data-mirror-existing-chart]', HTMLButtonElement).addEventListener('click', () => {
+    mirrorChartIntent = true;
+    fileInput.click();
   });
 
   fileInput.addEventListener('change', () => {
@@ -712,12 +751,15 @@ function setupUpload(): void {
     });
   }
   dropZone.addEventListener('drop', (event) => {
+    mirrorChartIntent = false;
     void acceptFiles(event.dataTransfer?.files ? [...event.dataTransfer.files] : []);
   });
 }
 
 async function acceptFiles(files: readonly File[]): Promise<void> {
   const requestRevision = ++loadRevision;
+  const routeToChartMirror = mirrorChartIntent;
+  mirrorChartIntent = false;
   const result = validateSingleImageFile(files, {
     mimeTypes: appCapabilities.upload.mimeTypes,
     maximumBytes: appCapabilities.upload.maximumBytes,
@@ -726,11 +768,17 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     setFileStatus(result.message, 'error');
     return;
   }
-  generationController?.abort();
+  if (!routeToChartMirror && !newPatternEntrySupported) {
+    setFileStatus('当前服务暂不支持制作新图纸，请稍后再试。', 'error');
+    return;
+  }
+  previewCoordinator.cancel();
+  clearPreviewRegenerationTimer();
   exportCoordinator.invalidate();
   chartMirrorController?.abort();
   recommendationRequests.cancel();
   setFileStatus(`正在读取 ${result.file.name}…`, 'loading');
+  setPreviewStatus('reading');
   objectUrls.revokeAll();
   const objectUrl = objectUrls.create(result.file);
 
@@ -762,25 +810,32 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     rotation = 0;
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
     currentProject = null;
+    sourceGenerationRevision = null;
+    previewProject = null;
+    previewStatistics = null;
     history = null;
     canvasController?.destroy();
     canvasController = null;
     projectFileStatus.textContent = '';
     setFileStatus('图片已载入。', 'ready');
-    if (customerTask === 'mirrorExistingChart') {
+    if (routeToChartMirror) {
       mode = 'existingChart';
-      prepareState = null;
-      syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
+      applyUploadPrepareFlow(
+        Object.freeze({ customerTask: 'mirrorExistingChart', prepareState: null }),
+      );
       openChartWorkspace();
     } else {
       const recommendationRequest = recommendationRequests.begin();
       applyUploadPrepareFlow(
-        beginUploadedImage(currentUploadPrepareFlow(), recommendationRequest.token),
+        beginUploadedImage(
+          Object.freeze({ customerTask: 'newPattern', prepareState: null }),
+          recommendationRequest.token,
+        ),
       );
       mode = firstSupportedNewPatternMode();
       samplingSelection = createAutomaticSampling(mode, appCapabilities.sampling);
       syncSamplingControls(samplingRadioController, samplingSelection);
-      openPrepareWorkspace();
+      openPreviewWorkspace();
       void completeImageRecommendation(
         resource.image,
         result.mimeType,
@@ -820,29 +875,25 @@ async function completeImageRecommendation(
   } catch (error) {
     if (signal.aborted || isAbortError(error)) return;
     if (prepareState?.task === 'newPattern' && prepareState.sourceToken === sourceToken) {
-      required(prepareWorkspace, '[data-mode-recommendation]', HTMLElement).textContent =
+      required(previewWorkspace, '[data-mode-recommendation]', HTMLElement).textContent =
         '暂时无法自动分析这张图片，请在这里选择“自然图片”或“清晰像素”。';
-      const generateButton = required(
-        prepareWorkspace,
-        '[data-generate-pattern]',
-        HTMLButtonElement,
-      );
-      generateButton.disabled = prepareState.preference === 'auto';
+      setPreviewStatus('analyzing');
     }
   }
 }
 
-function applyPrepareModeState(): void {
+function applyPrepareModeState(allowRegeneration = true): void {
   const state = prepareState;
   if (!state) return;
   syncUploadPrepareControls(uploadPrepareRadioControllers, currentUploadPrepareFlow());
-  const status = required(prepareWorkspace, '[data-mode-recommendation]', HTMLElement);
-  const generateButton = required(prepareWorkspace, '[data-generate-pattern]', HTMLButtonElement);
+  const status = required(previewWorkspace, '[data-mode-recommendation]', HTMLElement);
   if (state.recommendationStatus === 'analyzing' && state.resolvedMode === null) {
     mode = firstSupportedNewPatternMode();
     status.textContent = state.reason;
-    generateButton.disabled = true;
     updateSamplingDefault();
+    if (stage === 'preview') {
+      setPreviewStatus('analyzing');
+    }
     return;
   }
   const requestedMode = state.resolvedMode ?? firstSupportedNewPatternMode();
@@ -855,7 +906,9 @@ function applyPrepareModeState(): void {
     );
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : '当前服务暂不支持制作新图纸。';
-    generateButton.disabled = true;
+    if (stage === 'preview') {
+      setPreviewStatus('failure');
+    }
     return;
   }
   mode = supportedMode;
@@ -866,8 +919,14 @@ function applyPrepareModeState(): void {
           supportedMode === 'photo' ? '自然图片' : '清晰像素'
         }。`;
   status.textContent = `${state.reason}${fallbackMessage}`;
-  generateButton.disabled = false;
   updateSamplingDefault();
+  if (stage === 'preview' && allowRegeneration) {
+    if (firstPreviewGenerationStarted) {
+      schedulePreviewRegeneration();
+    } else {
+      startPreviewGeneration();
+    }
+  }
 }
 
 function firstSupportedNewPatternMode(): NewPatternMode {
@@ -880,7 +939,8 @@ function firstSupportedNewPatternMode(): NewPatternMode {
 
 async function openProjectFile(file: File): Promise<void> {
   const requestRevision = ++loadRevision;
-  generationController?.abort();
+  previewCoordinator.cancel();
+  clearPreviewRegenerationTimer();
   exportCoordinator.invalidate();
   chartMirrorController?.abort();
   recommendationRequests.cancel();
@@ -916,6 +976,8 @@ async function openProjectFile(file: File): Promise<void> {
     syncSamplingControls(samplingRadioController, samplingSelection);
     currentProject = project;
     sourceGenerationRevision = null;
+    previewProject = null;
+    previewStatistics = null;
     availableColorIds = new Set(project.palette.availableColorIds);
     selectedColorId =
       Object.keys(calculateStatistics(project.cells).perColorCounts)[0] ??
@@ -941,45 +1003,48 @@ async function openProjectFile(file: File): Promise<void> {
   }
 }
 
-function setupPrepare(): void {
-  const prepareReplace = required(prepareWorkspace, '[data-prepare-replace]', HTMLButtonElement);
-  const rotateLeft = required(prepareWorkspace, '[data-rotate-left]', HTMLButtonElement);
-  const rotateRight = required(prepareWorkspace, '[data-rotate-right]', HTMLButtonElement);
-  const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
-  const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
-  const aspectButton = required(prepareWorkspace, '[data-aspect-lock]', HTMLButtonElement);
+function setupPreview(): void {
+  const prepareReplace = required(previewWorkspace, '[data-prepare-replace]', HTMLButtonElement);
+  const holdOriginalButton = required(previewWorkspace, '[data-hold-original]', HTMLButtonElement);
+  const panelToggle = required(previewWorkspace, '[data-preview-panel-toggle]', HTMLButtonElement);
+  const panelBody = required(previewWorkspace, '[data-preview-panel-body]', HTMLElement);
+  const rotateLeft = required(previewWorkspace, '[data-rotate-left]', HTMLButtonElement);
+  const rotateRight = required(previewWorkspace, '[data-rotate-right]', HTMLButtonElement);
+  const columnsInput = required(previewWorkspace, '[data-columns]', HTMLInputElement);
+  const rowsInput = required(previewWorkspace, '[data-rows]', HTMLInputElement);
+  const aspectButton = required(previewWorkspace, '[data-aspect-lock]', HTMLButtonElement);
   const boardPreset = requiredVaadinElement(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-board-preset]',
     'vaadin-select',
   );
   const paletteSelect = requiredVaadinElement(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-palette-id]',
     'vaadin-select',
   );
-  const maximumColors = required(prepareWorkspace, '[data-maximum-colors]', HTMLInputElement);
-  const alphaThreshold = required(prepareWorkspace, '[data-alpha-threshold]', HTMLInputElement);
-  const beadDiameter = required(prepareWorkspace, '[data-bead-diameter]', HTMLInputElement);
-  const beadPitch = required(prepareWorkspace, '[data-bead-pitch]', HTMLInputElement);
+  const maximumColors = required(previewWorkspace, '[data-maximum-colors]', HTMLInputElement);
+  const alphaThreshold = required(previewWorkspace, '[data-alpha-threshold]', HTMLInputElement);
+  const beadDiameter = required(previewWorkspace, '[data-bead-diameter]', HTMLInputElement);
+  const beadPitch = required(previewWorkspace, '[data-bead-pitch]', HTMLInputElement);
   const customBoardFields = required(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-custom-board-fields]',
     HTMLFieldSetElement,
   );
-  const customBoardRows = required(prepareWorkspace, '[data-custom-board-rows]', HTMLInputElement);
+  const customBoardRows = required(previewWorkspace, '[data-custom-board-rows]', HTMLInputElement);
   const customBoardColumns = required(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-custom-board-columns]',
     HTMLInputElement,
   );
   const openAvailableColors = requiredVaadinElement(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-open-available-colors]',
     'vaadin-button',
   );
   const availableColorTemplate = required(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-available-color-dialog-template]',
     HTMLTemplateElement,
   );
@@ -996,25 +1061,46 @@ function setupPrepare(): void {
     series: availableColorSeries,
     status: availableColorStatus,
   } = availableColorDialogController;
-  const generateButton = required(prepareWorkspace, '[data-generate-pattern]', HTMLButtonElement);
-  const returnEditorButton = required(prepareWorkspace, '[data-return-editor]', HTMLButtonElement);
-  const cropFrame = required(prepareWorkspace, '[data-crop-frame]', HTMLElement);
-  const cropSelection = required(prepareWorkspace, '[data-crop-selection]', HTMLElement);
-  const cropInputs = {
-    x: required(prepareWorkspace, '[data-crop-x]', HTMLInputElement),
-    y: required(prepareWorkspace, '[data-crop-y]', HTMLInputElement),
-    width: required(prepareWorkspace, '[data-crop-width]', HTMLInputElement),
-    height: required(prepareWorkspace, '[data-crop-height]', HTMLInputElement),
-  };
-  let cropGesture: {
-    readonly pointerId: number;
-    readonly startX: number;
-    readonly startY: number;
-    readonly initial: CropPercent;
-    readonly handle: 'move' | 'nw' | 'ne' | 'sw' | 'se';
-  } | null = null;
+  const editPatternButton = required(previewWorkspace, '[data-edit-pattern]', HTMLButtonElement);
+  const returnEditorButton = required(previewWorkspace, '[data-return-editor]', HTMLButtonElement);
 
   prepareReplace.addEventListener('click', handleReplaceImageClick);
+  holdOriginalButton.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    holdOriginalActive = true;
+    applyPreviewCompareView('original');
+  });
+  const endHoldOriginal = (): void => {
+    if (!holdOriginalActive) return;
+    holdOriginalActive = false;
+    applyPreviewCompareView(currentPreviewCompareValue());
+  };
+  holdOriginalButton.addEventListener('pointerup', endHoldOriginal);
+  holdOriginalButton.addEventListener('pointercancel', endHoldOriginal);
+  holdOriginalButton.addEventListener('lostpointercapture', endHoldOriginal);
+  holdOriginalButton.addEventListener('keydown', (event) => {
+    if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
+      event.preventDefault();
+      holdOriginalActive = true;
+      applyPreviewCompareView('original');
+    }
+  });
+  holdOriginalButton.addEventListener('keyup', (event) => {
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      endHoldOriginal();
+    }
+  });
+  holdOriginalButton.addEventListener('blur', endHoldOriginal);
+  panelToggle.addEventListener('click', () => {
+    const expanded = panelToggle.getAttribute('aria-expanded') !== 'false';
+    panelToggle.setAttribute('aria-expanded', String(!expanded));
+    panelBody.hidden = expanded;
+  });
+  previewCompareRadioController.subscribe((value) => {
+    if (holdOriginalActive) return;
+    applyPreviewCompareView(value === 'original' ? 'original' : 'pattern');
+  });
   rotateLeft.addEventListener('click', () => {
     rotation = normalizeRotation(rotation - 90);
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
@@ -1022,6 +1108,7 @@ function setupPrepare(): void {
     renderCropSelection();
     updatePrepareSummaries();
     announce('图片已向左旋转。');
+    schedulePreviewRegeneration();
   });
   rotateRight.addEventListener('click', () => {
     rotation = normalizeRotation(rotation + 90);
@@ -1030,6 +1117,7 @@ function setupPrepare(): void {
     renderCropSelection();
     updatePrepareSummaries();
     announce('图片已向右旋转。');
+    schedulePreviewRegeneration();
   });
   aspectButton.addEventListener('click', () => {
     aspectLocked = !aspectLocked;
@@ -1102,13 +1190,16 @@ function setupPrepare(): void {
     updatePrepareSummaries();
   });
   alphaThreshold.addEventListener('input', syncAlphaThresholdCopy);
+  alphaThreshold.addEventListener('change', () => {
+    schedulePreviewRegeneration();
+  });
   availableColorSearch.addEventListener('input', () => {
     prepareColorQuery = availableColorSearch.value;
     renderAvailableColorFilter();
   });
   selectAllColors.addEventListener('click', () => {
     availableColorIds = new Set(
-      getPalette(selectValue(prepareWorkspace, '[data-palette-id]', 'mard')).colorIds,
+      getPalette(selectValue(previewWorkspace, '[data-palette-id]', 'mard')).colorIds,
     );
     maximumColors.max = String(availableColorIds.size);
     maximumColors.value = String(
@@ -1149,8 +1240,8 @@ function setupPrepare(): void {
     preparePresetControls?.setAvailableColorCount(availableColorIds.size);
     renderAvailableColorFilter();
   });
-  generateButton.addEventListener('click', () => {
-    void startPatternGeneration();
+  editPatternButton.addEventListener('click', () => {
+    confirmPreviewAsEditorBaseline();
   });
   returnEditorButton.addEventListener('click', () => {
     if (currentProject && history) {
@@ -1159,96 +1250,21 @@ function setupPrepare(): void {
     }
   });
 
-  cropSelection.addEventListener('pointerdown', (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    const handle = target.classList.contains('crop-handle-nw')
-      ? 'nw'
-      : target.classList.contains('crop-handle-ne')
-        ? 'ne'
-        : target.classList.contains('crop-handle-sw')
-          ? 'sw'
-          : target.classList.contains('crop-handle-se')
-            ? 'se'
-            : 'move';
-    event.preventDefault();
-    cropSelection.setPointerCapture(event.pointerId);
-    cropGesture = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      initial: cropPercent,
-      handle,
-    };
-  });
-  cropSelection.addEventListener('pointermove', (event) => {
-    if (!cropGesture || cropGesture.pointerId !== event.pointerId) {
-      return;
-    }
-    event.preventDefault();
-    const frameRect = cropFrame.getBoundingClientRect();
-    const deltaX = ((event.clientX - cropGesture.startX) / frameRect.width) * 100;
-    const deltaY = ((event.clientY - cropGesture.startY) / frameRect.height) * 100;
-    cropPercent = resizeCrop(cropGesture.initial, cropGesture.handle, deltaX, deltaY);
-    renderCropSelection();
-    updatePrepareSummaries();
-  });
-  const endCropGesture = (event: PointerEvent): void => {
-    if (!cropGesture || cropGesture.pointerId !== event.pointerId) {
-      return;
-    }
-    cropGesture = null;
-    if (cropSelection.hasPointerCapture(event.pointerId)) {
-      cropSelection.releasePointerCapture(event.pointerId);
-    }
-    announce('裁剪范围已更新。');
-  };
-  cropSelection.addEventListener('pointerup', endCropGesture);
-  cropSelection.addEventListener('pointercancel', (event) => {
-    if (!cropGesture || cropGesture.pointerId !== event.pointerId) {
-      return;
-    }
-    cropPercent = cropGesture.initial;
-    cropGesture = null;
-    renderCropSelection();
-    updatePrepareSummaries();
-    announce('本次裁剪调整已取消。');
-  });
-  cropSelection.addEventListener('lostpointercapture', (event) => {
-    if (cropGesture?.pointerId === event.pointerId) {
-      cropPercent = cropGesture.initial;
-      cropGesture = null;
-      renderCropSelection();
+  mountCropInteractions({
+    root: previewWorkspace,
+    getCrop: () => cropPercent,
+    setCrop(nextCrop) {
+      cropPercent = nextCrop;
+    },
+    onLiveChange(editingInput) {
+      renderCropSelection(editingInput);
       updatePrepareSummaries();
-    }
+    },
+    onGestureEnd() {
+      schedulePreviewRegeneration();
+    },
+    announce,
   });
-  cropSelection.addEventListener('keydown', (event) => {
-    if (!isCropArrowKey(event.key)) {
-      return;
-    }
-    event.preventDefault();
-    cropPercent = applyCropKeyboardStep(cropPercent, event.key, {
-      resize: event.altKey,
-      shiftKey: event.shiftKey,
-    });
-    renderCropSelection();
-    updatePrepareSummaries();
-    announce(event.altKey ? '裁剪大小已更新。' : '裁剪位置已更新。');
-  });
-  for (const input of Object.values(cropInputs)) {
-    input.addEventListener('input', () => {
-      cropPercent = normalizeCropPercent({
-        x: Number(cropInputs.x.value),
-        y: Number(cropInputs.y.value),
-        width: Number(cropInputs.width.value),
-        height: Number(cropInputs.height.value),
-      });
-      renderCropSelection(input);
-      updatePrepareSummaries();
-    });
-  }
 
   availableColorGridRenderer = createAvailableColorGridRenderer(availableColorGrid, {
     status: availableColorStatus,
@@ -1256,7 +1272,7 @@ function setupPrepare(): void {
   boardSelectController = createVaadinSelectController({
     element: boardPreset,
     options: boardSelectOptions(),
-    selectedId: selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare'),
+    selectedId: selectValue(previewWorkspace, '[data-board-preset]', 'standardSquare'),
     onChange() {
       updateCustomBoardVisibility();
       updatePrepareSummaries();
@@ -1265,7 +1281,7 @@ function setupPrepare(): void {
   paletteSelectController = createVaadinSelectController({
     element: paletteSelect,
     options: paletteSelectOptions(),
-    selectedId: selectValue(prepareWorkspace, '[data-palette-id]', 'mard'),
+    selectedId: selectValue(previewWorkspace, '[data-palette-id]', 'mard'),
     onChange(selectedId) {
       applyPreparePalette(selectedId);
     },
@@ -1280,21 +1296,21 @@ function setupPrepare(): void {
     },
   });
   const ditheringChoices = requiredVaadinElement(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-dithering]',
     'vaadin-select',
   );
   ditheringSelectController = createVaadinSelectController({
     element: ditheringChoices,
     options: ditheringSelectOptions(),
-    selectedId: selectValue(prepareWorkspace, '[data-dithering]', 'none'),
+    selectedId: selectValue(previewWorkspace, '[data-dithering]', 'none'),
     onChange(selectedId) {
       const dithering = selectedId === 'floydSteinberg' ? 'floydSteinberg' : 'none';
       preparePresetControls?.setDithering(dithering);
       updatePrepareSummaries();
     },
   });
-  preparePresetControls = mountPreparePresetControls(prepareWorkspace, {
+  preparePresetControls = mountPreparePresetControls(previewWorkspace, {
     initialState: {
       croppedColumns: 1,
       croppedRows: 1,
@@ -1304,13 +1320,24 @@ function setupPrepare(): void {
       beadPitchMm: 5,
       maximumColors: 24,
       availableColorCount: availableColorIds.size,
+      sampling: 'average',
       dithering: 'none',
+      colorBoost: 'none',
     },
     radioGroups: preparePresetRadioGroupControllers,
-    onChange() {
-      if (!syncingPreparePresetCrop) {
-        ditheringSelectController?.setValue(preparePresetControls?.getState().dithering ?? 'none');
-        updatePrepareSummaries();
+    onChange(state) {
+      if (syncingPreparePresetCrop) {
+        return;
+      }
+      ditheringSelectController?.setValue(state.dithering);
+      if (state.sampling !== samplingSelection.value) {
+        samplingSelection = chooseSampling(samplingSelection, state.sampling, 'user');
+        syncSamplingControls(samplingRadioController, samplingSelection);
+      }
+      updatePrepareSummaries();
+      updateColorCountEstimate();
+      if (!hydratingPreviewControls) {
+        schedulePreviewRegeneration();
       }
     },
   });
@@ -1329,6 +1356,8 @@ function setupPrepare(): void {
     if (!isSamplingValue(value) || value === samplingSelection.value) return;
     samplingSelection = chooseSampling(samplingSelection, value, 'user');
     syncSamplingControls(samplingRadioController, samplingSelection);
+    preparePresetControls?.setSampling(value);
+    schedulePreviewRegeneration();
   });
   updateCustomBoardVisibility();
   initializePrepareColorSeries();
@@ -1380,119 +1409,132 @@ function setupPrepare(): void {
   }
 }
 
-function openPrepareWorkspace(preserveProjectSettings = false): void {
+function openPreviewWorkspace(preserveProjectSettings = false): void {
   if (!selectedImage) {
     return;
   }
   availableColorDialogController?.close();
-  showStage('prepare');
-  const columnsInput = required(prepareWorkspace, '[data-columns]', HTMLInputElement);
-  const rowsInput = required(prepareWorkspace, '[data-rows]', HTMLInputElement);
+  showStage('preview');
+  previewClobberAcknowledged = false;
+  const columnsInput = required(previewWorkspace, '[data-columns]', HTMLInputElement);
+  const rowsInput = required(previewWorkspace, '[data-rows]', HTMLInputElement);
   const project = preserveProjectSettings ? currentProject : null;
-  if (project) {
-    rotation = project.source.rotation;
-    const dimensions = rotatedDimensions();
-    cropPercent = normalizeCropPercent({
-      x: (project.source.crop.x / dimensions.width) * 100,
-      y: (project.source.crop.y / dimensions.height) * 100,
-      width: (project.source.crop.width / dimensions.width) * 100,
-      height: (project.source.crop.height / dimensions.height) * 100,
-    });
-    mode = project.mode;
-    if (!prepareState) {
-      applyUploadPrepareFlow(flowFromImportedProject(project.mode));
-    }
-    columnsInput.value = String(project.grid.columns);
-    rowsInput.value = String(project.grid.rows);
-    aspectLocked = project.grid.aspectLocked;
-    const aspectButton = required(prepareWorkspace, '[data-aspect-lock]', HTMLButtonElement);
-    aspectButton.classList.toggle('is-active', aspectLocked);
-    aspectButton.setAttribute('aria-pressed', String(aspectLocked));
-    boardSelectController?.setValue(project.grid.boardPresetId);
-    required(prepareWorkspace, '[data-custom-board-rows]', HTMLInputElement).value = String(
-      project.grid.boardRows,
-    );
-    required(prepareWorkspace, '[data-custom-board-columns]', HTMLInputElement).value = String(
-      project.grid.boardColumns,
-    );
-    paletteSelectController?.setValue(project.palette.paletteId);
-    availableColorIds = new Set(project.palette.availableColorIds);
-    required(prepareWorkspace, '[data-maximum-colors]', HTMLInputElement).value = String(
-      project.palette.maximumColors ?? project.palette.availableColorIds.length,
-    );
-    required(prepareWorkspace, '[data-bead-diameter]', HTMLInputElement).value = String(
-      project.grid.beadDiameterMm,
-    );
-    required(prepareWorkspace, '[data-bead-pitch]', HTMLInputElement).value = String(
-      project.grid.beadPitchMm,
-    );
-    ditheringSelectController?.setValue(project.generation.dithering);
-    required(prepareWorkspace, '[data-alpha-threshold]', HTMLInputElement).value = String(
-      project.generation.alphaEmptyThreshold,
-    );
-    samplingSelection = chooseSampling(
-      createAutomaticSampling(
-        project.mode === 'pixelArt' ? 'pixelArt' : 'photo',
-        appCapabilities.sampling,
-      ),
-      project.generation.sampling,
-      'project',
-    );
-    syncSamplingControls(samplingRadioController, samplingSelection);
-    const cropDimensions = croppedImageDimensions();
-    preparePresetControls?.hydrate({
-      croppedColumns: cropDimensions.width,
-      croppedRows: cropDimensions.height,
-      columns: project.grid.columns,
-      rows: project.grid.rows,
-      beadDiameterMm: project.grid.beadDiameterMm,
-      beadPitchMm: project.grid.beadPitchMm,
-      maximumColors: project.palette.maximumColors ?? project.palette.availableColorIds.length,
-      availableColorCount: Math.max(1, project.palette.availableColorIds.length),
-      dithering: project.generation.dithering,
-    });
-  } else {
-    const cropDimensions = croppedImageDimensions();
-    const presetDimensions = dimensionsForLongEdge(48, cropDimensions.width, cropDimensions.height);
-    columnsInput.value = String(presetDimensions.columns);
-    rowsInput.value = String(presetDimensions.rows);
-    preparePresetControls?.hydrate(
-      createNewImagePrepareDefaults({
+  hydratingPreviewControls = true;
+  try {
+    if (project) {
+      rotation = project.source.rotation;
+      const dimensions = rotatedDimensions();
+      cropPercent = normalizeCropPercent({
+        x: (project.source.crop.x / dimensions.width) * 100,
+        y: (project.source.crop.y / dimensions.height) * 100,
+        width: (project.source.crop.width / dimensions.width) * 100,
+        height: (project.source.crop.height / dimensions.height) * 100,
+      });
+      mode = project.mode;
+      if (!prepareState) {
+        applyUploadPrepareFlow(flowFromImportedProject(project.mode));
+      }
+      columnsInput.value = String(project.grid.columns);
+      rowsInput.value = String(project.grid.rows);
+      aspectLocked = project.grid.aspectLocked;
+      const aspectButton = required(previewWorkspace, '[data-aspect-lock]', HTMLButtonElement);
+      aspectButton.classList.toggle('is-active', aspectLocked);
+      aspectButton.setAttribute('aria-pressed', String(aspectLocked));
+      boardSelectController?.setValue(project.grid.boardPresetId);
+      required(previewWorkspace, '[data-custom-board-rows]', HTMLInputElement).value = String(
+        project.grid.boardRows,
+      );
+      required(previewWorkspace, '[data-custom-board-columns]', HTMLInputElement).value = String(
+        project.grid.boardColumns,
+      );
+      paletteSelectController?.setValue(project.palette.paletteId);
+      availableColorIds = new Set(project.palette.availableColorIds);
+      required(previewWorkspace, '[data-maximum-colors]', HTMLInputElement).value = String(
+        project.palette.maximumColors ?? project.palette.availableColorIds.length,
+      );
+      required(previewWorkspace, '[data-bead-diameter]', HTMLInputElement).value = String(
+        project.grid.beadDiameterMm,
+      );
+      required(previewWorkspace, '[data-bead-pitch]', HTMLInputElement).value = String(
+        project.grid.beadPitchMm,
+      );
+      ditheringSelectController?.setValue(project.generation.dithering);
+      required(previewWorkspace, '[data-alpha-threshold]', HTMLInputElement).value = String(
+        project.generation.alphaEmptyThreshold,
+      );
+      samplingSelection = chooseSampling(
+        createAutomaticSampling(
+          project.mode === 'pixelArt' ? 'pixelArt' : 'photo',
+          appCapabilities.sampling,
+        ),
+        project.generation.sampling,
+        'project',
+      );
+      syncSamplingControls(samplingRadioController, samplingSelection);
+      const cropDimensions = croppedImageDimensions();
+      preparePresetControls?.hydrate({
         croppedColumns: cropDimensions.width,
         croppedRows: cropDimensions.height,
-        columns: presetDimensions.columns,
-        rows: presetDimensions.rows,
-        availableColorCount: availableColorIds.size,
-      }),
-    );
-    samplingSelection = createAutomaticSampling(
-      mode === 'pixelArt' ? 'pixelArt' : 'photo',
-      appCapabilities.sampling,
-    );
-    updateSamplingDefault();
+        columns: project.grid.columns,
+        rows: project.grid.rows,
+        beadDiameterMm: project.grid.beadDiameterMm,
+        beadPitchMm: project.grid.beadPitchMm,
+        maximumColors: project.palette.maximumColors ?? project.palette.availableColorIds.length,
+        availableColorCount: Math.max(1, project.palette.availableColorIds.length),
+        sampling: project.generation.sampling,
+        dithering: project.generation.dithering,
+        colorBoost: preparePresetControls.getState().colorBoost,
+      });
+      previewProject = project;
+      previewStatistics = calculateStatistics(project.cells);
+    } else {
+      firstPreviewGenerationStarted = false;
+      previewProject = null;
+      previewStatistics = null;
+      const cropDimensions = croppedImageDimensions();
+      const presetDimensions = dimensionsForLongEdge(
+        48,
+        cropDimensions.width,
+        cropDimensions.height,
+      );
+      columnsInput.value = String(presetDimensions.columns);
+      rowsInput.value = String(presetDimensions.rows);
+      preparePresetControls?.hydrate(
+        createNewImagePrepareDefaults({
+          croppedColumns: cropDimensions.width,
+          croppedRows: cropDimensions.height,
+          columns: presetDimensions.columns,
+          rows: presetDimensions.rows,
+          availableColorCount: availableColorIds.size,
+        }),
+      );
+      samplingSelection = createAutomaticSampling(
+        mode === 'pixelArt' ? 'pixelArt' : 'photo',
+        appCapabilities.sampling,
+      );
+      updateSamplingDefault();
+    }
+  } finally {
+    hydratingPreviewControls = false;
   }
-  const palette = getPalette(selectValue(prepareWorkspace, '[data-palette-id]', 'mard'));
+  const palette = getPalette(selectValue(previewWorkspace, '[data-palette-id]', 'mard'));
   if (![...availableColorIds].every((colorId) => palette.colorIds.includes(colorId))) {
     availableColorIds = new Set(palette.colorIds);
   }
   const customFields = required(
-    prepareWorkspace,
+    previewWorkspace,
     '[data-custom-board-fields]',
     HTMLFieldSetElement,
   );
   const customBoard =
-    selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare') === 'custom';
+    selectValue(previewWorkspace, '[data-board-preset]', 'standardSquare') === 'custom';
   customFields.hidden = !customBoard;
   customFields.disabled = !customBoard;
-  required(prepareWorkspace, '[data-generate-label]', HTMLElement).textContent = currentProject
-    ? '重新生成图纸'
-    : '生成图纸';
-  required(prepareWorkspace, '[data-return-editor]', HTMLButtonElement).hidden =
+  required(previewWorkspace, '[data-return-editor]', HTMLButtonElement).hidden =
     currentProject === null;
-  required(prepareWorkspace, '[data-generate-status]', HTMLElement).textContent = currentProject
-    ? '当前图纸会保留到重新生成成功；替换前会再次确认。'
-    : '';
-  applyPrepareModeState();
+  syncPreviewResult();
+  applyPreviewCompareView(currentPreviewCompareValue());
+  applyPrepareModeState(false);
   initializePrepareColorSeries();
   renderAvailableColorFilter();
   drawCropPreview();
@@ -1504,46 +1546,11 @@ function drawCropPreview(): void {
   if (!selectedImage) {
     return;
   }
-  const canvas = required(prepareWorkspace, '[data-crop-canvas]', HTMLCanvasElement);
-  const frame = required(prepareWorkspace, '[data-crop-frame]', HTMLElement);
-  const image = selectedImage.image;
-  const dimensions = rotatedDimensions();
-  const maxDimension = 1400;
-  const scale = Math.min(1, maxDimension / Math.max(dimensions.width, dimensions.height));
-  canvas.width = Math.max(1, Math.round(dimensions.width * scale));
-  canvas.height = Math.max(1, Math.round(dimensions.height * scale));
-  frame.style.aspectRatio = `${String(dimensions.width)} / ${String(dimensions.height)}`;
-  const context = canvas.getContext('2d');
-  if (!context) {
-    return;
-  }
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.save();
-  if (rotation === 90) {
-    context.translate(canvas.width, 0);
-    context.rotate(Math.PI / 2);
-    context.drawImage(image, 0, 0, canvas.height, canvas.width);
-  } else if (rotation === 180) {
-    context.translate(canvas.width, canvas.height);
-    context.rotate(Math.PI);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  } else if (rotation === 270) {
-    context.translate(0, canvas.height);
-    context.rotate(-Math.PI / 2);
-    context.drawImage(image, 0, 0, canvas.height, canvas.width);
-  } else {
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  }
-  context.restore();
+  drawRotatedCropPreview(previewWorkspace, selectedImage.image, rotation);
 }
 
 function renderCropSelection(editingInput?: HTMLInputElement): void {
-  const selection = required(prepareWorkspace, '[data-crop-selection]', HTMLElement);
-  selection.style.left = `${String(cropPercent.x)}%`;
-  selection.style.top = `${String(cropPercent.y)}%`;
-  selection.style.width = `${String(cropPercent.width)}%`;
-  selection.style.height = `${String(cropPercent.height)}%`;
-  syncCropNumericInputValues(prepareWorkspace, cropPercent, editingInput);
+  renderCropSelectionOverlay(previewWorkspace, cropPercent, editingInput);
 }
 
 function updatePrepareSummaries(): void {
@@ -1567,31 +1574,31 @@ function updatePrepareSummaries(): void {
       syncingPreparePresetCrop = false;
     }
   }
-  const columns = numberValue(prepareWorkspace, '[data-columns]', 48);
-  const rows = numberValue(prepareWorkspace, '[data-rows]', 48);
+  const columns = numberValue(previewWorkspace, '[data-columns]', 48);
+  const rows = numberValue(previewWorkspace, '[data-rows]', 48);
   const board = selectedBoardSize();
   const boardCount = Math.ceil(columns / board.columns) * Math.ceil(rows / board.rows);
-  const beadDiameter = numberValue(prepareWorkspace, '[data-bead-diameter]', 5);
+  const beadDiameter = numberValue(previewWorkspace, '[data-bead-diameter]', 5);
   const beadPitch = Math.max(
     beadDiameter,
-    numberValue(prepareWorkspace, '[data-bead-pitch]', beadDiameter),
+    numberValue(previewWorkspace, '[data-bead-pitch]', beadDiameter),
   );
-  required(prepareWorkspace, '[data-image-summary]', HTMLElement).textContent =
+  required(previewWorkspace, '[data-image-summary]', HTMLElement).textContent =
     `${String(cropWidth)} × ${String(cropHeight)} px`;
-  required(prepareWorkspace, '[data-size-summary]', HTMLElement).textContent =
+  required(previewWorkspace, '[data-size-summary]', HTMLElement).textContent =
     `约 ${(((columns - 1) * beadPitch + beadDiameter) / 10).toFixed(1)} × ${(
       ((rows - 1) * beadPitch + beadDiameter) /
       10
     ).toFixed(1)} cm`;
-  required(prepareWorkspace, '[data-board-summary]', HTMLElement).textContent =
+  required(previewWorkspace, '[data-board-summary]', HTMLElement).textContent =
     `约需 ${String(boardCount)} 块拼板`;
   syncAlphaThresholdCopy();
 }
 
 function syncAlphaThresholdCopy(): void {
-  const threshold = numberValue(prepareWorkspace, '[data-alpha-threshold]', 0.1);
-  const label = required(prepareWorkspace, '[data-alpha-threshold-label]', HTMLElement);
-  const description = required(prepareWorkspace, '[data-alpha-threshold-description]', HTMLElement);
+  const threshold = numberValue(previewWorkspace, '[data-alpha-threshold]', 0.1);
+  const label = required(previewWorkspace, '[data-alpha-threshold-label]', HTMLElement);
+  const description = required(previewWorkspace, '[data-alpha-threshold-description]', HTMLElement);
   if (threshold <= 0.05) {
     label.textContent = '低';
     description.textContent = '低：保留更多半透明内容';
@@ -1607,7 +1614,7 @@ function syncAlphaThresholdCopy(): void {
 }
 
 function renderAvailableColorFilter(): void {
-  const paletteId = selectValue(prepareWorkspace, '[data-palette-id]', 'mard');
+  const paletteId = selectValue(previewWorkspace, '[data-palette-id]', 'mard');
   const palette = getPalette(paletteId);
   const paletteColors = PALETTE_COLORS.filter((color) => palette.colorIds.includes(color.id));
   availableColorGridRenderer?.update({
@@ -1627,7 +1634,7 @@ function renderAvailableColorFilter(): void {
 }
 
 function initializePrepareColorSeries(): void {
-  const paletteId = selectValue(prepareWorkspace, '[data-palette-id]', 'mard');
+  const paletteId = selectValue(previewWorkspace, '[data-palette-id]', 'mard');
   const palette = getPalette(paletteId);
   const series = [
     ...new Set(
@@ -1665,9 +1672,29 @@ function updateAvailableColorSummary(): void {
   }
 }
 
-async function startPatternGeneration(replacementConfirmed = false): Promise<void> {
+const PREVIEW_REGENERATION_DEBOUNCE_MS = 250;
+
+function schedulePreviewRegeneration(): void {
+  if (stage !== 'preview' || hydratingPreviewControls) {
+    return;
+  }
+  clearPreviewRegenerationTimer();
+  previewRegenerationTimer = window.setTimeout(() => {
+    previewRegenerationTimer = null;
+    startPreviewGeneration();
+  }, PREVIEW_REGENERATION_DEBOUNCE_MS);
+}
+
+function clearPreviewRegenerationTimer(): void {
+  if (previewRegenerationTimer !== null) {
+    window.clearTimeout(previewRegenerationTimer);
+    previewRegenerationTimer = null;
+  }
+}
+
+function startPreviewGeneration(): void {
   const image = selectedImage;
-  if (!image) {
+  if (!image || stage !== 'preview') {
     return;
   }
   if (
@@ -1675,18 +1702,16 @@ async function startPatternGeneration(replacementConfirmed = false): Promise<voi
     prepareState.recommendationStatus === 'analyzing' &&
     prepareState.resolvedMode === null
   ) {
-    required(prepareWorkspace, '[data-generate-status]', HTMLElement).textContent =
-      '正在分析图片；也可以在“专业设置”中先选择自然图片或清晰像素。';
+    setPreviewStatus('analyzing');
     return;
   }
   if (!hasAvailableColorSelection(availableColorIds)) {
-    required(prepareWorkspace, '[data-generate-status]', HTMLElement).textContent =
-      '请至少选择一种手边有的颜色。';
-    announce('生成前请至少选择一种颜色。');
+    setPreviewStatusText('请至少选择一种手边有的颜色。');
+    announce('生成预览前请至少选择一种颜色。');
     return;
   }
   if (
-    !replacementConfirmed &&
+    !previewClobberAcknowledged &&
     currentProject &&
     sourceGenerationRevision !== null &&
     currentProject.revision !== sourceGenerationRevision
@@ -1696,72 +1721,156 @@ async function startPatternGeneration(replacementConfirmed = false): Promise<voi
       description:
         '新图纸生成成功后，当前逐格修改和撤销记录将被替换。你可以先保存项目，之后再继续。',
       onContinue() {
-        void startPatternGeneration(true);
+        previewClobberAcknowledged = true;
+        startPreviewGeneration();
+      },
+      onCancel() {
+        restoreProjectSettingsToPreviewControls();
       },
     });
     return;
   }
-  generationController?.abort();
-  const controller = new AbortController();
-  generationController = controller;
-  const generateButton = required(prepareWorkspace, '[data-generate-pattern]', HTMLButtonElement);
-  const status = required(prepareWorkspace, '[data-generate-status]', HTMLElement);
-  generateButton.disabled = true;
-  required(generateButton, '[data-generate-label]', HTMLElement).textContent = '正在生成图纸…';
-  status.textContent = '正在按你选择的色板生成拼豆格，可以随时更换图片取消。';
-  sessionStatus.textContent = '正在生成';
+  firstPreviewGenerationStarted = true;
+  setPreviewStatus(capabilitiesDegraded ? 'degraded' : 'generating');
+  previewCoordinator.request({ file: image.file, settings: buildGenerationSettings() });
+}
 
-  try {
-    const result = await generatePattern(image.file, buildGenerationSettings(), controller.signal);
-    if (controller.signal.aborted) {
-      return;
-    }
+function handlePreviewCoordinatorEvent(event: PreviewCoordinatorEvent): void {
+  if (event.type === 'started') {
+    return;
+  }
+  if (event.type === 'failed') {
+    setPreviewStatus('failure');
+    announce(PREVIEW_STATUS_TEXT.failure);
+    return;
+  }
+  const { result } = event;
+  previewProject = result.project;
+  previewStatistics = result.statistics;
+  if (stage !== 'editor') {
     currentProject = result.project;
     sourceGenerationRevision = result.project.revision;
-    selectedColorId =
-      Object.keys(result.statistics.perColorCounts)[0] ??
-      result.project.palette.availableColorIds[0] ??
-      selectedColorId;
-    availableColorIds = new Set(result.project.palette.availableColorIds);
     history = new MatrixHistory(result.project.cells, 100, result.project.revision);
     currentSelection = null;
-    openPatternEditor(result.project);
-    announce(
-      `图纸已生成，共 ${String(result.statistics.nonEmptyBeadCount)} 颗拼豆，使用 ${String(
-        result.statistics.usedColorCount,
-      )} 种颜色。`,
-    );
-  } catch (error) {
-    if (controller.signal.aborted || isAbortError(error)) {
-      status.textContent = '生成已取消。';
-      return;
-    }
-    status.textContent =
-      error instanceof PatternApiError ? error.message : '生成失败，请检查设置后重试。';
-    sessionStatus.textContent = '需要重试';
-  } finally {
-    if (generationController === controller) {
-      generationController = null;
-    }
-    required(generateButton, '[data-generate-label]', HTMLElement).textContent = currentProject
-      ? '重新生成图纸'
-      : '生成图纸';
-    if (prepareState) {
-      applyPrepareModeState();
-    } else {
-      generateButton.disabled = false;
-    }
+    exportCoordinator.invalidate();
   }
+  selectedColorId =
+    Object.keys(result.statistics.perColorCounts)[0] ??
+    result.project.palette.availableColorIds[0] ??
+    selectedColorId;
+  availableColorIds = new Set(result.project.palette.availableColorIds);
+  const doneStatus = formatPreviewDoneStatus(
+    result.project.grid.columns,
+    result.project.grid.rows,
+    result.statistics.usedColorCount,
+  );
+  setPreviewStatusText(doneStatus);
+  announce(doneStatus);
+  if (stage === 'preview') {
+    syncPreviewResult();
+  }
+}
+
+function confirmPreviewAsEditorBaseline(): void {
+  const project = previewProject;
+  if (!project) {
+    return;
+  }
+  previewCoordinator.cancel();
+  currentProject = project;
+  sourceGenerationRevision = project.revision;
+  history = new MatrixHistory(project.cells, 100, project.revision);
+  currentSelection = null;
+  openPatternEditor(project);
+}
+
+function restoreProjectSettingsToPreviewControls(): void {
+  const project = currentProject;
+  if (!project || stage !== 'preview') {
+    return;
+  }
+  previewProject = project;
+  previewStatistics = calculateStatistics(project.cells);
+  openPreviewWorkspace(true);
+  announce('已恢复为当前图纸的设置，未重新生成。');
+}
+
+function setPreviewStatus(kind: PreviewStatusKind): void {
+  if (kind === 'done') {
+    const project = previewProject;
+    const statistics = previewStatistics;
+    setPreviewStatusText(
+      project && statistics
+        ? formatPreviewDoneStatus(
+            project.grid.columns,
+            project.grid.rows,
+            statistics.usedColorCount,
+          )
+        : '',
+    );
+    return;
+  }
+  setPreviewStatusText(PREVIEW_STATUS_TEXT[kind]);
+}
+
+function setPreviewStatusText(text: string): void {
+  const busy = text === PREVIEW_STATUS_TEXT.generating || text === PREVIEW_STATUS_TEXT.degraded;
+  previewView.setStatusText(text, {
+    hasResult: previewProject !== null,
+    showBadge: busy && previewProject !== null,
+  });
+}
+
+function syncPreviewResult(): void {
+  previewView.syncResult({
+    project: previewProject,
+    statistics: previewStatistics,
+    hasCurrentProject: currentProject !== null,
+    generationActive: previewCoordinator.activeRequestId() !== null,
+  });
+  updateColorCountEstimate();
+}
+
+function drawPreviewCanvas(): void {
+  previewView.drawPreview(previewProject);
+}
+
+function updateColorCountEstimate(): void {
+  const usedColors = previewStatistics
+    ? previewStatistics.usedColorCount
+    : (preparePresetControls?.getState().maximumColors ?? 0);
+  previewView.updateEstimate(usedColors);
+}
+
+function applyPreviewCompareView(view: 'original' | 'pattern'): void {
+  previewView.applyCompareView(view);
+}
+
+function currentPreviewCompareValue(): 'original' | 'pattern' {
+  return previewCompareRadioController.selectedValue() === 'original' ? 'original' : 'pattern';
+}
+
+function setupPreviewCanvasResize(): void {
+  const stack = required(previewWorkspace, '[data-preview-pattern-view]', HTMLElement);
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+  const observer = new ResizeObserver(() => {
+    if (stage === 'preview' && previewProject) {
+      drawPreviewCanvas();
+    }
+  });
+  observer.observe(stack);
 }
 
 function buildGenerationSettings(): PatternGenerationSettings {
   const dimensions = rotatedDimensions();
-  const paletteId = selectValue(prepareWorkspace, '[data-palette-id]', 'mard') as
+  const paletteId = selectValue(previewWorkspace, '[data-palette-id]', 'mard') as
     'default' | 'mard';
-  const maximumValue = numberValue(prepareWorkspace, '[data-maximum-colors]', 24);
+  const maximumValue = numberValue(previewWorkspace, '[data-maximum-colors]', 24);
   const sampling = samplingSelection.value;
   const dithering =
-    selectValue(prepareWorkspace, '[data-dithering]', 'none') === 'floydSteinberg'
+    selectValue(previewWorkspace, '[data-dithering]', 'none') === 'floydSteinberg'
       ? 'floydSteinberg'
       : 'none';
   const board = selectedBoardSize();
@@ -1774,15 +1883,15 @@ function buildGenerationSettings(): PatternGenerationSettings {
       height: Math.max(1, Math.round(dimensions.height * (cropPercent.height / 100))),
     },
     rotation,
-    rows: numberValue(prepareWorkspace, '[data-rows]', 48),
-    columns: numberValue(prepareWorkspace, '[data-columns]', 48),
+    rows: numberValue(previewWorkspace, '[data-rows]', 48),
+    columns: numberValue(previewWorkspace, '[data-columns]', 48),
     aspectLocked,
-    beadDiameterMm: numberValue(prepareWorkspace, '[data-bead-diameter]', 5),
+    beadDiameterMm: numberValue(previewWorkspace, '[data-bead-diameter]', 5),
     beadPitchMm: Math.max(
-      numberValue(prepareWorkspace, '[data-bead-diameter]', 5),
-      numberValue(prepareWorkspace, '[data-bead-pitch]', 5),
+      numberValue(previewWorkspace, '[data-bead-diameter]', 5),
+      numberValue(previewWorkspace, '[data-bead-pitch]', 5),
     ),
-    boardPresetId: selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare') as
+    boardPresetId: selectValue(previewWorkspace, '[data-board-preset]', 'standardSquare') as
       'smallSquare' | 'standardSquare' | 'custom',
     boardRows: board.rows,
     boardColumns: board.columns,
@@ -1791,7 +1900,8 @@ function buildGenerationSettings(): PatternGenerationSettings {
     maximumColors: Math.min(Math.max(1, maximumValue), availableColorIds.size),
     sampling,
     dithering,
-    alphaEmptyThreshold: numberValue(prepareWorkspace, '[data-alpha-threshold]', 0.1),
+    alphaEmptyThreshold: numberValue(previewWorkspace, '[data-alpha-threshold]', 0.1),
+    colorBoost: preparePresetControls?.getState().colorBoost ?? 'none',
   };
 }
 
@@ -1880,7 +1990,7 @@ function setupPatternWorkspace(): void {
     }
     if (target.closest('[data-return-prepare]')) {
       if (selectedImage) {
-        openPrepareWorkspace(true);
+        openPreviewWorkspace(true);
       } else {
         announce('已保存项目不包含源图片，无法重新生成；你仍可继续编辑和导出。');
       }
@@ -2162,6 +2272,9 @@ function setupPatternWorkspace(): void {
 
 function openPatternEditor(project: BeadProject): void {
   currentProject = project;
+  previewCoordinator.cancel();
+  clearPreviewRegenerationTimer();
+  required(previewWorkspace, '[data-preview-badge]', HTMLElement).hidden = true;
   showStage('editor');
   const canvas = required(patternWorkspace, '[data-pattern-canvas]', HTMLCanvasElement);
   const canvasJumpRow = required(patternWorkspace, '[data-canvas-jump-row]', HTMLInputElement);
@@ -2237,7 +2350,7 @@ function openPatternEditor(project: BeadProject): void {
   for (const button of queryPatternWorkspaceAll('[data-return-prepare]', HTMLButtonElement)) {
     button.disabled = selectedImage === null;
     button.title = selectedImage
-      ? '保留当前矩阵并返回生成设置'
+      ? '保留当前矩阵并返回预览调整设置'
       : '已保存项目不包含源图片，无法重新生成';
   }
   updateHistoryButtons();
@@ -3013,7 +3126,10 @@ function setupConfirmationSurface(): void {
       request.onContinue();
     },
     onCancel() {
-      if (!confirmationSaving) confirmationRequest = null;
+      if (confirmationSaving) return;
+      const request = confirmationRequest;
+      confirmationRequest = null;
+      request?.onCancel?.();
     },
   });
 }
@@ -3065,12 +3181,13 @@ function confirmReplaceImage(replacementConfirmed = false): void {
     });
     return;
   }
-  resetToUpload();
+  resetToStart();
 }
 
-function resetToUpload(): void {
+function resetToStart(): void {
   loadRevision += 1;
-  generationController?.abort();
+  previewCoordinator.cancel();
+  clearPreviewRegenerationTimer();
   exportCoordinator.invalidate();
   chartMirrorController?.abort();
   recommendationRequests.cancel();
@@ -3080,6 +3197,12 @@ function resetToUpload(): void {
   history = null;
   currentProject = null;
   sourceGenerationRevision = null;
+  previewProject = null;
+  previewStatistics = null;
+  previewClobberAcknowledged = false;
+  firstPreviewGenerationStarted = false;
+  mirrorChartIntent = false;
+  holdOriginalActive = false;
   selectedImage = null;
   currentSelection = null;
   currentSelectionViewportRect = null;
@@ -3087,7 +3210,7 @@ function resetToUpload(): void {
   recentColorIds = Object.freeze([]);
   gridContract = null;
   applyUploadPrepareFlow(resetFlowForReplacement(currentUploadPrepareFlow()));
-  mode = customerTask === 'mirrorExistingChart' ? 'existingChart' : 'photo';
+  mode = 'photo';
   samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
   syncSamplingControls(samplingRadioController, samplingSelection);
   clearChartResult();
@@ -3096,14 +3219,21 @@ function resetToUpload(): void {
   projectFileInput.value = '';
   projectFileStatus.textContent = '';
   setFileStatus('', 'ready');
-  showStage('upload');
+  previewCompareRadioController.setValue('pattern');
+  applyPreviewCompareView('pattern');
+  setPreviewStatusText('');
+  syncPreviewResult();
+  showStage('start');
   announce('已返回图片选择。');
 }
 
 function showStage(nextStage: AppStage): void {
-  if (stage === 'prepare' && nextStage !== 'prepare') {
+  if (stage === 'preview' && nextStage !== 'preview') {
     availableSeriesSelectController?.close();
     availableColorDialogController?.close();
+    paletteSelectController?.close();
+    boardSelectController?.close();
+    ditheringSelectController?.close();
   }
   if (stage === 'editor' && nextStage !== 'editor') {
     for (const controller of editorSeriesSelectControllers) controller.close();
@@ -3113,20 +3243,20 @@ function showStage(nextStage: AppStage): void {
   }
   stage = nextStage;
   shell.dataset.stage = nextStage;
-  uploadWorkspace.hidden = nextStage !== 'upload';
-  prepareWorkspace.hidden = nextStage !== 'prepare';
+  startWorkspace.hidden = nextStage !== 'start';
+  previewWorkspace.hidden = nextStage !== 'preview';
   patternWorkspace.hidden = nextStage !== 'editor';
   chartWorkspace.hidden = nextStage !== 'chart';
-  headerReplace.hidden = nextStage === 'upload';
+  headerReplace.hidden = nextStage === 'start';
   headerContext.textContent =
-    nextStage === 'upload'
-      ? '创建拼豆图纸'
-      : nextStage === 'prepare'
-        ? '准备图片'
+    nextStage === 'start'
+      ? brandConfig.shortName
+      : nextStage === 'preview'
+        ? '预览图纸'
         : nextStage === 'editor'
           ? '编辑拼豆图纸'
           : '镜像已有图纸';
-  sessionStatus.textContent = nextStage === 'upload' ? '仅保存在本次会话' : '本次会话';
+  sessionStatus.textContent = nextStage === 'start' ? '仅保存在本次会话' : '本次会话';
   required(app, '#main-workspace', HTMLElement).focus({ preventScroll: true });
 }
 
@@ -3157,6 +3287,10 @@ function updateWorkspaceLayout(): void {
 
   if (crossingDesktopBoundary) {
     for (const controller of editorSeriesSelectControllers) controller.close();
+    paletteSelectController?.close();
+    boardSelectController?.close();
+    ditheringSelectController?.close();
+    availableSeriesSelectController?.close();
   }
 
   const layout = responsiveWorkspaceMount.update(viewportWidth);
@@ -3169,6 +3303,7 @@ function updateWorkspaceLayout(): void {
     '--workspace-inspector-width',
     `${String(layout.inspectorWidth)}px`,
   );
+  mountPreviewControls(layout.mode);
   recalculateSheetMotion();
   scheduleSelectionContextPosition();
 
@@ -3193,6 +3328,28 @@ function updateWorkspaceLayout(): void {
       layout.attachInspector ? patternWorkspace : workspaceSheet,
       focusSnapshot,
     );
+  }
+}
+
+function mountPreviewControls(layoutMode: WorkspaceLayoutMode): void {
+  const panel = required(previewWorkspace, '[data-preview-controls-panel]', HTMLElement);
+  const host =
+    layoutMode === 'desktop'
+      ? required(previewWorkspace, '[data-preview-inspector]', HTMLElement)
+      : required(previewWorkspace, '[data-preview-panel-body]', HTMLElement);
+  if (panel.parentElement === host) {
+    return;
+  }
+  const activeElement = document.activeElement;
+  const restoreFocus =
+    activeElement instanceof HTMLElement && panel.contains(activeElement) ? activeElement : null;
+  host.append(panel);
+  restoreFocus?.focus({ preventScroll: true });
+  if (layoutMode === 'desktop') {
+    const toggle = required(previewWorkspace, '[data-preview-panel-toggle]', HTMLButtonElement);
+    const body = required(previewWorkspace, '[data-preview-panel-body]', HTMLElement);
+    toggle.setAttribute('aria-expanded', 'true');
+    body.hidden = false;
   }
 }
 
@@ -3243,6 +3400,7 @@ function updateSamplingDefault(): void {
   if (mode === 'existingChart') return;
   samplingSelection = recommendSampling(samplingSelection, mode, appCapabilities.sampling);
   syncSamplingControls(samplingRadioController, samplingSelection);
+  preparePresetControls?.setSampling(samplingSelection.value);
 }
 
 function setFileStatus(message: string, state: 'ready' | 'loading' | 'error'): void {
@@ -3278,50 +3436,17 @@ function rotatedDimensions(): { readonly width: number; readonly height: number 
     : { width: selectedImage.width, height: selectedImage.height };
 }
 
-function resizeCrop(
-  initial: CropPercent,
-  handle: 'move' | 'nw' | 'ne' | 'sw' | 'se',
-  deltaX: number,
-  deltaY: number,
-): CropPercent {
-  const minimum = 8;
-  if (handle === 'move') {
-    return {
-      ...initial,
-      x: clamp(initial.x + deltaX, 0, 100 - initial.width),
-      y: clamp(initial.y + deltaY, 0, 100 - initial.height),
-    };
-  }
-  let left = initial.x;
-  let top = initial.y;
-  let right = initial.x + initial.width;
-  let bottom = initial.y + initial.height;
-  if (handle.includes('w')) {
-    left = clamp(initial.x + deltaX, 0, right - minimum);
-  }
-  if (handle.includes('e')) {
-    right = clamp(initial.x + initial.width + deltaX, left + minimum, 100);
-  }
-  if (handle.includes('n')) {
-    top = clamp(initial.y + deltaY, 0, bottom - minimum);
-  }
-  if (handle.includes('s')) {
-    bottom = clamp(initial.y + initial.height + deltaY, top + minimum, 100);
-  }
-  return { x: left, y: top, width: right - left, height: bottom - top };
-}
-
 function selectedBoardSize(): { readonly rows: number; readonly columns: number } {
-  const presetId = selectValue(prepareWorkspace, '[data-board-preset]', 'standardSquare');
+  const presetId = selectValue(previewWorkspace, '[data-board-preset]', 'standardSquare');
   if (presetId === 'custom') {
     return Object.freeze({
       rows: numberValue(
-        prepareWorkspace,
+        previewWorkspace,
         '[data-custom-board-rows]',
         appCapabilities.boards.custom.minimumRows,
       ),
       columns: numberValue(
-        prepareWorkspace,
+        previewWorkspace,
         '[data-custom-board-columns]',
         appCapabilities.boards.custom.minimumColumns,
       ),
@@ -3451,10 +3576,6 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function isCustomerTask(value: string): value is CustomerTask {
-  return value === 'newPattern' || value === 'mirrorExistingChart';
-}
-
 function isModePreference(value: string): value is ModePreference {
   return value === 'auto' || value === 'photo' || value === 'pixelArt';
 }
@@ -3471,10 +3592,6 @@ function applyUploadPrepareFlow(flow: UploadPrepareFlow): void {
   customerTask = flow.customerTask;
   prepareState = flow.prepareState;
   syncUploadPrepareControls(uploadPrepareRadioControllers, flow);
-}
-
-function isCropArrowKey(value: string): value is CropArrowKey {
-  return ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(value);
 }
 
 function isEditorTool(value: string): value is EditorTool {
@@ -3526,7 +3643,8 @@ function cleanup(): void {
     window.cancelAnimationFrame(selectionContextPositionFrame);
     selectionContextPositionFrame = 0;
   }
-  generationController?.abort();
+  clearPreviewRegenerationTimer();
+  previewCoordinator.destroy();
   exportCoordinator.destroy();
   chartMirrorController?.abort();
   recommendationRequests.cancel();
@@ -3538,14 +3656,14 @@ function cleanup(): void {
   paletteSelectController?.destroy();
   availableSeriesSelectController?.destroy();
   ditheringSelectController?.destroy();
-  uploadPrepareRadioControllers.customerTask.destroy();
   uploadPrepareRadioControllers.modePreference.destroy();
   samplingRadioController.destroy();
+  previewCompareRadioController.destroy();
   for (const controller of [
     preparePresetRadioGroupControllers.patternSize,
     preparePresetRadioGroupControllers.beadSize,
     preparePresetRadioGroupControllers.colorCount,
-    preparePresetRadioGroupControllers.processing,
+    preparePresetRadioGroupControllers.visualStyle,
   ]) {
     controller.destroy();
   }

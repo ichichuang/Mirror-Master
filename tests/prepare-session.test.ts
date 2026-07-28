@@ -13,31 +13,33 @@ import {
 } from '../src/features/prepare-workspace/prepareSession';
 import type { VaadinRadioGroupController } from '../src/features/vaadin-controls/vaadinControls';
 
-test('project import, replacement, and a new upload keep task radios synchronized without leaking mode preference', () => {
+test('project import, replacement, and a new upload keep mode preference synchronized without leaking across flows', () => {
   for (const fixture of [
     { mode: 'photo' as const, task: 'newPattern' as const },
     { mode: 'pixelArt' as const, task: 'newPattern' as const },
     { mode: 'existingChart' as const, task: 'mirrorExistingChart' as const },
   ]) {
-    const customerTask = createTestRadioController('newPattern');
     const modePreference = createTestRadioController('auto');
-    const controllers = { customerTask, modePreference };
+    const controllers = { modePreference };
 
     const imported = flowFromImportedProject(fixture.mode);
+    assert.equal(imported.customerTask, fixture.task);
     syncUploadPrepareControls(controllers, imported);
-    assert.equal(customerTask.selectedValue(), fixture.task);
     if (fixture.task === 'newPattern') {
       assert.equal(modePreference.selectedValue(), fixture.mode);
+    } else {
+      assert.equal(imported.prepareState, null);
     }
 
     const reset = resetFlowForReplacement(imported);
     syncUploadPrepareControls(controllers, reset);
-    assert.equal(customerTask.selectedValue(), fixture.task);
+    assert.equal(reset.customerTask, fixture.task);
+    assert.equal(reset.prepareState, null);
     assert.equal(modePreference.selectedValue(), 'auto');
 
     const uploaded = beginUploadedImage(reset, 41);
     syncUploadPrepareControls(controllers, uploaded);
-    assert.equal(customerTask.selectedValue(), fixture.task);
+    assert.equal(uploaded.customerTask, fixture.task);
     if (fixture.task === 'newPattern') {
       assert.equal(uploaded.prepareState?.preference, 'auto');
       assert.equal(modePreference.selectedValue(), 'auto');

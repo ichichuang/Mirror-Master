@@ -13,6 +13,7 @@ import {
   reducePrepareWorkspaceState,
   resolveSupportedNewPatternMode,
   syncCropNumericInputValues,
+  type CreatePrepareWorkspaceStateInput,
   type PrepareColor,
   type PreparePresetRadioGroupControllers,
 } from '../src/features/prepare-workspace/prepareWorkspace';
@@ -20,106 +21,9 @@ import type {
   VaadinRadioGroupController,
   VaadinRadioGroupValueChangedListener,
 } from '../src/features/vaadin-controls/vaadinControls';
-test('mounted customer cards update real prepare controls and live physical size', () => {
-  const window = new Window();
-  const document = window.document;
-  document.body.innerHTML = renderApp();
-  const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
-  assert.ok(prepare);
-  const controller = mountPreparePresetControls(prepare, {
-    radioGroups: createTestPrepareRadioGroups(prepare),
-    initialState: {
-      croppedColumns: 160,
-      croppedRows: 90,
-      columns: 48,
-      rows: 27,
-      beadDiameterMm: 5,
-      beadPitchMm: 5,
-      maximumColors: 24,
-      availableColorCount: 221,
-      dithering: 'none',
-    },
-  });
-  const customBeadFields = prepare.querySelector<HTMLFieldSetElement>('[data-custom-bead-fields]');
-  assert.ok(customBeadFields);
-  assert.equal(customBeadFields.hidden, true);
-  assert.equal(customBeadFields.disabled, true);
 
-  changeRadio(window, prepare, 'pattern-size-preset', '29');
-  assert.equal(prepare.querySelector<HTMLInputElement>('[data-columns]')?.value, '29');
-  assert.equal(prepare.querySelector<HTMLInputElement>('[data-rows]')?.value, '16');
-  assert.equal(prepare.querySelector('[data-physical-size]')?.textContent, '约 14.5 × 8.0 cm');
-
-  changeRadio(window, prepare, 'bead-size-preset', '2.6');
-  assert.equal(customBeadFields.hidden, true);
-  assert.equal(customBeadFields.disabled, true);
-  assert.equal(prepare.querySelector<HTMLInputElement>('[data-bead-diameter]')?.value, '2.6');
-  assert.equal(prepare.querySelector<HTMLInputElement>('[data-bead-pitch]')?.value, '2.6');
-  assert.equal(prepare.querySelector('[data-physical-size]')?.textContent, '约 7.5 × 4.2 cm');
-
-  changeRadio(window, prepare, 'color-count-preset', '48');
-  assert.equal(prepare.querySelector<HTMLInputElement>('[data-maximum-colors]')?.value, '48');
-  changeRadio(window, prepare, 'processing-preset', 'gradient');
-  assert.equal(controller.getState().dithering, 'floydSteinberg');
-  assert.equal(controller.getState().processingPreset, 'gradient');
-  controller.destroy();
-  window.close();
-});
-
-test('mounted manual controls reverse-sync cards and custom bead size opens the sole expert surface', () => {
-  const window = new Window();
-  const document = window.document;
-  document.body.innerHTML = renderApp();
-  const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
-  assert.ok(prepare);
-  const controller = mountPreparePresetControls(prepare, {
-    radioGroups: createTestPrepareRadioGroups(prepare),
-    initialState: {
-      croppedColumns: 4,
-      croppedRows: 3,
-      columns: 48,
-      rows: 36,
-      beadDiameterMm: 5,
-      beadPitchMm: 5,
-      maximumColors: 24,
-      availableColorCount: 39,
-      dithering: 'none',
-    },
-  });
-  const columns = prepare.querySelector<HTMLInputElement>('[data-columns]');
-  assert.ok(columns);
-  columns.value = '49';
-  columns.dispatchEvent(new window.Event('input', { bubbles: true }));
-  assert.equal(radioGroupValue(prepare, 'pattern-size-preset'), 'custom');
-  assert.equal(controller.getState().patternSizePreset, 'custom');
-  const customPatternState = prepare.querySelector<HTMLElement>('[data-pattern-size-custom]');
-  assert.ok(customPatternState);
-  assert.equal(customPatternState.hidden, false);
-  assert.match(customPatternState.textContent, /自定义[\s\S]*49 × 36 颗/u);
-
-  changeRadio(window, prepare, 'bead-size-preset', 'custom');
-  const professional = prepare.querySelector<HTMLDetailsElement>('[data-professional-settings]');
-  assert.ok(professional?.open);
-  assert.equal(controller.getState().beadSizePreset, 'custom');
-  const customBeadFields = prepare.querySelector<HTMLFieldSetElement>('[data-custom-bead-fields]');
-  assert.ok(customBeadFields);
-  assert.equal(customBeadFields.hidden, false);
-  assert.equal(customBeadFields.disabled, false);
-
-  const maximum = prepare.querySelector<HTMLInputElement>('[data-maximum-colors]');
-  assert.ok(maximum);
-  maximum.value = '12';
-  maximum.dispatchEvent(new window.Event('input', { bubbles: true }));
-  assert.equal(radioGroupValue(prepare, 'color-count-preset'), '12');
-
-  controller.setDithering('floydSteinberg');
-  assert.equal(radioGroupValue(prepare, 'processing-preset'), 'gradient');
-  controller.destroy();
-  window.close();
-});
-
-test('pattern cards map the cropped long edge to 29/48/72 and manual dimensions become custom', () => {
-  let state = createPrepareWorkspaceState({
+function stateInput(overrides: Partial<CreatePrepareWorkspaceStateInput> = {}) {
+  return {
     croppedColumns: 160,
     croppedRows: 90,
     columns: 48,
@@ -128,8 +32,115 @@ test('pattern cards map the cropped long edge to 29/48/72 and manual dimensions 
     beadPitchMm: 5,
     maximumColors: 24,
     availableColorCount: 221,
-    dithering: 'none',
+    sampling: 'average' as const,
+    dithering: 'none' as const,
+    colorBoost: 'none' as const,
+    ...overrides,
+  };
+}
+
+test('mounted customer cards update real preview controls and live physical size', () => {
+  const window = new Window();
+  const document = window.document;
+  document.body.innerHTML = renderApp();
+  const preview = document.querySelector<HTMLElement>('[data-preview-workspace]');
+  assert.ok(preview);
+  const controller = mountPreparePresetControls(preview, {
+    radioGroups: createTestPrepareRadioGroups(preview),
+    initialState: stateInput(),
   });
+  const customBeadFields = preview.querySelector<HTMLFieldSetElement>('[data-custom-bead-fields]');
+  assert.ok(customBeadFields);
+  assert.equal(customBeadFields.hidden, true);
+  assert.equal(customBeadFields.disabled, true);
+  const dimensionInputs = preview.querySelector<HTMLElement>('[data-dimension-inputs]');
+  assert.ok(dimensionInputs);
+  assert.equal(dimensionInputs.hidden, true);
+
+  changeRadio(window, preview, 'pattern-size-preset', '29');
+  assert.equal(preview.querySelector<HTMLInputElement>('[data-columns]')?.value, '29');
+  assert.equal(preview.querySelector<HTMLInputElement>('[data-rows]')?.value, '16');
+  assert.equal(preview.querySelector('[data-physical-size]')?.textContent, '约 14.5 × 8.0 cm');
+  assert.equal(preview.querySelector('[data-grid-summary]')?.textContent, '29 × 16 颗');
+
+  changeRadio(window, preview, 'bead-size-preset', '2.6');
+  assert.equal(customBeadFields.hidden, true);
+  assert.equal(customBeadFields.disabled, true);
+  assert.equal(preview.querySelector<HTMLInputElement>('[data-bead-diameter]')?.value, '2.6');
+  assert.equal(preview.querySelector<HTMLInputElement>('[data-bead-pitch]')?.value, '2.6');
+  assert.equal(preview.querySelector('[data-physical-size]')?.textContent, '约 7.5 × 4.2 cm');
+
+  changeRadio(window, preview, 'color-count-preset', '48');
+  assert.equal(preview.querySelector<HTMLInputElement>('[data-maximum-colors]')?.value, '48');
+  changeRadio(window, preview, 'visual-style-preset', 'smoothGradient');
+  assert.equal(controller.getState().dithering, 'floydSteinberg');
+  assert.equal(controller.getState().visualStylePreset, 'smoothGradient');
+  controller.destroy();
+  window.close();
+});
+
+test('mounted manual controls reverse-sync cards and custom bead size opens the sole expert surface', () => {
+  const window = new Window();
+  const document = window.document;
+  document.body.innerHTML = renderApp();
+  const preview = document.querySelector<HTMLElement>('[data-preview-workspace]');
+  assert.ok(preview);
+  const controller = mountPreparePresetControls(preview, {
+    radioGroups: createTestPrepareRadioGroups(preview),
+    initialState: stateInput({
+      croppedColumns: 4,
+      croppedRows: 3,
+      columns: 48,
+      rows: 36,
+      availableColorCount: 39,
+    }),
+  });
+  const dimensionInputs = preview.querySelector<HTMLElement>('[data-dimension-inputs]');
+  assert.ok(dimensionInputs);
+  const columns = preview.querySelector<HTMLInputElement>('[data-columns]');
+  assert.ok(columns);
+  columns.value = '49';
+  columns.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(radioGroupValue(preview, 'pattern-size-preset'), 'custom');
+  assert.equal(controller.getState().patternSizePreset, 'custom');
+  assert.equal(dimensionInputs.hidden, false);
+  assert.equal(preview.querySelector('[data-grid-summary]')?.textContent, '49 × 36 颗');
+
+  changeRadio(window, preview, 'pattern-size-preset', '48');
+  assert.equal(dimensionInputs.hidden, true);
+  changeRadio(window, preview, 'pattern-size-preset', 'custom');
+  assert.equal(controller.getState().patternSizePreset, 'custom');
+  assert.equal(dimensionInputs.hidden, false);
+
+  changeRadio(window, preview, 'bead-size-preset', 'custom');
+  const professional = preview.querySelector<HTMLDetailsElement>('[data-professional-settings]');
+  assert.ok(professional?.open);
+  assert.equal(controller.getState().beadSizePreset, 'custom');
+  const customBeadFields = preview.querySelector<HTMLFieldSetElement>('[data-custom-bead-fields]');
+  assert.ok(customBeadFields);
+  assert.equal(customBeadFields.hidden, false);
+  assert.equal(customBeadFields.disabled, false);
+
+  const maximum = preview.querySelector<HTMLInputElement>('[data-maximum-colors]');
+  assert.ok(maximum);
+  maximum.value = '12';
+  maximum.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(radioGroupValue(preview, 'color-count-preset'), '12');
+  const maximumField = preview.querySelector<HTMLElement>('[data-maximum-colors-field]');
+  assert.ok(maximumField);
+  assert.equal(maximumField.hidden, true);
+  changeRadio(window, preview, 'color-count-preset', 'custom');
+  assert.equal(maximumField.hidden, false);
+
+  controller.setDithering('floydSteinberg');
+  assert.equal(radioGroupValue(preview, 'visual-style-preset'), 'smoothGradient');
+  assert.equal(preview.querySelector<HTMLElement>('[data-visual-style-custom]')?.hidden, true);
+  controller.destroy();
+  window.close();
+});
+
+test('pattern cards map the cropped long edge to 29/48/72 and manual dimensions become custom', () => {
+  let state = createPrepareWorkspaceState(stateInput());
 
   state = reducePrepareWorkspaceState(state, { type: 'selectPatternSize', preset: 29 });
   assert.deepEqual(
@@ -159,20 +170,24 @@ test('pattern cards map the cropped long edge to 29/48/72 and manual dimensions 
     { columns: state.columns, rows: state.rows, preset: state.patternSizePreset },
     { columns: 72, rows: 41, preset: 72 },
   );
+
+  state = reducePrepareWorkspaceState(state, { type: 'selectPatternSize', preset: 'custom' });
+  assert.deepEqual(
+    { columns: state.columns, rows: state.rows, preset: state.patternSizePreset },
+    { columns: 72, rows: 41, preset: 'custom' },
+  );
 });
 
 test('crop changes keep a selected pattern preset proportional while custom dimensions stay exact', () => {
-  let presetState = createPrepareWorkspaceState({
-    croppedColumns: 4,
-    croppedRows: 3,
-    columns: 48,
-    rows: 36,
-    beadDiameterMm: 5,
-    beadPitchMm: 5,
-    maximumColors: 24,
-    availableColorCount: 39,
-    dithering: 'none',
-  });
+  let presetState = createPrepareWorkspaceState(
+    stateInput({
+      croppedColumns: 4,
+      croppedRows: 3,
+      columns: 48,
+      rows: 36,
+      availableColorCount: 39,
+    }),
+  );
   presetState = reducePrepareWorkspaceState(presetState, {
     type: 'setCropDimensions',
     croppedColumns: 3,
@@ -207,18 +222,16 @@ test('crop changes keep a selected pattern preset proportional while custom dime
   );
 });
 
-test('bead-size, color-detail, and processing presets remain two-way synchronized', () => {
-  let state = createPrepareWorkspaceState({
-    croppedColumns: 1,
-    croppedRows: 1,
-    columns: 29,
-    rows: 29,
-    beadDiameterMm: 5,
-    beadPitchMm: 5,
-    maximumColors: 24,
-    availableColorCount: 39,
-    dithering: 'none',
-  });
+test('bead-size, color-count, and visual style presets remain two-way synchronized', () => {
+  let state = createPrepareWorkspaceState(
+    stateInput({
+      croppedColumns: 1,
+      croppedRows: 1,
+      columns: 29,
+      rows: 29,
+      availableColorCount: 39,
+    }),
+  );
 
   state = reducePrepareWorkspaceState(state, { type: 'selectBeadSize', preset: 2.6 });
   assert.deepEqual(
@@ -250,29 +263,51 @@ test('bead-size, color-detail, and processing presets remain two-way synchronize
   assert.equal(state.colorCountPreset, 48);
   state = reducePrepareWorkspaceState(state, { type: 'setMaximumColors', maximumColors: 10 });
   assert.equal(state.colorCountPreset, 'custom');
+  state = reducePrepareWorkspaceState(state, { type: 'selectColorCount', preset: 'custom' });
+  assert.equal(state.colorCountPreset, 'custom');
+  assert.equal(state.maximumColors, 10);
 
+  assert.equal(state.visualStylePreset, 'natural');
+  state = reducePrepareWorkspaceState(state, { type: 'selectVisualStyle', preset: 'vivid' });
+  assert.deepEqual(
+    {
+      sampling: state.sampling,
+      dithering: state.dithering,
+      colorBoost: state.colorBoost,
+      preset: state.visualStylePreset,
+    },
+    { sampling: 'average', dithering: 'none', colorBoost: 'vivid', preset: 'vivid' },
+  );
+  state = reducePrepareWorkspaceState(state, { type: 'selectVisualStyle', preset: 'clearBlocks' });
+  assert.deepEqual(
+    { sampling: state.sampling, colorBoost: state.colorBoost, preset: state.visualStylePreset },
+    { sampling: 'nearest', colorBoost: 'none', preset: 'clearBlocks' },
+  );
+  state = reducePrepareWorkspaceState(state, { type: 'setColorBoost', colorBoost: 'vivid' });
+  assert.equal(state.visualStylePreset, 'custom');
+  state = reducePrepareWorkspaceState(state, { type: 'setSampling', sampling: 'average' });
+  assert.equal(state.visualStylePreset, 'vivid');
   state = reducePrepareWorkspaceState(state, {
-    type: 'selectProcessing',
-    preset: 'gradient',
+    type: 'setDithering',
+    dithering: 'floydSteinberg',
   });
-  assert.equal(state.dithering, 'floydSteinberg');
-  assert.equal(state.processingPreset, 'gradient');
+  assert.equal(state.visualStylePreset, 'custom');
+  state = reducePrepareWorkspaceState(state, { type: 'setColorBoost', colorBoost: 'none' });
+  assert.equal(state.visualStylePreset, 'smoothGradient');
   state = reducePrepareWorkspaceState(state, { type: 'setDithering', dithering: 'none' });
-  assert.equal(state.processingPreset, 'easy');
+  assert.equal(state.visualStylePreset, 'natural');
 });
 
 test('clearing every available color is represented as an explicit zero state', () => {
-  let state = createPrepareWorkspaceState({
-    croppedColumns: 1,
-    croppedRows: 1,
-    columns: 48,
-    rows: 48,
-    beadDiameterMm: 5,
-    beadPitchMm: 5,
-    maximumColors: 24,
-    availableColorCount: 39,
-    dithering: 'none',
-  });
+  let state = createPrepareWorkspaceState(
+    stateInput({
+      croppedColumns: 1,
+      croppedRows: 1,
+      columns: 48,
+      rows: 48,
+      availableColorCount: 39,
+    }),
+  );
   state = reducePrepareWorkspaceState(state, { type: 'selectColorCount', preset: 48 });
   state = reducePrepareWorkspaceState(state, { type: 'setAvailableColorCount', count: 0 });
   assert.equal(state.availableColorCount, 0);
@@ -294,19 +329,21 @@ test('replacement defaults preserve a cleared palette as coherent zero state and
   });
   assert.equal(defaults.availableColorCount, 0);
   assert.equal(defaults.maximumColors, 0);
+  assert.equal(defaults.sampling, 'average');
+  assert.equal(defaults.colorBoost, 'none');
   assert.equal(hasAvailableColorSelection(new Set()), false);
   assert.equal(hasAvailableColorSelection(new Set(['mard:A1'])), true);
 
   const window = new Window();
   const document = window.document;
   document.body.innerHTML = renderApp();
-  const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
-  assert.ok(prepare);
-  const controller = mountPreparePresetControls(prepare, {
+  const preview = document.querySelector<HTMLElement>('[data-preview-workspace]');
+  assert.ok(preview);
+  const controller = mountPreparePresetControls(preview, {
     initialState: defaults,
-    radioGroups: createTestPrepareRadioGroups(prepare),
+    radioGroups: createTestPrepareRadioGroups(preview),
   });
-  const maximum = prepare.querySelector<HTMLInputElement>('[data-maximum-colors]');
+  const maximum = preview.querySelector<HTMLInputElement>('[data-maximum-colors]');
   assert.ok(maximum);
   assert.equal(maximum.value, '0');
   assert.equal(maximum.disabled, true);
@@ -423,16 +460,16 @@ test('crop numeric synchronization preserves the active multi-key value and care
   const window = new Window();
   const document = window.document;
   document.body.innerHTML = renderApp();
-  const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
-  const x = prepare?.querySelector<HTMLInputElement>('[data-crop-x]');
-  const y = prepare?.querySelector<HTMLInputElement>('[data-crop-y]');
-  assert.ok(prepare && x && y);
+  const preview = document.querySelector<HTMLElement>('[data-preview-workspace]');
+  const x = preview?.querySelector<HTMLInputElement>('[data-crop-x]');
+  const y = preview?.querySelector<HTMLInputElement>('[data-crop-y]');
+  assert.ok(preview && x && y);
   x.type = 'text';
   x.value = '12';
   x.focus();
   x.setSelectionRange(2, 2);
 
-  syncCropNumericInputValues(prepare, { x: 12, y: 3.5, width: 80, height: 60 }, x);
+  syncCropNumericInputValues(preview, { x: 12, y: 3.5, width: 80, height: 60 }, x);
   assert.equal(x.value, '12');
   assert.equal(x.selectionStart, 2);
   assert.equal(x.selectionEnd, 2);
@@ -440,7 +477,7 @@ test('crop numeric synchronization preserves the active multi-key value and care
 
   x.value = '12.3';
   x.setSelectionRange(4, 4);
-  syncCropNumericInputValues(prepare, { x: 12.3, y: 3.5, width: 80, height: 60 }, x);
+  syncCropNumericInputValues(preview, { x: 12.3, y: 3.5, width: 80, height: 60 }, x);
   assert.equal(x.value, '12.3');
   assert.equal(x.selectionStart, 4);
   assert.equal(x.selectionEnd, 4);
@@ -451,23 +488,19 @@ test('external preset synchronization preserves a focused numeric caret', () => 
   const window = new Window();
   const document = window.document;
   document.body.innerHTML = renderApp();
-  const prepare = document.querySelector<HTMLElement>('[data-prepare-workspace]');
-  assert.ok(prepare);
-  const controller = mountPreparePresetControls(prepare, {
-    radioGroups: createTestPrepareRadioGroups(prepare),
-    initialState: {
+  const preview = document.querySelector<HTMLElement>('[data-preview-workspace]');
+  assert.ok(preview);
+  const controller = mountPreparePresetControls(preview, {
+    radioGroups: createTestPrepareRadioGroups(preview),
+    initialState: stateInput({
       croppedColumns: 4,
       croppedRows: 3,
       columns: 48,
       rows: 36,
-      beadDiameterMm: 5,
-      beadPitchMm: 5,
-      maximumColors: 24,
       availableColorCount: 39,
-      dithering: 'none',
-    },
+    }),
   });
-  const columns = prepare.querySelector<HTMLInputElement>('[data-columns]');
+  const columns = preview.querySelector<HTMLInputElement>('[data-columns]');
   assert.ok(columns);
   columns.type = 'text';
   columns.focus();
@@ -506,7 +539,7 @@ function createTestPrepareRadioGroups(root: ParentNode): PreparePresetRadioGroup
     patternSize: createTestRadioGroup(root, 'pattern-size-preset'),
     beadSize: createTestRadioGroup(root, 'bead-size-preset'),
     colorCount: createTestRadioGroup(root, 'color-count-preset'),
-    processing: createTestRadioGroup(root, 'processing-preset'),
+    visualStyle: createTestRadioGroup(root, 'visual-style-preset'),
   };
 }
 

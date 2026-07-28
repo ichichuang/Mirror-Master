@@ -147,6 +147,9 @@ class PatternGenerationSettings(BaseModel):
     alpha_empty_threshold: Annotated[
         StrictFloat, Field(ge=0, le=1)
     ] = Field(alias="alphaEmptyThreshold")
+    color_boost: Literal["none", "vivid"] = Field(
+        default="none", alias="colorBoost"
+    )
 
     @model_validator(mode="after")
     def validate_generation_settings(self) -> "PatternGenerationSettings":

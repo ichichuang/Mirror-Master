@@ -1,7 +1,16 @@
 export type PatternSizePreset = 29 | 48 | 72 | 'custom';
 export type ColorCountPreset = 12 | 24 | 48 | 'custom';
 export type BeadSizePreset = 5 | 2.6 | 'custom';
-export type ProcessingPreset = 'easy' | 'gradient';
+export type VisualStylePreset = 'clearBlocks' | 'natural' | 'vivid' | 'smoothGradient' | 'custom';
+export type ColorBoostMode = 'none' | 'vivid';
+export type VisualStyleSampling = 'average' | 'nearest';
+export type VisualStyleDithering = 'none' | 'floydSteinberg';
+
+export interface VisualStyleSettings {
+  readonly sampling: VisualStyleSampling;
+  readonly dithering: VisualStyleDithering;
+  readonly colorBoost: ColorBoostMode;
+}
 
 export interface PatternDimensions {
   readonly columns: number;
@@ -107,14 +116,36 @@ export function resolveColorCountPreset(
   return matchingPresets.length === 1 ? (matchingPresets[0] ?? 'custom') : 'custom';
 }
 
-export function processingSettingsForPreset(preset: ProcessingPreset): {
-  readonly dithering: 'none' | 'floydSteinberg';
-} {
-  return Object.freeze({ dithering: preset === 'easy' ? 'none' : 'floydSteinberg' });
+const VISUAL_STYLE_SETTINGS: Readonly<
+  Record<Exclude<VisualStylePreset, 'custom'>, VisualStyleSettings>
+> = Object.freeze({
+  clearBlocks: Object.freeze({ sampling: 'nearest', dithering: 'none', colorBoost: 'none' }),
+  natural: Object.freeze({ sampling: 'average', dithering: 'none', colorBoost: 'none' }),
+  vivid: Object.freeze({ sampling: 'average', dithering: 'none', colorBoost: 'vivid' }),
+  smoothGradient: Object.freeze({
+    sampling: 'average',
+    dithering: 'floydSteinberg',
+    colorBoost: 'none',
+  }),
+});
+
+export function visualStyleSettingsForPreset(
+  preset: Exclude<VisualStylePreset, 'custom'>,
+): VisualStyleSettings {
+  return VISUAL_STYLE_SETTINGS[preset];
 }
 
-export function resolveProcessingPreset(dithering: 'none' | 'floydSteinberg'): ProcessingPreset {
-  return dithering === 'none' ? 'easy' : 'gradient';
+export function resolveVisualStylePreset(settings: VisualStyleSettings): VisualStylePreset {
+  for (const [preset, candidate] of Object.entries(VISUAL_STYLE_SETTINGS)) {
+    if (
+      candidate.sampling === settings.sampling &&
+      candidate.dithering === settings.dithering &&
+      candidate.colorBoost === settings.colorBoost
+    ) {
+      return preset as Exclude<VisualStylePreset, 'custom'>;
+    }
+  }
+  return 'custom';
 }
 
 export function physicalDimensionsForGrid(input: PhysicalDimensionsInput): {

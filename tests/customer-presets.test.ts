@@ -9,8 +9,8 @@ import {
   resolveColorCountPreset,
   resolveColorLimit,
   resolvePatternSizePreset,
-  resolveProcessingPreset,
-  processingSettingsForPreset,
+  resolveVisualStylePreset,
+  visualStyleSettingsForPreset,
 } from '../src/features/customer-flow/presets';
 
 test('pattern-size presets use cropped columns and rows for landscape, portrait, square, and non-full crops', () => {
@@ -81,11 +81,62 @@ test('color-count inverse identifies only unambiguous preset mappings', () => {
   assert.equal(resolveColorCountPreset(24, 24), 'custom');
 });
 
-test('processing presets map to and from the approved dithering settings', () => {
-  assert.deepEqual(processingSettingsForPreset('easy'), { dithering: 'none' });
-  assert.deepEqual(processingSettingsForPreset('gradient'), { dithering: 'floydSteinberg' });
-  assert.equal(resolveProcessingPreset('none'), 'easy');
-  assert.equal(resolveProcessingPreset('floydSteinberg'), 'gradient');
+test('visual style presets map to the approved sampling, dithering, and color boost contracts', () => {
+  assert.deepEqual(visualStyleSettingsForPreset('clearBlocks'), {
+    sampling: 'nearest',
+    dithering: 'none',
+    colorBoost: 'none',
+  });
+  assert.deepEqual(visualStyleSettingsForPreset('natural'), {
+    sampling: 'average',
+    dithering: 'none',
+    colorBoost: 'none',
+  });
+  assert.deepEqual(visualStyleSettingsForPreset('vivid'), {
+    sampling: 'average',
+    dithering: 'none',
+    colorBoost: 'vivid',
+  });
+  assert.deepEqual(visualStyleSettingsForPreset('smoothGradient'), {
+    sampling: 'average',
+    dithering: 'floydSteinberg',
+    colorBoost: 'none',
+  });
+});
+
+test('visual style inverse resolves presets and never snaps custom combinations', () => {
+  assert.equal(
+    resolveVisualStylePreset({ sampling: 'nearest', dithering: 'none', colorBoost: 'none' }),
+    'clearBlocks',
+  );
+  assert.equal(
+    resolveVisualStylePreset({ sampling: 'average', dithering: 'none', colorBoost: 'none' }),
+    'natural',
+  );
+  assert.equal(
+    resolveVisualStylePreset({ sampling: 'average', dithering: 'none', colorBoost: 'vivid' }),
+    'vivid',
+  );
+  assert.equal(
+    resolveVisualStylePreset({
+      sampling: 'average',
+      dithering: 'floydSteinberg',
+      colorBoost: 'none',
+    }),
+    'smoothGradient',
+  );
+  assert.equal(
+    resolveVisualStylePreset({ sampling: 'nearest', dithering: 'none', colorBoost: 'vivid' }),
+    'custom',
+  );
+  assert.equal(
+    resolveVisualStylePreset({
+      sampling: 'nearest',
+      dithering: 'floydSteinberg',
+      colorBoost: 'none',
+    }),
+    'custom',
+  );
 });
 
 test('physical dimensions are derived from grid and bead dimensions without retained state', () => {

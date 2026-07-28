@@ -4,7 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK_ONLY = process.argv.includes('--check');
-const sourcePaths = [resolve(ROOT, 'src/app.ts'), resolve(ROOT, 'src/main.ts')];
+const sourcePaths = [
+  resolve(ROOT, 'src/app.ts'),
+  resolve(ROOT, 'src/main.ts'),
+  resolve(ROOT, 'src/features/start-workspace/startWorkspace.ts'),
+  resolve(ROOT, 'src/features/preview-workspace/previewWorkspace.ts'),
+];
 const selectionPath = resolve(ROOT, 'node_modules/@phosphor-icons/web/src/regular/selection.json');
 const outputPath = resolve(ROOT, 'src/generated/phosphor-icons.css');
 

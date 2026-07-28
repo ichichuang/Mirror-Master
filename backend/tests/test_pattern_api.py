@@ -31,8 +31,9 @@ def generation_settings(
     available_color_ids: list[str] | None = None,
     maximum_colors: int | None = None,
     alpha_empty_threshold: float = 0.1,
+    color_boost: str | None = None,
 ) -> dict[str, object]:
-    return {
+    settings: dict[str, object] = {
         "mode": "photo",
         "crop": {"x": 0, "y": 0, "width": width, "height": height},
         "rotation": 0,
@@ -52,6 +53,9 @@ def generation_settings(
         "dithering": "none",
         "alphaEmptyThreshold": alpha_empty_threshold,
     }
+    if color_boost is not None:
+        settings["colorBoost"] = color_boost
+    return settings
 
 
 def post_generate(
@@ -250,6 +254,123 @@ def test_invalid_palette_settings_return_structured_chinese_error(
     assert_structured_chinese_error(
         response, "PATTERN_SETTINGS_INVALID"
     )
+
+
+def make_colorful_image() -> Image.Image:
+    image = Image.new("RGBA", (4, 4))
+    image.putdata(
+        [
+            (
+                (x * 37 + y * 11) % 256,
+                (x * 17 + y * 53) % 256,
+                (x * 73 + y * 29) % 256,
+                255,
+            )
+            for y in range(4)
+            for x in range(4)
+        ]
+    )
+    return image
+
+
+def test_color_boost_defaults_to_identical_matrix(
+    client: TestClient,
+) -> None:
+    image = make_colorful_image()
+    settings = generation_settings(
+        width=4, height=4, rows=4, columns=4, sampling="average"
+    )
+    explicit_none = {**settings, "colorBoost": "none"}
+
+    default_response = post_generate(client, image, settings)
+    none_response = post_generate(client, image, explicit_none)
+
+    assert default_response.status_code == 200
+    assert none_response.status_code == 200
+    assert (
+        default_response.json()["project"]["cells"]
+        == none_response.json()["project"]["cells"]
+    )
+
+
+def make_photographic_image(size: int = 16) -> Image.Image:
+    image = Image.new("RGBA", (size, size))
+    image.putdata(
+        [
+            (
+                (60 + 8 * x + 3 * y) % 256,
+                (100 + 5 * x + 9 * y) % 256,
+                (140 + 11 * x + 2 * y) % 256,
+                255,
+            )
+            for y in range(size)
+            for x in range(size)
+        ]
+    )
+    return image
+
+
+def test_color_boost_vivid_is_deterministic_and_changes_colors(
+    client: TestClient,
+) -> None:
+    image = make_photographic_image()
+    all_default_colors = [
+        color["id"]
+        for color in PALETTE_COLORS
+        if color["paletteId"] == "default"
+    ]
+    settings = generation_settings(
+        width=16,
+        height=16,
+        rows=16,
+        columns=16,
+        sampling="average",
+        available_color_ids=all_default_colors,
+    )
+    vivid = {**settings, "colorBoost": "vivid"}
+
+    first = post_generate(client, image, vivid)
+    second = post_generate(client, image, vivid)
+    plain = post_generate(client, image, settings)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert plain.status_code == 200
+    first_cells = first.json()["project"]["cells"]
+    assert first_cells == second.json()["project"]["cells"]
+    assert first_cells != plain.json()["project"]["cells"]
+
+
+def test_color_boost_rejects_invalid_values(
+    client: TestClient,
+) -> None:
+    image = make_colorful_image()
+    settings = generation_settings(width=4, height=4, rows=4, columns=4)
+    settings["colorBoost"] = "ultra"
+
+    response = post_generate(client, image, settings)
+
+    assert_structured_chinese_error(
+        response, "PATTERN_SETTINGS_INVALID"
+    )
+
+
+def test_color_boost_vivid_keeps_transparent_cells_empty(
+    client: TestClient,
+) -> None:
+    image = Image.new("RGBA", (2, 1))
+    image.putdata([(200, 120, 60, 255), (227, 27, 35, 0)])
+    settings = generation_settings(
+        width=2, height=1, rows=1, columns=2, color_boost="vivid"
+    )
+
+    response = post_generate(client, image, settings)
+
+    assert response.status_code == 200
+    cells = response.json()["project"]["cells"][0]
+    assert cells[0]["kind"] == "bead"
+    assert cells[1] == {"kind": "empty"}
+    assert response.json()["statistics"]["blankCount"] == 1
 
 
 def test_png_pdf_csv_exports_use_the_same_project(
