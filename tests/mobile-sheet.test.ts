@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { Window } from 'happy-dom';
+
 import {
   calculateSheetSnapPoints,
   createSheetMotionState,
+  didSheetGestureMove,
   dragSheetHeight,
   reduceSheetMotion,
+  registerSheetGestureCancellation,
   snapSheetHeight,
   snapSheetWithVelocity,
   type SheetSnapPoints,
@@ -64,6 +68,30 @@ test('sheet snap points account for safe areas and the visible keyboard', () => 
       full: 489,
     },
   );
+});
+
+test('sheet gestures tolerate touch jitter while preserving a precise mouse drag threshold', () => {
+  assert.equal(didSheetGestureMove(100, 108, 'touch'), false);
+  assert.equal(didSheetGestureMove(100, 112, 'touch'), true);
+  assert.equal(didSheetGestureMove(100, 104, 'mouse'), false);
+  assert.equal(didSheetGestureMove(100, 105, 'mouse'), true);
+});
+
+test('sheet gesture cancellation handles both pointer cancellation and lost capture', () => {
+  const window = new Window();
+  const target = window.document.createElement('div');
+  let cancellationCount = 0;
+  const unregister = registerSheetGestureCancellation(target, () => {
+    cancellationCount += 1;
+  });
+  target.dispatchEvent(new window.Event('pointercancel'));
+  target.dispatchEvent(new window.Event('lostpointercapture'));
+  assert.equal(cancellationCount, 2);
+
+  unregister();
+  target.dispatchEvent(new window.Event('lostpointercapture'));
+  assert.equal(cancellationCount, 2);
+  window.close();
 });
 
 test('release snap combines pointer position with upward and downward velocity', () => {

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   filterPaletteColors,
   groupPaletteColorsBySeries,
+  paletteFilterStatusText,
   pushRecentColor,
   type PaletteControlColor,
 } from '../src/features/palette-controls/paletteControls';
@@ -109,4 +110,13 @@ test('recent colors are deduplicated, newest first, and bounded', () => {
 
   assert.deepEqual(recent, ['mard:B2', 'mard:A1', 'mard:C1']);
   assert.deepEqual(pushRecentColor(recent, 'mard:A2', 3), ['mard:A2', 'mard:B2', 'mard:A1']);
+});
+
+test('empty scoped palette results explain the active filter instead of looking unresponsive', () => {
+  assert.equal(paletteFilterStatusText(0, 221, 'recent'), '暂无最近使用颜色 · 共 221 色');
+  assert.equal(
+    paletteFilterStatusText(0, 221, 'used'),
+    '当前图纸没有使用符合条件的颜色 · 共 221 色',
+  );
+  assert.equal(paletteFilterStatusText(48, 221, 'used'), '显示 48 / 221 色');
 });

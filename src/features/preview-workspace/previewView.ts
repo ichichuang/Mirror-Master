@@ -109,12 +109,17 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
   function drawPreview(project: BeadProject | null): void {
     lastProject = project;
     if (!project) {
+      canvasSlot.style.removeProperty('--preview-canvas-aspect-ratio');
       canvasStack.style.removeProperty('inline-size');
       canvasStack.style.removeProperty('block-size');
       clearPatternPreview(canvas);
       emptyHint.hidden = false;
       return;
     }
+    canvasSlot.style.setProperty(
+      '--preview-canvas-aspect-ratio',
+      `${String(project.grid.columns)} / ${String(project.grid.rows)}`,
+    );
     const slotWidth = canvasSlot.clientWidth;
     const slotHeight = canvasSlot.clientHeight;
     if (slotWidth > 0 && slotHeight > 0) {

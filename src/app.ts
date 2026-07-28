@@ -362,13 +362,18 @@ function renderPaletteControls(surface: 'desktop' | 'mobile'): string {
       ></vaadin-text-field>
       <vaadin-radio-group
         class="palette-scope"
-        label="显示颜色"
         aria-label="显示颜色"
         data-color-filter
       >
-        <vaadin-radio-button value="all" label="全部" checked></vaadin-radio-button>
-        <vaadin-radio-button value="used" label="已使用"></vaadin-radio-button>
-        <vaadin-radio-button value="recent" label="最近"></vaadin-radio-button>
+        <vaadin-radio-button value="all" checked>
+          <label slot="label">全部</label>
+        </vaadin-radio-button>
+        <vaadin-radio-button value="used">
+          <label slot="label">已使用</label>
+        </vaadin-radio-button>
+        <vaadin-radio-button value="recent">
+          <label slot="label">最近</label>
+        </vaadin-radio-button>
       </vaadin-radio-group>
       <vaadin-select
         class="palette-series"

@@ -40,7 +40,9 @@ import { createObjectUrlStore } from './features/local-image-input/objectUrlStor
 import {
   calculateSheetSnapPoints,
   createSheetMotionState,
+  didSheetGestureMove,
   dragSheetHeight,
+  registerSheetGestureCancellation,
   reduceSheetMotion,
   type SheetMotionState,
   type SheetSnapPoints,
@@ -49,6 +51,7 @@ import {
 import {
   ALL_SERIES_SELECT_VALUE,
   filterPaletteColors,
+  paletteFilterStatusText,
   paletteSeriesFromSelectValue,
   paletteSeriesToSelectValue,
   pushRecentColor,
@@ -178,6 +181,7 @@ import {
 } from './features/workspace-layout/layout';
 import {
   createWorkspacePanels,
+  moveFocusBeforeHiding,
   type WorkspacePanelsController,
   type WorkspacePanelsView,
 } from './features/workspace-panels/workspacePanels';
@@ -1022,6 +1026,7 @@ function setupPreview(): void {
   );
   let previewSheetGesture: {
     readonly pointerId: number;
+    readonly pointerType: string;
     readonly startY: number;
     readonly startHeight: number;
     readonly toggleOnTap: boolean;
@@ -1134,6 +1139,7 @@ function setupPreview(): void {
       previewSheetMotionState?.height ?? previewControlSurface.getBoundingClientRect().height;
     previewSheetGesture = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       startY: event.clientY,
       startHeight: currentHeight,
       toggleOnTap: target instanceof Node && panelToggle.contains(target),
@@ -1164,7 +1170,11 @@ function setupPreview(): void {
     previewSheetGesture.lastY = event.clientY;
     previewSheetGesture.lastTime = event.timeStamp;
     previewSheetGesture.currentHeight = height;
-    previewSheetGesture.moved ||= Math.abs(event.clientY - previewSheetGesture.startY) > 4;
+    previewSheetGesture.moved ||= didSheetGestureMove(
+      previewSheetGesture.startY,
+      event.clientY,
+      previewSheetGesture.pointerType,
+    );
     previewSheetMotionState = reduceSheetMotion(
       previewSheetMotionState ?? createSheetMotionState(previewSheetState, snapPoints),
       { type: 'drag', height },
@@ -1213,7 +1223,13 @@ function setupPreview(): void {
     }
     event.preventDefault();
   });
-  previewSheetDragRegion.addEventListener('pointercancel', () => {
+  registerSheetGestureCancellation(previewSheetDragRegion, (event) => {
+    if (
+      !previewSheetGesture ||
+      (event instanceof PointerEvent && event.pointerId !== previewSheetGesture.pointerId)
+    ) {
+      return;
+    }
     const snapPoints = previewSheetSnapPoints();
     const motion = reduceSheetMotion(
       previewSheetMotionState ?? createSheetMotionState(previewSheetState, snapPoints),
@@ -2056,6 +2072,7 @@ function setupPatternWorkspace(): void {
   const sheetDragRegion = required(workspaceSheet, '[data-sheet-drag-region]', HTMLElement);
   let sheetGesture: {
     readonly pointerId: number;
+    readonly pointerType: string;
     readonly startY: number;
     readonly startHeight: number;
     readonly toggleOnTap: boolean;
@@ -2280,6 +2297,7 @@ function setupPatternWorkspace(): void {
     const currentHeight = sheetMotionState?.height ?? workspaceSheet.getBoundingClientRect().height;
     sheetGesture = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       startY: event.clientY,
       startHeight: currentHeight,
       toggleOnTap: target instanceof Node && workspaceSheetHandle.contains(target),
@@ -2309,7 +2327,11 @@ function setupPatternWorkspace(): void {
     sheetGesture.lastY = event.clientY;
     sheetGesture.lastTime = event.timeStamp;
     sheetGesture.currentHeight = height;
-    sheetGesture.moved ||= Math.abs(event.clientY - sheetGesture.startY) > 4;
+    sheetGesture.moved ||= didSheetGestureMove(
+      sheetGesture.startY,
+      event.clientY,
+      sheetGesture.pointerType,
+    );
     sheetMotionState = reduceSheetMotion(
       sheetMotionState ?? createSheetMotionState(sheetState, sheetSnapPoints()),
       { type: 'drag', height },
@@ -2354,7 +2376,13 @@ function setupPatternWorkspace(): void {
     }
     event.preventDefault();
   });
-  sheetDragRegion.addEventListener('pointercancel', () => {
+  registerSheetGestureCancellation(sheetDragRegion, (event) => {
+    if (
+      !sheetGesture ||
+      (event instanceof PointerEvent && event.pointerId !== sheetGesture.pointerId)
+    ) {
+      return;
+    }
     const motion = reduceSheetMotion(
       sheetMotionState ?? createSheetMotionState(sheetState, sheetSnapPoints()),
       { type: 'pointercancel' },
@@ -2968,7 +2996,11 @@ function applyPaletteFilters(): void {
   }
   setTextAll(
     '[data-color-filter-status]',
-    `显示 ${String(filtered.length)} / ${String(project.palette.availableColorIds.length)} 色`,
+    paletteFilterStatusText(
+      filtered.length,
+      project.palette.availableColorIds.length,
+      paletteScope,
+    ),
   );
 }
 
@@ -3370,6 +3402,18 @@ function resetToStart(): void {
 }
 
 function showStage(nextStage: AppStage): void {
+  const mainWorkspace = required(app, '#main-workspace', HTMLElement);
+  if (stage !== nextStage) {
+    const currentStage =
+      stage === 'start'
+        ? startWorkspace
+        : stage === 'preview'
+          ? previewWorkspace
+          : stage === 'editor'
+            ? patternWorkspace
+            : chartWorkspace;
+    moveFocusBeforeHiding([currentStage], mainWorkspace);
+  }
   if (stage === 'preview' && nextStage !== 'preview') {
     availableSeriesSelectController?.close();
     availableColorDialogController?.close();
@@ -3399,7 +3443,7 @@ function showStage(nextStage: AppStage): void {
           ? '编辑拼豆图纸'
           : '镜像已有图纸';
   sessionStatus.textContent = nextStage === 'start' ? '仅保存在本次会话' : '本次会话';
-  required(app, '#main-workspace', HTMLElement).focus({ preventScroll: true });
+  mainWorkspace.focus({ preventScroll: true });
 }
 
 function updateWorkspaceLayout(): void {
@@ -3571,6 +3615,16 @@ function setSheetState(nextState: SheetState): void {
 }
 
 function applySheetState(nextState: SheetState): void {
+  if (nextState === 'peek') {
+    moveFocusBeforeHiding(
+      [
+        ...workspaceSheet.querySelectorAll<HTMLElement>(
+          '.inspector-tabs, .palette-controls, .sheet-content',
+        ),
+      ],
+      workspaceSheetHandle,
+    );
+  }
   sheetState = nextState;
   workspaceSheet.dataset.sheetState = nextState;
   workspaceSheetHandle.setAttribute(
@@ -3720,7 +3774,7 @@ function sheetSnapPoints(): SheetSnapPoints {
     viewportHeight,
     peekContentHeight: 144,
     keyboardHeight,
-    topGap: 8,
+    topGap: 0,
     halfRatio: 0.46,
   });
 }

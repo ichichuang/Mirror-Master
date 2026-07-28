@@ -68,6 +68,13 @@ const PANEL_IDS: readonly WorkspacePanelId[] = Object.freeze([
   'settings',
 ]);
 
+const PANEL_LABELS: Readonly<Record<WorkspacePanelId, string>> = Object.freeze({
+  tools: '工具',
+  palette: '颜色',
+  materials: '材料',
+  settings: '设置',
+});
+
 const TOOLS = Object.freeze([
   Object.freeze({ id: 'paint', label: '画笔', icon: 'ph-pencil-simple' }),
   Object.freeze({ id: 'erase', label: '橡皮', icon: 'ph-eraser' }),
@@ -75,6 +82,21 @@ const TOOLS = Object.freeze([
   Object.freeze({ id: 'fill', label: '填充', icon: 'ph-paint-bucket' }),
   Object.freeze({ id: 'select', label: '选择', icon: 'ph-selection' }),
 ]);
+
+export function moveFocusBeforeHiding(
+  containers: readonly HTMLElement[],
+  fallback: HTMLElement,
+): boolean {
+  const focusedElement = fallback.ownerDocument.activeElement;
+  if (
+    focusedElement === null ||
+    !containers.some((container) => container.contains(focusedElement))
+  ) {
+    return false;
+  }
+  fallback.focus({ preventScroll: true });
+  return fallback.ownerDocument.activeElement === fallback;
+}
 
 export function createWorkspacePanels(root: HTMLElement): WorkspacePanelsController {
   const document = root.ownerDocument;
@@ -248,11 +270,20 @@ export function createWorkspacePanels(root: HTMLElement): WorkspacePanelsControl
   function setActivePanel(panel: WorkspacePanelId): void {
     assertAlive();
     root.dataset.activeWorkspacePanel = panel;
+    const nextPanel = requiredPanel(panels, panel);
+    nextPanel.hidden = false;
+    nextPanel.removeAttribute('inert');
+    nextPanel.removeAttribute('aria-hidden');
+    moveFocusBeforeHiding(
+      createdPanels.filter((element) => element !== nextPanel),
+      nextPanel,
+    );
     for (const panelId of PANEL_IDS) {
       const element = requiredPanel(panels, panelId);
       const active = panelId === panel;
+      element.toggleAttribute('inert', !active);
       element.hidden = !active;
-      element.setAttribute('aria-hidden', String(!active));
+      element.removeAttribute('aria-hidden');
     }
   }
 
@@ -398,6 +429,8 @@ function buildSettingsPanel(document: Document): HTMLElement {
 function panelElement(document: Document, panel: WorkspacePanelId): HTMLElement {
   const element = document.createElement('section');
   element.dataset.workspacePanel = panel;
+  element.tabIndex = -1;
+  element.setAttribute('aria-label', PANEL_LABELS[panel]);
   return element;
 }
 

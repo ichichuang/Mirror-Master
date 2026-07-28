@@ -10,8 +10,12 @@ export function renderPreviewWorkspace(): string {
               aria-label="在原图和拼豆预览之间切换"
               data-compare-switch
             >
-              <vaadin-radio-button value="pattern" label="拼豆" checked></vaadin-radio-button>
-              <vaadin-radio-button value="original" label="原图"></vaadin-radio-button>
+              <vaadin-radio-button value="pattern" checked>
+                <label slot="label">拼豆</label>
+              </vaadin-radio-button>
+              <vaadin-radio-button value="original">
+                <label slot="label">原图</label>
+              </vaadin-radio-button>
             </vaadin-radio-group>
             <button class="secondary-button hold-original-button" type="button" data-hold-original>
               <i class="ph ph-eye" aria-hidden="true"></i>

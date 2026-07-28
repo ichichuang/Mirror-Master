@@ -1465,7 +1465,7 @@ select {
 .pattern-workspace {
   --sheet-peek-height: calc(9rem + var(--safe-bottom));
   --sheet-half-height: 46svh;
-  --sheet-full-height: calc(100% - 0.5rem);
+  --sheet-full-height: 100%;
   --sheet-keyboard-offset: 0px;
 
   position: relative;
@@ -1727,7 +1727,7 @@ select {
 .workspace-sheet {
   --sheet-peek-height: calc(9rem + var(--safe-bottom));
   --sheet-half-height: 46svh;
-  --sheet-full-height: calc(100% - 0.5rem);
+  --sheet-full-height: 100%;
   --sheet-height: var(--sheet-peek-height);
 
   position: absolute;
@@ -1761,6 +1761,8 @@ select {
 
 .workspace-sheet[data-sheet-state='full'] {
   --sheet-height: var(--sheet-full-height);
+
+  border-radius: 0;
 }
 
 .workspace-sheet[data-sheet-dragging='true'] {
@@ -1962,6 +1964,7 @@ select {
 .workspace-sheet .color-filter-status {
   grid-column: 1 / -1;
   grid-row: 3;
+  pointer-events: none;
 }
 
 .palette-search,
@@ -2532,6 +2535,53 @@ select {
 }
 
 @media (max-width: 767px) {
+  .preview-canvas-column {
+    grid-template-rows: auto auto auto auto;
+    align-content: start;
+  }
+
+  .preview-compare-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .preview-compare-bar .compare-switch {
+    grid-column: 2;
+  }
+
+  .preview-compare-bar .text-button {
+    grid-column: 3;
+    justify-self: end;
+    margin-left: 0;
+  }
+
+  .hold-original-button {
+    display: none;
+  }
+
+  .preview-canvas-slot {
+    width: 100%;
+    aspect-ratio: var(--preview-canvas-aspect-ratio, 4 / 3);
+    max-height: 48svh;
+  }
+
+  .preview-controls-scroll {
+    padding-top: var(--space-1);
+  }
+
+  .preview-controls-scroll > .settings-section {
+    gap: var(--space-3);
+  }
+
+  .preview-controls-scroll > .settings-section + .settings-section,
+  .preview-controls-scroll > .advanced-settings {
+    margin-top: var(--space-3);
+  }
+
+  .preview-controls-scroll > .customer-setting + .customer-setting {
+    padding-top: var(--space-3);
+  }
+
   .canvas-toolbar {
     grid-template-columns: auto auto minmax(0, 1fr) auto;
     gap: var(--space-1);

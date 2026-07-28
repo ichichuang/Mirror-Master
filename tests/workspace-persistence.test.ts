@@ -7,6 +7,7 @@ import { Window } from 'happy-dom';
 import { createKeyedListRenderer } from '../src/features/workspace-panels/keyedList';
 import {
   createWorkspacePanels,
+  moveFocusBeforeHiding,
   type WorkspacePanelsView,
 } from '../src/features/workspace-panels/workspacePanels';
 
@@ -204,7 +205,7 @@ test('workspace panel updates retain every panel and keyed palette/material node
   root.tabIndex = 0;
   document.body.append(root);
   const controller = createWorkspacePanels(root);
-  controller.update(panelView());
+  controller.update(panelView({ activePanel: 'palette' }));
   const toolsPanel = controller.panelFor('tools');
   const palettePanel = controller.panelFor('palette');
   const materialPanel = controller.panelFor('materials');
@@ -296,6 +297,69 @@ test('workspace panel active state changes never recreate project-level collecti
   assert.equal(controller.materialNodeFor('mard:A1') === material, true);
   controller.destroy();
   await window.happyDOM.close();
+});
+
+test('switching panels moves focus out of the panel before it becomes hidden', async (context) => {
+  const window = new Window();
+  context.after(async () => {
+    await window.happyDOM.close();
+  });
+  const { document } = window;
+  const root = document.createElement('div');
+  document.body.append(root);
+  const controller = createWorkspacePanels(root);
+  controller.update(panelView());
+  const toolsPanel = controller.panelFor('tools');
+  const palettePanel = controller.panelFor('palette');
+  const changeColor = toolsPanel.querySelector<HTMLButtonElement>('[data-panel-tab="palette"]');
+  assert.ok(changeColor);
+  changeColor.focus();
+  assert.strictEqual(document.activeElement, changeColor);
+
+  controller.setActivePanel('palette');
+
+  assert.strictEqual(document.activeElement, palettePanel);
+  assert.equal(toolsPanel.hidden, true);
+  assert.equal(palettePanel.hidden, false);
+  controller.destroy();
+});
+
+test('inactive workspace panels are inert without redundant aria-hidden state', async (context) => {
+  const window = new Window();
+  context.after(async () => {
+    await window.happyDOM.close();
+  });
+  const root = window.document.createElement('div');
+  window.document.body.append(root);
+  const controller = createWorkspacePanels(root);
+  controller.update(panelView({ activePanel: 'palette' }));
+  const toolsPanel = controller.panelFor('tools');
+  const palettePanel = controller.panelFor('palette');
+
+  assert.equal(toolsPanel.hasAttribute('inert'), true);
+  assert.equal(toolsPanel.hasAttribute('aria-hidden'), false);
+  assert.equal(palettePanel.hasAttribute('inert'), false);
+  assert.equal(palettePanel.hasAttribute('aria-hidden'), false);
+
+  controller.destroy();
+});
+
+test('focus handoff moves focus before a container is hidden by responsive state', async (context) => {
+  const window = new Window();
+  context.after(async () => {
+    await window.happyDOM.close();
+  });
+  const collapsible = window.document.createElement('div');
+  const focusedButton = window.document.createElement('button');
+  const fallback = window.document.createElement('button');
+  collapsible.append(focusedButton);
+  window.document.body.append(collapsible, fallback);
+  focusedButton.focus();
+
+  assert.equal(moveFocusBeforeHiding([collapsible], fallback), true);
+  collapsible.hidden = true;
+  assert.strictEqual(window.document.activeElement, fallback);
+  assert.equal(moveFocusBeforeHiding([collapsible], fallback), false);
 });
 
 test('main mounts the persistent workspace after the one-time app shell without runtime innerHTML', () => {

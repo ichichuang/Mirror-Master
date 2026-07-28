@@ -55,6 +55,32 @@ export type SheetMotionEvent =
     };
 
 const RELEASE_PROJECTION_MS = 160;
+const MOUSE_DRAG_THRESHOLD = 4;
+const TOUCH_DRAG_THRESHOLD = 10;
+
+export function didSheetGestureMove(
+  startPointerY: number,
+  pointerY: number,
+  pointerType: string,
+): boolean {
+  if (!Number.isFinite(startPointerY) || !Number.isFinite(pointerY)) {
+    throw new Error('控制面板指针位置无效。');
+  }
+  const threshold = pointerType === 'touch' ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
+  return Math.abs(pointerY - startPointerY) > threshold;
+}
+
+export function registerSheetGestureCancellation(
+  target: HTMLElement,
+  listener: EventListener,
+): () => void {
+  target.addEventListener('pointercancel', listener);
+  target.addEventListener('lostpointercapture', listener);
+  return () => {
+    target.removeEventListener('pointercancel', listener);
+    target.removeEventListener('lostpointercapture', listener);
+  };
+}
 
 export function calculateSheetSnapPoints(input: SheetSnapLayoutInput): SheetSnapPoints {
   const safeAreaTop = input.safeAreaTop ?? 0;

@@ -18,6 +18,20 @@ export interface PaletteFilterOptions {
 
 export const ALL_SERIES_SELECT_VALUE = '__all__';
 
+export function paletteFilterStatusText(
+  visibleCount: number,
+  availableCount: number,
+  scope: 'all' | 'used' | 'recent',
+): string {
+  if (visibleCount === 0 && scope === 'recent') {
+    return `暂无最近使用颜色 · 共 ${String(availableCount)} 色`;
+  }
+  if (visibleCount === 0 && scope === 'used') {
+    return `当前图纸没有使用符合条件的颜色 · 共 ${String(availableCount)} 色`;
+  }
+  return `显示 ${String(visibleCount)} / ${String(availableCount)} 色`;
+}
+
 export function paletteSeriesToSelectValue(series: string): string {
   return series || ALL_SERIES_SELECT_VALUE;
 }

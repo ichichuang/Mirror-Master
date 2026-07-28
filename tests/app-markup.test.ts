@@ -2,10 +2,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { Window } from 'happy-dom';
+
 import { renderApp } from '../src/app';
 
 const markup = renderApp();
 const mainSource = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+const previewViewSource = readFileSync(
+  new URL('../src/features/preview-workspace/previewView.ts', import.meta.url),
+  'utf8',
+);
 const pageCss = readFileSync(new URL('../src/styles/page.css', import.meta.url), 'utf8');
 const vaadinThemeCss = readFileSync(
   new URL('../src/styles/vaadin-theme.css', import.meta.url),
@@ -148,8 +154,8 @@ test('preview is result-first with comparison controls and no generation button'
   assert.match(preview, /data-preview-status[^>]*role="status"[^>]*aria-live="polite"/u);
   assert.match(preview, /data-preview-badge[^>]*hidden/u);
   assert.match(preview, /data-compare-switch/u);
-  assert.match(preview, /value="original"[^>]*label="原图"|label="原图"/u);
-  assert.match(preview, /label="拼豆"[^>]*checked|checked[^>]*label="拼豆"/u);
+  assert.match(preview, /value="original"[\s\S]*<label slot="label">原图<\/label>/u);
+  assert.match(preview, /value="pattern"[^>]*checked[\s\S]*<label slot="label">拼豆<\/label>/u);
   assert.match(preview, /data-hold-original/u);
   assert.match(preview, /按住对比/u);
   assert.match(preview, /data-preview-original-view[^>]*hidden/u);
@@ -260,6 +266,41 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.doesNotMatch(markup, /data-selection-actions/u);
 });
 
+test('palette scope controls expose one native label across every visual radio card', async () => {
+  const window = new Window();
+  window.document.body.innerHTML = markup;
+  const groups = [
+    ...window.document.querySelectorAll<HTMLElement>('vaadin-radio-group[data-color-filter]'),
+  ];
+  assert.equal(groups.length, 2);
+
+  for (const group of groups) {
+    assert.equal(group.hasAttribute('label'), false);
+    const buttons = [...group.querySelectorAll<HTMLElement>('vaadin-radio-button')];
+    assert.deepEqual(
+      buttons.map((button) => button.querySelector('[slot="label"]')?.textContent?.trim()),
+      ['全部', '已使用', '最近'],
+    );
+  }
+
+  await window.happyDOM.close();
+});
+
+test('segmented radio controls give their native inputs the full visual hit area', () => {
+  assert.match(
+    vaadinThemeCss,
+    /vaadin-radio-button\s*>\s*input\[slot=['"]input['"]\]\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*inline-size:\s*100%;[^}]*block-size:\s*100%;/u,
+  );
+  assert.doesNotMatch(
+    vaadinThemeCss,
+    /\.workspace-sheet \.palette-scope\s*\{[^}]*block-size:\s*2\.75rem;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.workspace-sheet \.color-filter-status\s*\{[^}]*pointer-events:\s*none;/u,
+  );
+});
+
 test('RadioGroups use one checked child default without a static group value', () => {
   const groups = [
     ...markup.matchAll(/<vaadin-radio-group\b([^>]*)>([\s\S]*?)<\/vaadin-radio-group>/gu),
@@ -325,6 +366,18 @@ test('mobile sheet states use the shared height variable and disable drag transi
   assert.match(
     pageCss,
     /\.workspace-sheet\[data-sheet-dragging='true'\]\s*\{[^}]*transition:\s*none/u,
+  );
+});
+
+test('editor full sheet covers the workspace without exposing controls behind rounded corners', () => {
+  const sheetSnapPointSource = mainSource.match(
+    /function sheetSnapPoints\(\): SheetSnapPoints \{[\s\S]*?\n\}/u,
+  )?.[0];
+  assert.ok(sheetSnapPointSource);
+  assert.match(sheetSnapPointSource, /topGap:\s*0/u);
+  assert.match(
+    pageCss,
+    /\.workspace-sheet\[data-sheet-state='full'\]\s*\{[^}]*border-radius:\s*0;/u,
   );
 });
 
@@ -403,11 +456,54 @@ test('preview comparison and preset cards adapt without global radio width pollu
   );
   assert.match(
     vaadinThemeCss,
+    /\.compare-switch vaadin-radio-button\s*\{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);[^}]*align-items:\s*stretch;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.compare-switch vaadin-radio-button > \[slot='label'\]\s*\{[^}]*block-size:\s*100%;[^}]*place-items:\s*center;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.compare-switch vaadin-radio-button::before,[\s\S]*\.palette-scope vaadin-radio-button::before\s*\{[^}]*content:\s*none;[^}]*display:\s*none;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.preset-card > \[slot='label'\]\s*\{[^}]*display:\s*grid;[^}]*block-size:\s*100%;[^}]*place-items:\s*center;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
     /\.preset-cards-four::part\(group-field\)\s*\{[^}]*grid-template-columns:\s*repeat\(2,/u,
   );
   assert.match(
     vaadinThemeCss,
     /@container \(min-width:\s*35rem\)[\s\S]*\.preview-workspace\[data-preview-layout='desktop'\] \.preset-cards-four::part\(group-field\)[\s\S]*grid-template-columns:\s*repeat\(4,/u,
+  );
+});
+
+test('mobile preview keeps the comparison, canvas, and settings choices visually compact', () => {
+  assert.match(
+    previewViewSource,
+    /canvasSlot\.style\.setProperty\(\s*'--preview-canvas-aspect-ratio',\s*`\$\{String\(project\.grid\.columns\)\} \/ \$\{String\(project\.grid\.rows\)\}`/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(max-width:\s*767px\)[\s\S]*\.preview-canvas-column\s*\{[^}]*grid-template-rows:\s*auto auto auto auto;[^}]*align-content:\s*start;/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(max-width:\s*767px\)[\s\S]*\.preview-canvas-slot\s*\{[^}]*aspect-ratio:\s*var\(--preview-canvas-aspect-ratio,\s*4 \/ 3\);[^}]*max-height:\s*48svh;/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(max-width:\s*767px\)[\s\S]*\.preview-compare-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto minmax\(0,\s*1fr\);/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(max-width:\s*767px\)[\s\S]*\.preview-controls-scroll > \.settings-section\s*\{[^}]*gap:\s*var\(--space-3\);/u,
+  );
+  assert.doesNotMatch(
+    vaadinThemeCss,
+    /\.preset-card\[checked\]\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/u,
   );
 });
 
