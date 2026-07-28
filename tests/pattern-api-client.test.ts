@@ -48,7 +48,7 @@ function projectFixture(): BeadProject {
   };
 }
 
-test('pattern export sends an explicit pure or annotated template with the captured revision', async () => {
+test('pattern export sends an explicit numbered template with the captured revision', async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: unknown;
   globalThis.fetch = async (_input, init) => {
@@ -60,7 +60,7 @@ test('pattern export sends an explicit pure or annotated template with the captu
   };
 
   try {
-    await exportPattern(projectFixture(), 'png', 'pure');
+    await exportPattern(projectFixture(), 'png', 'numbered');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -68,7 +68,31 @@ test('pattern export sends an explicit pure or annotated template with the captu
   assert.deepEqual(requestBody, {
     project: projectFixture(),
     format: 'png',
-    template: 'pure',
+    template: 'numbered',
+  });
+});
+
+test('pattern export sends the rounded-grid template without rewriting it', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: unknown;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(new Blob(['ok']), {
+      status: 200,
+      headers: { 'X-Project-Revision': '6' },
+    });
+  };
+
+  try {
+    await exportPattern(projectFixture(), 'png', 'rounded');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    project: projectFixture(),
+    format: 'png',
+    template: 'rounded',
   });
 });
 

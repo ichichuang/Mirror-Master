@@ -114,7 +114,12 @@ def test_capabilities_match_project_contract(client: TestClient) -> None:
         "minimumColumns": 1,
         "maximumColumns": 300,
     }
-    assert payload["pngTemplates"] == ["pure", "annotated"]
+    assert payload["pngTemplates"] == [
+        "pure",
+        "annotated",
+        "numbered",
+        "rounded",
+    ]
     assert payload["pdf"] == {
         "pageSize": "A4",
         "summaryPage": True,

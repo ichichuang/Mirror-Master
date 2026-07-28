@@ -430,6 +430,16 @@ function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
           <span>带标注<small>包含网格、坐标和材料图例</small></span>
           </label>
         </vaadin-radio-button>
+        <vaadin-radio-button value="numbered" data-export-template="numbered">
+          <label slot="label">
+          <span>色号图纸<small>每格显示色号，并附材料数量清单</small></span>
+          </label>
+        </vaadin-radio-button>
+        <vaadin-radio-button value="rounded" data-export-template="rounded">
+          <label slot="label">
+          <span>圆角方格<small>圆角小方格清晰分隔，适合放大分享</small></span>
+          </label>
+        </vaadin-radio-button>
       </vaadin-radio-group>
       <button class="primary-button export-run" type="button" data-export-run>
         下载分享图片

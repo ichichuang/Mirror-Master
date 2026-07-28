@@ -75,6 +75,18 @@ def test_export_request_uses_explicit_template_enum() -> None:
 
     pure = export_request(project, format_name="png", template="pure")
     assert pure.template == "pure"
+    numbered = export_request(
+        project,
+        format_name="png",
+        template="numbered",
+    )
+    assert numbered.template == "numbered"
+    rounded = export_request(
+        project,
+        format_name="png",
+        template="rounded",
+    )
+    assert rounded.template == "rounded"
 
     with pytest.raises(ValidationError):
         PatternExportRequest.model_validate(
@@ -130,6 +142,118 @@ def test_annotated_png_has_coordinates_grid_legend_and_semantic_colors() -> None
         for pixel in image.crop(
             (LABEL_MARGIN, 0, LABEL_MARGIN + CELL_SIZE, LABEL_MARGIN)
         ).get_flattened_data()
+    )
+
+
+def test_numbered_png_uses_full_color_cells_codes_and_count_legend() -> None:
+    project = two_cell_project()
+    selected = next(
+        color
+        for color in PALETTE_COLORS
+        if color["id"] == project.cells[0][0].color_id
+    )
+    text_builder = getattr(pattern_export, "_numbered_png_text", None)
+    cell_size_builder = getattr(pattern_export, "_numbered_cell_size", None)
+
+    assert callable(text_builder), "numbered PNG text model is missing"
+    assert callable(cell_size_builder), "numbered PNG cell sizing is missing"
+    numbered_cell_size = cell_size_builder(project)
+    assert numbered_cell_size == 44
+    text = text_builder(project)
+    assert text.cell_codes == ((selected["code"], ""),)
+    assert text.legend_lines == (
+        f"{selected['code']}｜1 颗",
+    )
+    assert text.total == "总计：1 颗"
+
+    content, media_type, _ = create_pattern_export(
+        export_request(
+            project,
+            format_name="png",
+            template="numbered",
+        )
+    )
+    image = Image.open(io.BytesIO(content)).convert("RGBA")
+    background = (255, 255, 255, 255)
+    selected_rgb = tuple(bytes.fromhex(selected["displayHex"][1:]))
+    located_full_cell = False
+
+    for top in range(image.height - numbered_cell_size + 1):
+        for left in range(
+            image.width - 2 * numbered_cell_size + 1
+        ):
+            if (
+                image.getpixel((left + 2, top + 2))[:3] == selected_rgb
+                and image.getpixel(
+                    (left + numbered_cell_size + 2, top + 2)
+                )
+                == background
+            ):
+                located_full_cell = True
+                break
+        if located_full_cell:
+            break
+
+    assert media_type == "image/png"
+    assert image.width > project.grid.columns * CELL_SIZE
+    assert image.height >= 760
+    assert located_full_cell
+
+
+def test_rounded_png_is_a_clean_matrix_of_separated_rounded_squares() -> None:
+    project = two_cell_project()
+    selected = next(
+        color
+        for color in PALETTE_COLORS
+        if color["id"] == project.cells[0][0].color_id
+    )
+    pitch = getattr(pattern_export, "ROUNDED_CELL_PITCH", None)
+
+    assert pitch == 16
+
+    content, media_type, _ = create_pattern_export(
+        export_request(
+            project,
+            format_name="png",
+            template="rounded",
+        )
+    )
+    image = Image.open(io.BytesIO(content)).convert("RGBA")
+    background = (255, 255, 255, 255)
+    selected_rgb = tuple(bytes.fromhex(selected["displayHex"][1:]))
+
+    assert media_type == "image/png"
+    assert image.size == (2 * pitch, pitch)
+    assert image.getpixel((0, 0)) == background
+    assert image.getpixel((pitch // 2, pitch // 2))[:3] == selected_rgb
+    assert image.getpixel((pitch - 1, pitch // 2)) == background
+    assert image.crop((pitch, 0, 2 * pitch, pitch)).getchannel(
+        "A"
+    ).getextrema() == (255, 255)
+    assert set(
+        image.crop((pitch, 0, 2 * pitch, pitch)).get_flattened_data()
+    ) == {background}
+
+
+def test_rounded_png_keeps_white_beads_visible_against_the_canvas() -> None:
+    project = BeadProject.model_validate(project_payload())
+    pitch = 16
+
+    content, _, _ = create_pattern_export(
+        export_request(
+            project,
+            format_name="png",
+            template="rounded",
+        )
+    )
+    image = Image.open(io.BytesIO(content)).convert("RGBA")
+
+    assert image.getpixel((pitch // 2, 1)) == (220, 226, 222, 255)
+    assert image.getpixel((pitch // 2, pitch // 2)) == (
+        255,
+        255,
+        255,
+        255,
     )
 
 

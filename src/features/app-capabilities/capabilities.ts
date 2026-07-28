@@ -5,7 +5,7 @@ export type AppMode = 'photo' | 'pixelArt' | 'existingChart';
 export type AppSamplingMode = 'average' | 'nearest';
 export type AppDitheringMode = 'none' | 'floydSteinberg';
 export type AppExportFormat = 'png' | 'pdf' | 'csv' | 'projectJson';
-export type AppPngTemplate = 'pure' | 'annotated';
+export type AppPngTemplate = 'pure' | 'annotated' | 'numbered' | 'rounded';
 export type AppGridMirrorAxis = 'horizontal' | 'vertical';
 export type BackgroundRemovalUnavailableReason =
   'MODEL_MISSING' | 'MODEL_INVALID' | 'ENGINE_INITIALIZATION_FAILED';
@@ -107,7 +107,7 @@ const MODES = ['photo', 'pixelArt', 'existingChart'] as const;
 const SAMPLING_MODES = ['average', 'nearest'] as const;
 const DITHERING_MODES = ['none', 'floydSteinberg'] as const;
 const EXPORT_FORMATS = ['png', 'pdf', 'csv', 'projectJson'] as const;
-const PNG_TEMPLATES = ['pure', 'annotated'] as const;
+const PNG_TEMPLATES = ['pure', 'annotated', 'numbered', 'rounded'] as const;
 const GRID_MIRROR_AXES = ['horizontal', 'vertical'] as const;
 const PDF_PAGE_SIZES = ['A4'] as const;
 const PDF_PHYSICAL_SCALES = ['fit-with-declared-scale'] as const;

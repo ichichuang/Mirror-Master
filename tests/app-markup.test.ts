@@ -252,6 +252,10 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.equal(countMatches(markup, /role="search"/g), 3);
   assert.equal(countMatches(markup, /data-export-template="pure"/g), 2);
   assert.equal(countMatches(markup, /data-export-template="annotated"/g), 2);
+  assert.equal(countMatches(markup, /data-export-template="numbered"/g), 2);
+  assert.equal(countMatches(markup, /data-export-template="rounded"/g), 2);
+  assert.match(markup, /色号图纸[\s\S]*每格显示色号，并附材料数量清单/u);
+  assert.match(markup, /圆角方格[\s\S]*圆角小方格清晰分隔，适合放大分享/u);
   assert.match(markup, /data-return-prepare/u);
   assert.match(markup, /data-edit-pattern/u);
   assert.match(markup, /data-return-editor/u);

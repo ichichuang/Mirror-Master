@@ -90,7 +90,7 @@ export async function generatePattern(
 export async function exportPattern(
   project: BeadProject,
   format: 'png' | 'pdf' | 'csv',
-  template: 'pure' | 'annotated',
+  template: 'pure' | 'annotated' | 'numbered' | 'rounded',
   signal?: AbortSignal,
 ): Promise<Blob> {
   const response = await request(

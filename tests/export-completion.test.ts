@@ -9,11 +9,12 @@ import {
   createExportCompletionState,
   failExport,
   openExportCompletion,
+  parseExportPngTemplate,
   selectExportTask,
   setExportPngTemplate,
 } from '../src/features/export-completion/exportState';
 
-test('completion exposes exactly four customer tasks with PNG templates only for sharing', () => {
+test('completion exposes exactly four customer tasks with four PNG templates only for sharing', () => {
   assert.deepEqual(
     EXPORT_TASKS.map(({ id, label, format }) => ({ id, label, format })),
     [
@@ -26,10 +27,20 @@ test('completion exposes exactly four customer tasks with PNG templates only for
   assert.deepEqual(EXPORT_TASKS[0]?.templates, [
     { id: 'pure', label: '纯图案' },
     { id: 'annotated', label: '带标注' },
+    { id: 'numbered', label: '色号图纸' },
+    { id: 'rounded', label: '圆角方格' },
   ]);
   assert.equal(EXPORT_TASKS[1]?.templates, undefined);
   assert.equal(EXPORT_TASKS[2]?.templates, undefined);
   assert.equal(EXPORT_TASKS[3]?.templates, undefined);
+});
+
+test('export template parsing preserves every explicit PNG presentation choice', () => {
+  assert.equal(parseExportPngTemplate('pure'), 'pure');
+  assert.equal(parseExportPngTemplate('annotated'), 'annotated');
+  assert.equal(parseExportPngTemplate('numbered'), 'numbered');
+  assert.equal(parseExportPngTemplate('rounded'), 'rounded');
+  assert.equal(parseExportPngTemplate('unexpected'), 'annotated');
 });
 
 test('open and close retain the prior panel, sheet height, focus target, and scroll position', () => {

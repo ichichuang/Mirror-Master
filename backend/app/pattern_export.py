@@ -27,6 +27,22 @@ PALETTE_LABEL_BY_ID = {
 CELL_SIZE = 24
 LABEL_MARGIN = 76
 LEGEND_WIDTH = 320
+NUMBERED_HEADER_HEIGHT = 88
+NUMBERED_OUTER_MARGIN = 24
+NUMBERED_COORDINATE_GUTTER = 28
+NUMBERED_SECTION_GAP = 28
+NUMBERED_LEGEND_TITLE_HEIGHT = 64
+NUMBERED_LEGEND_ROW_HEIGHT = 90
+NUMBERED_TOTAL_HEIGHT = 72
+NUMBERED_MIN_WIDTH = 760
+NUMBERED_LEGEND_MIN_COLUMN_WIDTH = 220
+NUMBERED_MAX_LEGEND_COLUMNS = 4
+NUMBERED_MIN_CELL_SIZE = 18
+NUMBERED_MAX_CELL_SIZE = 44
+NUMBERED_MAX_GRID_SPAN = 4400
+ROUNDED_CELL_PITCH = 16
+ROUNDED_CELL_INSET = 1
+ROUNDED_CELL_RADIUS = 3
 PDF_DPI = 150
 PDF_SUMMARY_HEADING_FONT_SIZE = 32
 PDF_SUMMARY_BODY_FONT_SIZE = 20
@@ -100,6 +116,29 @@ class AnnotatedPngText:
             *self.column_labels,
             *self.row_labels,
             *self.legend_lines,
+        )
+
+
+@dataclass(frozen=True)
+class NumberedPngText:
+    title: str
+    summary: str
+    palette: str
+    legend_heading: str
+    cell_codes: tuple[tuple[str, ...], ...]
+    legend_lines: tuple[str, ...]
+    total: str
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        return (
+            self.title,
+            self.summary,
+            self.palette,
+            self.legend_heading,
+            *(code for row in self.cell_codes for code in row if code),
+            *self.legend_lines,
+            self.total,
         )
 
 
@@ -401,6 +440,39 @@ def _annotated_png_text(project: BeadProject) -> AnnotatedPngText:
     )
 
 
+def _numbered_png_text(project: BeadProject) -> NumberedPngText:
+    statistics = _statistics(project)
+    return NumberedPngText(
+        title=f"{PRODUCT_NAME} · 色号图纸",
+        summary=(
+            f"{project.grid.columns} 列 × {project.grid.rows} 行"
+            f"｜{statistics['nonEmptyBeadCount']} 颗"
+            f"｜{len(statistics['perColorCounts'])} 色"
+        ),
+        palette=f"{_palette_label(project.palette.palette_id)} 色板",
+        legend_heading="材料清单",
+        cell_codes=tuple(
+            tuple(
+                (
+                    str(COLOR_BY_ID[cell.color_id]["code"])
+                    if isinstance(cell, FilledBeadCell)
+                    else ""
+                )
+                for cell in row
+            )
+            for row in project.cells
+        ),
+        legend_lines=tuple(
+            (
+                f"{COLOR_BY_ID[color_id]['code']}"
+                f"｜{count} 颗"
+            )
+            for color_id, count in statistics["perColorCounts"].items()
+        ),
+        total=f"总计：{statistics['nonEmptyBeadCount']} 颗",
+    )
+
+
 def _pdf_summary_text(plan: PdfDocumentPlan) -> PdfSummaryText:
     summary = plan.summary
     return PdfSummaryText(
@@ -521,7 +593,13 @@ def _render_pattern_image(
 ) -> Image.Image:
     if template == "pure":
         return _render_pure_pattern_image(project)
-    return _render_annotated_pattern_image(project)
+    if template == "annotated":
+        return _render_annotated_pattern_image(project)
+    if template == "numbered":
+        return _render_numbered_pattern_image(project)
+    if template == "rounded":
+        return _render_rounded_pattern_image(project)
+    raise ApiError(422, "EXPORT_TEMPLATE_INVALID", "导出图片样式不受支持。")
 
 
 def _render_pure_pattern_image(project: BeadProject) -> Image.Image:
@@ -546,6 +624,61 @@ def _render_pure_pattern_image(project: BeadProject) -> Image.Image:
                 hole_fill=(0, 0, 0, 0),
             )
     return canvas
+
+
+def _render_rounded_pattern_image(project: BeadProject) -> Image.Image:
+    canvas = Image.new(
+        "RGBA",
+        (
+            project.grid.columns * ROUNDED_CELL_PITCH,
+            project.grid.rows * ROUNDED_CELL_PITCH,
+        ),
+        EXPORT_COLORS["background"],
+    )
+    draw = ImageDraw.Draw(canvas)
+    for row_index, row in enumerate(project.cells):
+        for column_index, cell in enumerate(row):
+            if not isinstance(cell, FilledBeadCell):
+                continue
+            left = (
+                column_index * ROUNDED_CELL_PITCH
+                + ROUNDED_CELL_INSET
+            )
+            top = (
+                row_index * ROUNDED_CELL_PITCH
+                + ROUNDED_CELL_INSET
+            )
+            right = (
+                (column_index + 1) * ROUNDED_CELL_PITCH
+                - ROUNDED_CELL_INSET
+                - 1
+            )
+            bottom = (
+                (row_index + 1) * ROUNDED_CELL_PITCH
+                - ROUNDED_CELL_INSET
+                - 1
+            )
+            fill = str(COLOR_BY_ID[cell.color_id]["displayHex"])
+            draw.rounded_rectangle(
+                (left, top, right, bottom),
+                radius=ROUNDED_CELL_RADIUS,
+                fill=fill,
+                outline=_rounded_cell_outline(fill),
+                width=1,
+            )
+    return canvas
+
+
+def _rounded_cell_outline(color_hex: str) -> str | None:
+    red, green, blue = bytes.fromhex(color_hex.removeprefix("#"))
+    luminance = (
+        0.2126 * red
+        + 0.7152 * green
+        + 0.0722 * blue
+    )
+    if luminance > 235:
+        return EXPORT_COLORS["grid"]
+    return None
 
 
 def _render_annotated_pattern_image(project: BeadProject) -> Image.Image:
@@ -654,6 +787,325 @@ def _render_annotated_pattern_image(project: BeadProject) -> Image.Image:
         )
         legend_top += 30
     return canvas
+
+
+def _render_numbered_pattern_image(project: BeadProject) -> Image.Image:
+    text = _numbered_png_text(project)
+    statistics = _statistics(project)
+    used_colors = tuple(statistics["perColorCounts"].items())
+    cell_size = _numbered_cell_size(project)
+    scale = max(1.0, cell_size / CELL_SIZE)
+    header_height = round(NUMBERED_HEADER_HEIGHT * scale)
+    outer_margin = round(NUMBERED_OUTER_MARGIN * scale)
+    coordinate_gutter = round(
+        NUMBERED_COORDINATE_GUTTER * scale
+    )
+    section_gap = round(NUMBERED_SECTION_GAP * scale)
+    legend_title_height = round(
+        NUMBERED_LEGEND_TITLE_HEIGHT * scale
+    )
+    legend_row_height = round(
+        NUMBERED_LEGEND_ROW_HEIGHT * scale
+    )
+    total_height = round(NUMBERED_TOTAL_HEIGHT * scale)
+    grid_width = project.grid.columns * cell_size
+    grid_height = project.grid.rows * cell_size
+    canvas_width = max(
+        round(NUMBERED_MIN_WIDTH * scale),
+        grid_width
+        + 2 * (outer_margin + coordinate_gutter),
+    )
+    legend_available_width = canvas_width - 2 * outer_margin
+    legend_columns = min(
+        NUMBERED_MAX_LEGEND_COLUMNS,
+        max(1, len(used_colors)),
+        max(
+            1,
+            legend_available_width
+            // round(
+                NUMBERED_LEGEND_MIN_COLUMN_WIDTH * scale
+            ),
+        ),
+    )
+    legend_rows = (
+        math.ceil(len(used_colors) / legend_columns)
+        if used_colors
+        else 0
+    )
+    grid_left = (canvas_width - grid_width) // 2
+    grid_top = header_height + coordinate_gutter
+    grid_right = grid_left + grid_width
+    grid_bottom = grid_top + grid_height
+    legend_top = grid_bottom + coordinate_gutter + section_gap
+    canvas_height = (
+        legend_top
+        + legend_title_height
+        + legend_rows * legend_row_height
+        + total_height
+        + outer_margin
+    )
+    canvas = Image.new(
+        "RGBA",
+        (canvas_width, canvas_height),
+        EXPORT_COLORS["background"],
+    )
+    draw = ImageDraw.Draw(canvas)
+    header_font = _load_cjk_font(round(24 * scale))
+    header_detail_font = _load_cjk_font(round(13 * scale))
+    coordinate_font = _load_cjk_font(round(10 * scale))
+    cell_font = _load_cjk_font(round(8 * scale))
+    legend_heading_font = _load_cjk_font(round(22 * scale))
+    legend_font = _load_cjk_font(round(36 * scale))
+
+    draw.rectangle(
+        (0, 0, canvas_width, header_height),
+        fill=EXPORT_COLORS["textPrimary"],
+    )
+    draw.text(
+        (outer_margin, round(18 * scale)),
+        text.title,
+        fill=EXPORT_COLORS["background"],
+        font=header_font,
+    )
+    draw.text(
+        (outer_margin, round(56 * scale)),
+        "按格定位 · 按色备料",
+        fill=EXPORT_COLORS["grid"],
+        font=header_detail_font,
+    )
+    draw.text(
+        (
+            canvas_width - outer_margin,
+            round(24 * scale),
+        ),
+        text.summary,
+        anchor="ra",
+        fill=EXPORT_COLORS["background"],
+        font=header_detail_font,
+    )
+    draw.text(
+        (
+            canvas_width - outer_margin,
+            round(54 * scale),
+        ),
+        text.palette,
+        anchor="ra",
+        fill=EXPORT_COLORS["grid"],
+        font=header_detail_font,
+    )
+
+    for row_index, row in enumerate(project.cells):
+        for column_index, cell in enumerate(row):
+            left = grid_left + column_index * cell_size
+            top = grid_top + row_index * cell_size
+            right = left + cell_size
+            bottom = top + cell_size
+            fill = EXPORT_COLORS["background"]
+            if isinstance(cell, FilledBeadCell):
+                fill = str(COLOR_BY_ID[cell.color_id]["displayHex"])
+            draw.rectangle(
+                (left, top, right, bottom),
+                fill=fill,
+                outline=EXPORT_COLORS["grid"],
+                width=1,
+            )
+            if isinstance(cell, FilledBeadCell):
+                code = str(COLOR_BY_ID[cell.color_id]["code"])
+                draw.text(
+                    (
+                        left + cell_size / 2,
+                        top + cell_size / 2,
+                    ),
+                    code,
+                    anchor="mm",
+                    fill=_numbered_cell_text_color(fill),
+                    font=cell_font,
+                )
+
+    for column in range(0, project.grid.columns + 1, 10):
+        x = grid_left + column * cell_size
+        draw.line(
+            (x, grid_top, x, grid_bottom),
+            fill=EXPORT_COLORS["gridStrong"],
+            width=2,
+        )
+    for row in range(0, project.grid.rows + 1, 10):
+        y = grid_top + row * cell_size
+        draw.line(
+            (grid_left, y, grid_right, y),
+            fill=EXPORT_COLORS["gridStrong"],
+            width=2,
+        )
+
+    for column in range(project.grid.columns):
+        if not _should_label_numbered_coordinate(
+            column,
+            project.grid.columns,
+        ):
+            continue
+        center_x = grid_left + column * cell_size + cell_size / 2
+        label = str(column + 1)
+        draw.text(
+            (center_x, grid_top - round(8 * scale)),
+            label,
+            anchor="ms",
+            fill=EXPORT_COLORS["textSecondary"],
+            font=coordinate_font,
+        )
+        draw.text(
+            (center_x, grid_bottom + round(8 * scale)),
+            label,
+            anchor="ma",
+            fill=EXPORT_COLORS["textSecondary"],
+            font=coordinate_font,
+        )
+    for row in range(project.grid.rows):
+        if not _should_label_numbered_coordinate(
+            row,
+            project.grid.rows,
+        ):
+            continue
+        center_y = grid_top + row * cell_size + cell_size / 2
+        label = str(row + 1)
+        draw.text(
+            (grid_left - round(8 * scale), center_y),
+            label,
+            anchor="rm",
+            fill=EXPORT_COLORS["textSecondary"],
+            font=coordinate_font,
+        )
+        draw.text(
+            (grid_right + round(8 * scale), center_y),
+            label,
+            anchor="lm",
+            fill=EXPORT_COLORS["textSecondary"],
+            font=coordinate_font,
+        )
+
+    draw.line(
+        (
+            outer_margin,
+            legend_top,
+            canvas_width - outer_margin,
+            legend_top,
+        ),
+        fill=EXPORT_COLORS["gridStrong"],
+        width=1,
+    )
+    draw.text(
+        (outer_margin, legend_top + round(14 * scale)),
+        text.legend_heading,
+        fill=EXPORT_COLORS["textPrimary"],
+        font=legend_heading_font,
+    )
+    legend_items_top = legend_top + legend_title_height
+    legend_column_width = legend_available_width / legend_columns
+    legend_swatch_size = round(72 * scale)
+    for index, (color_id, count) in enumerate(used_colors):
+        column = index // max(1, legend_rows)
+        row = index % max(1, legend_rows)
+        left = (
+            outer_margin
+            + column * legend_column_width
+        )
+        top = legend_items_top + row * legend_row_height
+        color = COLOR_BY_ID[color_id]
+        draw.rectangle(
+            (
+                left,
+                top + round(5 * scale),
+                left + legend_swatch_size,
+                top + round(5 * scale) + legend_swatch_size,
+            ),
+            fill=color["displayHex"],
+            outline=EXPORT_COLORS["gridStrong"],
+            width=1,
+        )
+        draw.text(
+            (
+                left + round(88 * scale),
+                top + round(14 * scale),
+            ),
+            str(color["code"]),
+            fill=EXPORT_COLORS["textPrimary"],
+            font=legend_font,
+        )
+        draw.text(
+            (
+                left
+                + legend_column_width
+                - round(14 * scale),
+                top + round(14 * scale),
+            ),
+            f"{count} 颗",
+            anchor="ra",
+            fill=EXPORT_COLORS["textPrimary"],
+            font=legend_font,
+        )
+
+    total_top = (
+        legend_items_top
+        + legend_rows * legend_row_height
+        + round(12 * scale)
+    )
+    draw.line(
+        (
+            outer_margin,
+            total_top,
+            canvas_width - outer_margin,
+            total_top,
+        ),
+        fill=EXPORT_COLORS["grid"],
+        width=1,
+    )
+    draw.text(
+        (
+            canvas_width - outer_margin,
+            total_top + round(14 * scale),
+        ),
+        text.total,
+        anchor="ra",
+        fill=EXPORT_COLORS["textPrimary"],
+        font=legend_heading_font,
+    )
+    return canvas
+
+
+def _numbered_cell_size(project: BeadProject) -> int:
+    maximum_dimension = max(
+        project.grid.columns,
+        project.grid.rows,
+    )
+    return min(
+        NUMBERED_MAX_CELL_SIZE,
+        max(
+            NUMBERED_MIN_CELL_SIZE,
+            NUMBERED_MAX_GRID_SPAN // maximum_dimension,
+        ),
+    )
+
+
+def _should_label_numbered_coordinate(
+    index: int,
+    count: int,
+) -> bool:
+    return (
+        index == 0
+        or index == count - 1
+        or (index + 1) % 10 == 0
+    )
+
+
+def _numbered_cell_text_color(color_hex: str) -> str:
+    red, green, blue = bytes.fromhex(color_hex.removeprefix("#"))
+    luminance = (
+        0.2126 * red
+        + 0.7152 * green
+        + 0.0722 * blue
+    )
+    if luminance < 145:
+        return EXPORT_COLORS["background"]
+    return EXPORT_COLORS["textPrimary"]
 
 
 def _layout_annotated_png_coordinates(

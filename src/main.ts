@@ -122,6 +122,7 @@ import {
   exportTaskDefinition,
   failExport,
   openExportCompletion,
+  parseExportPngTemplate,
   selectExportTask,
   setExportPngTemplate,
   type ExportCompletionState,
@@ -2439,7 +2440,7 @@ function setupPatternWorkspace(): void {
   });
   for (const controller of exportTemplateRadioControllers) {
     controller.subscribe((value) => {
-      const template = value === 'pure' ? 'pure' : 'annotated';
+      const template = parseExportPngTemplate(value);
       if (template === exportCompletionState.pngTemplate) return;
       exportCompletionState = setExportPngTemplate(exportCompletionState, template);
       syncExportCompletionUi();

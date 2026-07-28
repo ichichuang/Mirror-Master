@@ -334,4 +334,4 @@ class PatternExportRequest(BaseModel):
 
     project: BeadProject
     format: Literal["png", "pdf", "csv"]
-    template: Literal["pure", "annotated"]
+    template: Literal["pure", "annotated", "numbered", "rounded"]

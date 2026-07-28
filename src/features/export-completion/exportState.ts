@@ -1,6 +1,6 @@
 export type ExportTaskId = 'shareImage' | 'printMaking' | 'materialsList' | 'saveProject';
 export type ExportFormat = 'png' | 'pdf' | 'csv' | 'json';
-export type ExportPngTemplate = 'pure' | 'annotated';
+export type ExportPngTemplate = 'pure' | 'annotated' | 'numbered' | 'rounded';
 export type ExportSheetState = 'peek' | 'half' | 'full';
 
 export interface ExportTaskDefinition {
@@ -25,6 +25,8 @@ export const EXPORT_TASKS: readonly ExportTaskDefinition[] = Object.freeze([
     templates: Object.freeze([
       Object.freeze({ id: 'pure', label: '纯图案' }),
       Object.freeze({ id: 'annotated', label: '带标注' }),
+      Object.freeze({ id: 'numbered', label: '色号图纸' }),
+      Object.freeze({ id: 'rounded', label: '圆角方格' }),
     ]),
   }),
   Object.freeze({
@@ -131,6 +133,13 @@ export function setExportPngTemplate(
   pngTemplate: ExportPngTemplate,
 ): ExportCompletionState {
   return freezeState({ ...state, pngTemplate });
+}
+
+export function parseExportPngTemplate(value: string): ExportPngTemplate {
+  if (value === 'pure' || value === 'numbered' || value === 'rounded') {
+    return value;
+  }
+  return 'annotated';
 }
 
 export function beginExport(

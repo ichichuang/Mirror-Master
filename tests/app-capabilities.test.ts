@@ -55,7 +55,7 @@ const VALID_CAPABILITIES = {
   sampling: ['average', 'nearest'],
   dithering: ['none', 'floydSteinberg'],
   exports: ['png', 'pdf', 'csv', 'projectJson'],
-  pngTemplates: ['pure', 'annotated'],
+  pngTemplates: ['pure', 'annotated', 'numbered', 'rounded'],
   pdf: {
     pageSize: 'A4',
     summaryPage: true,
@@ -90,7 +90,7 @@ test('capabilities parser returns a typed versioned contract', () => {
     columns: 29,
   });
   assert.deepEqual(capabilities.exports, ['png', 'pdf', 'csv', 'projectJson']);
-  assert.deepEqual(capabilities.pngTemplates, ['pure', 'annotated']);
+  assert.deepEqual(capabilities.pngTemplates, ['pure', 'annotated', 'numbered', 'rounded']);
   assert.equal(capabilities.pdf.physicalScale, 'fit-with-declared-scale');
   assert.equal(capabilities.pdf.maximumPages, 500);
   assert.equal(capabilities.pdf.maximumRasterPixels, 1_100_000_000);
