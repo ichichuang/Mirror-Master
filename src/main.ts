@@ -296,6 +296,7 @@ let currentProject: BeadProject | null = null;
 let sourceGenerationRevision: number | null = null;
 let previewProject: BeadProject | null = null;
 let previewStatistics: ProjectStatistics | null = null;
+let previewReturnToEditorAvailable = false;
 let previewClobberAcknowledged = false;
 let firstPreviewGenerationStarted = false;
 let previewRegenerationTimer: number | null = null;
@@ -305,6 +306,8 @@ let history: MatrixHistory | null = null;
 let canvasController: PatternCanvasController | null = null;
 let gridContract: GridDetectionContract | null = null;
 let activePanel: InspectorPanel = 'tools';
+let previewSheetState: SheetState = 'peek';
+let previewSheetMotionState: SheetMotionState | null = null;
 let sheetState: SheetState = 'peek';
 let sheetMotionState: SheetMotionState | null = null;
 let currentSelection: CellSelection | null = null;
@@ -1007,7 +1010,27 @@ function setupPreview(): void {
   const prepareReplace = required(previewWorkspace, '[data-prepare-replace]', HTMLButtonElement);
   const holdOriginalButton = required(previewWorkspace, '[data-hold-original]', HTMLButtonElement);
   const panelToggle = required(previewWorkspace, '[data-preview-panel-toggle]', HTMLButtonElement);
-  const panelBody = required(previewWorkspace, '[data-preview-panel-body]', HTMLElement);
+  const previewControlSurface = required(
+    previewWorkspace,
+    '[data-preview-control-surface]',
+    HTMLElement,
+  );
+  const previewSheetDragRegion = required(
+    previewControlSurface,
+    '[data-preview-sheet-drag-region]',
+    HTMLElement,
+  );
+  let previewSheetGesture: {
+    readonly pointerId: number;
+    readonly startY: number;
+    readonly startHeight: number;
+    readonly toggleOnTap: boolean;
+    currentHeight: number;
+    lastY: number;
+    lastTime: number;
+    pointerVelocityY: number;
+    moved: boolean;
+  } | null = null;
   const rotateLeft = required(previewWorkspace, '[data-rotate-left]', HTMLButtonElement);
   const rotateRight = required(previewWorkspace, '[data-rotate-right]', HTMLButtonElement);
   const columnsInput = required(previewWorkspace, '[data-columns]', HTMLInputElement);
@@ -1068,7 +1091,7 @@ function setupPreview(): void {
   holdOriginalButton.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     holdOriginalActive = true;
-    applyPreviewCompareView('original');
+    applyPreviewCompareView(currentPreviewCompareValue() === 'pattern' ? 'original' : 'pattern');
   });
   const endHoldOriginal = (): void => {
     if (!holdOriginalActive) return;
@@ -1082,7 +1105,7 @@ function setupPreview(): void {
     if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
       event.preventDefault();
       holdOriginalActive = true;
-      applyPreviewCompareView('original');
+      applyPreviewCompareView(currentPreviewCompareValue() === 'pattern' ? 'original' : 'pattern');
     }
   });
   holdOriginalButton.addEventListener('keyup', (event) => {
@@ -1092,10 +1115,127 @@ function setupPreview(): void {
     }
   });
   holdOriginalButton.addEventListener('blur', endHoldOriginal);
-  panelToggle.addEventListener('click', () => {
-    const expanded = panelToggle.getAttribute('aria-expanded') !== 'false';
-    panelToggle.setAttribute('aria-expanded', String(!expanded));
-    panelBody.hidden = expanded;
+  panelToggle.addEventListener('click', (event) => {
+    if (event.detail !== 0) {
+      return;
+    }
+    setPreviewSheetState(nextSheetState(previewSheetState));
+  });
+  previewSheetDragRegion.addEventListener('pointerdown', (event) => {
+    const target = event.target;
+    const interactive =
+      target instanceof Element
+        ? target.closest('button, input, textarea, select, a, [role="button"]')
+        : null;
+    if (interactive && !panelToggle.contains(interactive)) {
+      return;
+    }
+    const currentHeight =
+      previewSheetMotionState?.height ?? previewControlSurface.getBoundingClientRect().height;
+    previewSheetGesture = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: currentHeight,
+      toggleOnTap: target instanceof Node && panelToggle.contains(target),
+      currentHeight,
+      lastY: event.clientY,
+      lastTime: event.timeStamp,
+      pointerVelocityY: 0,
+      moved: false,
+    };
+    previewControlSurface.dataset.previewSheetDragging = 'true';
+    previewSheetDragRegion.setPointerCapture(event.pointerId);
+  });
+  previewSheetDragRegion.addEventListener('pointermove', (event) => {
+    if (!previewSheetGesture || previewSheetGesture.pointerId !== event.pointerId) {
+      return;
+    }
+    const snapPoints = previewSheetSnapPoints();
+    const height = dragSheetHeight({
+      startHeight: previewSheetGesture.startHeight,
+      startPointerY: previewSheetGesture.startY,
+      pointerY: event.clientY,
+      snapPoints,
+    });
+    const elapsed = event.timeStamp - previewSheetGesture.lastTime;
+    if (elapsed > 0) {
+      previewSheetGesture.pointerVelocityY = (event.clientY - previewSheetGesture.lastY) / elapsed;
+    }
+    previewSheetGesture.lastY = event.clientY;
+    previewSheetGesture.lastTime = event.timeStamp;
+    previewSheetGesture.currentHeight = height;
+    previewSheetGesture.moved ||= Math.abs(event.clientY - previewSheetGesture.startY) > 4;
+    previewSheetMotionState = reduceSheetMotion(
+      previewSheetMotionState ?? createSheetMotionState(previewSheetState, snapPoints),
+      { type: 'drag', height },
+    );
+    previewControlSurface.style.setProperty('--preview-sheet-height', `${String(height)}px`);
+    event.preventDefault();
+  });
+  previewSheetDragRegion.addEventListener('pointerup', (event) => {
+    if (!previewSheetGesture || previewSheetGesture.pointerId !== event.pointerId) {
+      return;
+    }
+    const elapsed = event.timeStamp - previewSheetGesture.lastTime;
+    const releaseDeltaY = event.clientY - previewSheetGesture.lastY;
+    if (elapsed > 0 && Math.abs(releaseDeltaY) > 0.5) {
+      previewSheetGesture.pointerVelocityY = releaseDeltaY / elapsed;
+    } else if (elapsed > 80) {
+      previewSheetGesture.pointerVelocityY = 0;
+    }
+    const snapPoints = previewSheetSnapPoints();
+    previewSheetGesture.currentHeight = dragSheetHeight({
+      startHeight: previewSheetGesture.startHeight,
+      startPointerY: previewSheetGesture.startY,
+      pointerY: event.clientY,
+      snapPoints,
+    });
+    const motion = reduceSheetMotion(
+      previewSheetMotionState ?? createSheetMotionState(previewSheetState, snapPoints),
+      {
+        type: 'pointerup',
+        height: previewSheetGesture.currentHeight,
+        pointerVelocityY: previewSheetGesture.pointerVelocityY,
+      },
+    );
+    const toggleOnTap = previewSheetGesture.toggleOnTap && !previewSheetGesture.moved;
+    previewSheetGesture = null;
+    previewSheetMotionState = motion;
+    previewControlSurface.style.removeProperty('--preview-sheet-height');
+    delete previewControlSurface.dataset.previewSheetDragging;
+    if (toggleOnTap) {
+      setPreviewSheetState(nextSheetState(previewSheetState));
+    } else {
+      applyPreviewSheetState(motion.stableState);
+    }
+    if (previewSheetDragRegion.hasPointerCapture(event.pointerId)) {
+      previewSheetDragRegion.releasePointerCapture(event.pointerId);
+    }
+    event.preventDefault();
+  });
+  previewSheetDragRegion.addEventListener('pointercancel', () => {
+    const snapPoints = previewSheetSnapPoints();
+    const motion = reduceSheetMotion(
+      previewSheetMotionState ?? createSheetMotionState(previewSheetState, snapPoints),
+      { type: 'pointercancel' },
+    );
+    previewSheetGesture = null;
+    previewSheetMotionState = motion;
+    previewControlSurface.style.removeProperty('--preview-sheet-height');
+    delete previewControlSurface.dataset.previewSheetDragging;
+    applyPreviewSheetState(motion.stableState);
+  });
+  previewControlSurface.addEventListener('keydown', (event) => {
+    if (
+      event.key !== 'Escape' ||
+      previewSheetState === 'peek' ||
+      workspaceLayoutMode === 'desktop'
+    ) {
+      return;
+    }
+    event.preventDefault();
+    setPreviewSheetState('peek');
+    panelToggle.focus({ preventScroll: true });
   });
   previewCompareRadioController.subscribe((value) => {
     if (holdOriginalActive) return;
@@ -1413,8 +1553,10 @@ function openPreviewWorkspace(preserveProjectSettings = false): void {
   if (!selectedImage) {
     return;
   }
+  previewReturnToEditorAvailable = preserveProjectSettings && currentProject !== null;
   availableColorDialogController?.close();
   showStage('preview');
+  setPreviewSheetState('peek');
   previewClobberAcknowledged = false;
   const columnsInput = required(previewWorkspace, '[data-columns]', HTMLInputElement);
   const rowsInput = required(previewWorkspace, '[data-rows]', HTMLInputElement);
@@ -1531,7 +1673,7 @@ function openPreviewWorkspace(preserveProjectSettings = false): void {
   customFields.hidden = !customBoard;
   customFields.disabled = !customBoard;
   required(previewWorkspace, '[data-return-editor]', HTMLButtonElement).hidden =
-    currentProject === null;
+    !previewReturnToEditorAvailable;
   syncPreviewResult();
   applyPreviewCompareView(currentPreviewCompareValue());
   applyPrepareModeState(false);
@@ -1718,8 +1860,7 @@ function startPreviewGeneration(): void {
   ) {
     openConfirmation({
       title: '重新生成会替换当前编辑',
-      description:
-        '新图纸生成成功后，当前逐格修改和撤销记录将被替换。你可以先保存项目，之后再继续。',
+      description: '确认编辑新图纸时，当前逐格修改和撤销记录将被替换。你也可以从预览返回当前图纸。',
       onContinue() {
         previewClobberAcknowledged = true;
         startPreviewGeneration();
@@ -1747,13 +1888,6 @@ function handlePreviewCoordinatorEvent(event: PreviewCoordinatorEvent): void {
   const { result } = event;
   previewProject = result.project;
   previewStatistics = result.statistics;
-  if (stage !== 'editor') {
-    currentProject = result.project;
-    sourceGenerationRevision = result.project.revision;
-    history = new MatrixHistory(result.project.cells, 100, result.project.revision);
-    currentSelection = null;
-    exportCoordinator.invalidate();
-  }
   selectedColorId =
     Object.keys(result.statistics.perColorCounts)[0] ??
     result.project.palette.availableColorIds[0] ??
@@ -1781,6 +1915,8 @@ function confirmPreviewAsEditorBaseline(): void {
   sourceGenerationRevision = project.revision;
   history = new MatrixHistory(project.cells, 100, project.revision);
   currentSelection = null;
+  previewReturnToEditorAvailable = false;
+  exportCoordinator.invalidate();
   openPatternEditor(project);
 }
 
@@ -1825,7 +1961,7 @@ function syncPreviewResult(): void {
   previewView.syncResult({
     project: previewProject,
     statistics: previewStatistics,
-    hasCurrentProject: currentProject !== null,
+    canReturnToEditor: previewReturnToEditorAvailable,
     generationActive: previewCoordinator.activeRequestId() !== null,
   });
   updateColorCountEstimate();
@@ -1851,16 +1987,20 @@ function currentPreviewCompareValue(): 'original' | 'pattern' {
 }
 
 function setupPreviewCanvasResize(): void {
-  const stack = required(previewWorkspace, '[data-preview-pattern-view]', HTMLElement);
+  const slot = required(previewWorkspace, '[data-preview-canvas-slot]', HTMLElement);
   if (typeof ResizeObserver === 'undefined') {
     return;
   }
   const observer = new ResizeObserver(() => {
     if (stage === 'preview' && previewProject) {
       drawPreviewCanvas();
+      if (currentPreviewCompareValue() === 'original') {
+        drawCropPreview();
+        renderCropSelection();
+      }
     }
   });
-  observer.observe(stack);
+  observer.observe(slot);
 }
 
 function buildGenerationSettings(): PatternGenerationSettings {
@@ -2272,6 +2412,7 @@ function setupPatternWorkspace(): void {
 
 function openPatternEditor(project: BeadProject): void {
   currentProject = project;
+  previewReturnToEditorAvailable = false;
   previewCoordinator.cancel();
   clearPreviewRegenerationTimer();
   required(previewWorkspace, '[data-preview-badge]', HTMLElement).hidden = true;
@@ -3199,6 +3340,7 @@ function resetToStart(): void {
   sourceGenerationRevision = null;
   previewProject = null;
   previewStatistics = null;
+  previewReturnToEditorAvailable = false;
   previewClobberAcknowledged = false;
   firstPreviewGenerationStarted = false;
   mirrorChartIntent = false;
@@ -3270,6 +3412,25 @@ function updateWorkspaceLayout(): void {
     workspaceLayoutMode !== null &&
     (workspaceLayoutMode === 'desktop') !== (nextLayout.mode === 'desktop');
   const activeElement = document.activeElement;
+  const previewControlSurface = required(
+    previewWorkspace,
+    '[data-preview-control-surface]',
+    HTMLElement,
+  );
+  const previewControlsScroll = required(
+    previewControlSurface,
+    '[data-preview-controls-scroll]',
+    HTMLElement,
+  );
+  const previewPanelToggle = required(
+    previewControlSurface,
+    '[data-preview-panel-toggle]',
+    HTMLButtonElement,
+  );
+  const previewFocusWasInSettings =
+    activeElement instanceof HTMLElement && previewControlsScroll.contains(activeElement);
+  const previewFocusWasOnToggle =
+    activeElement instanceof HTMLElement && previewPanelToggle.contains(activeElement);
   const sourceUsesDesktopSurface = workspaceLayoutMode === 'desktop';
   const focusWasInSourceSurface =
     activeElement !== null &&
@@ -3303,7 +3464,15 @@ function updateWorkspaceLayout(): void {
     '--workspace-inspector-width',
     `${String(layout.inspectorWidth)}px`,
   );
-  mountPreviewControls(layout.mode);
+  previewWorkspace.dataset.previewLayout = layout.mode;
+  if (layout.mode === 'desktop') {
+    previewSheetState = 'peek';
+    previewSheetMotionState = null;
+  } else if (crossingDesktopBoundary && previewFocusWasInSettings) {
+    previewSheetState = 'half';
+    previewSheetMotionState = null;
+  }
+  recalculatePreviewSheetMotion();
   recalculateSheetMotion();
   scheduleSelectionContextPosition();
 
@@ -3329,28 +3498,69 @@ function updateWorkspaceLayout(): void {
       focusSnapshot,
     );
   }
+
+  if (crossingDesktopBoundary && layout.mode === 'desktop' && previewFocusWasOnToggle) {
+    previewControlsScroll
+      .querySelector<HTMLElement>(
+        'vaadin-radio-button[checked], vaadin-select, button:not([disabled]), input:not([disabled])',
+      )
+      ?.focus({ preventScroll: true });
+  }
 }
 
-function mountPreviewControls(layoutMode: WorkspaceLayoutMode): void {
-  const panel = required(previewWorkspace, '[data-preview-controls-panel]', HTMLElement);
-  const host =
-    layoutMode === 'desktop'
-      ? required(previewWorkspace, '[data-preview-inspector]', HTMLElement)
-      : required(previewWorkspace, '[data-preview-panel-body]', HTMLElement);
-  if (panel.parentElement === host) {
-    return;
+function nextSheetState(currentState: SheetState): SheetState {
+  return currentState === 'peek' ? 'half' : currentState === 'half' ? 'full' : 'peek';
+}
+
+function setPreviewSheetState(nextState: SheetState): void {
+  const snapPoints = previewSheetSnapPoints();
+  applyPreviewSheetSnapPointVariables(snapPoints);
+  previewSheetMotionState = createSheetMotionState(nextState, snapPoints);
+  applyPreviewSheetState(nextState);
+}
+
+function applyPreviewSheetState(nextState: SheetState): void {
+  const surface = required(previewWorkspace, '[data-preview-control-surface]', HTMLElement);
+  const toggle = required(surface, '[data-preview-panel-toggle]', HTMLButtonElement);
+  const controlsScroll = required(surface, '[data-preview-controls-scroll]', HTMLElement);
+  previewSheetState = nextState;
+  surface.dataset.previewSheetState = nextState;
+  const controlsShouldBeHidden = workspaceLayoutMode !== 'desktop' && nextState === 'peek';
+  if (
+    controlsShouldBeHidden &&
+    document.activeElement instanceof HTMLElement &&
+    controlsScroll.contains(document.activeElement)
+  ) {
+    toggle.focus({ preventScroll: true });
   }
-  const activeElement = document.activeElement;
-  const restoreFocus =
-    activeElement instanceof HTMLElement && panel.contains(activeElement) ? activeElement : null;
-  host.append(panel);
-  restoreFocus?.focus({ preventScroll: true });
-  if (layoutMode === 'desktop') {
-    const toggle = required(previewWorkspace, '[data-preview-panel-toggle]', HTMLButtonElement);
-    const body = required(previewWorkspace, '[data-preview-panel-body]', HTMLElement);
-    toggle.setAttribute('aria-expanded', 'true');
-    body.hidden = false;
-  }
+  controlsScroll.hidden = controlsShouldBeHidden;
+  toggle.setAttribute('aria-expanded', String(nextState !== 'peek'));
+  toggle.setAttribute(
+    'aria-label',
+    nextState === 'peek'
+      ? '展开预览设置'
+      : nextState === 'half'
+        ? '展开全部预览设置'
+        : '收起预览设置',
+  );
+}
+
+function recalculatePreviewSheetMotion(): void {
+  const surface = required(previewWorkspace, '[data-preview-control-surface]', HTMLElement);
+  const snapPoints = previewSheetSnapPoints();
+  applyPreviewSheetSnapPointVariables(snapPoints);
+  previewSheetMotionState = previewSheetMotionState
+    ? reduceSheetMotion(previewSheetMotionState, { type: 'recalculate', snapPoints })
+    : createSheetMotionState(previewSheetState, snapPoints);
+  surface.style.removeProperty('--preview-sheet-height');
+  delete surface.dataset.previewSheetDragging;
+  applyPreviewSheetState(previewSheetMotionState.stableState);
+}
+
+function applyPreviewSheetSnapPointVariables(snapPoints: SheetSnapPoints): void {
+  previewWorkspace.style.setProperty('--preview-sheet-peek-height', `${String(snapPoints.peek)}px`);
+  previewWorkspace.style.setProperty('--preview-sheet-half-height', `${String(snapPoints.half)}px`);
+  previewWorkspace.style.setProperty('--preview-sheet-full-height', `${String(snapPoints.full)}px`);
 }
 
 function setSheetState(nextState: SheetState): void {
@@ -3386,11 +3596,15 @@ function recalculateSheetMotion(): void {
 }
 
 function handleVisualViewportChange(): void {
+  recalculatePreviewSheetMotion();
   recalculateSheetMotion();
   scheduleSelectionContextPosition();
 }
 
 function applySheetSnapPointVariables(snapPoints: SheetSnapPoints): void {
+  patternWorkspace.style.setProperty('--sheet-peek-height', `${String(snapPoints.peek)}px`);
+  patternWorkspace.style.setProperty('--sheet-half-height', `${String(snapPoints.half)}px`);
+  patternWorkspace.style.setProperty('--sheet-full-height', `${String(snapPoints.full)}px`);
   workspaceSheet.style.setProperty('--sheet-peek-height', `${String(snapPoints.peek)}px`);
   workspaceSheet.style.setProperty('--sheet-half-height', `${String(snapPoints.half)}px`);
   workspaceSheet.style.setProperty('--sheet-full-height', `${String(snapPoints.full)}px`);
@@ -3461,6 +3675,39 @@ function selectedBoardSize(): { readonly rows: number; readonly columns: number 
   );
 }
 
+function previewSheetSnapPoints(): SheetSnapPoints {
+  const viewportHeight = Math.max(
+    12,
+    previewWorkspace.clientHeight ||
+      previewWorkspace.parentElement?.clientHeight ||
+      window.innerHeight ||
+      12,
+  );
+  const surface = required(previewWorkspace, '[data-preview-control-surface]', HTMLElement);
+  const header = required(surface, '[data-preview-sheet-drag-region]', HTMLElement);
+  const actionDock = required(surface, '.preview-action-dock', HTMLElement);
+  const measuredPeekHeight = Math.ceil(
+    header.getBoundingClientRect().height + actionDock.getBoundingClientRect().height,
+  );
+  const visualViewport = window.visualViewport;
+  const rawKeyboardHeight = visualViewport
+    ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
+    : 0;
+  const keyboardHeight = Math.min(Math.max(0, viewportHeight - 12), rawKeyboardHeight);
+  previewWorkspace.style.setProperty(
+    '--preview-sheet-keyboard-offset',
+    `${String(rawKeyboardHeight)}px`,
+  );
+  const isLowLandscape = viewportHeight <= 440 && window.innerWidth > window.innerHeight;
+  return calculateSheetSnapPoints({
+    viewportHeight,
+    peekContentHeight: Math.max(isLowLandscape ? 88 : 124, measuredPeekHeight),
+    keyboardHeight,
+    topGap: 8,
+    halfRatio: 0.48,
+  });
+}
+
 function sheetSnapPoints(): SheetSnapPoints {
   const viewportHeight = Math.max(240, patternWorkspace.clientHeight || window.innerHeight || 240);
   const visualViewport = window.visualViewport;
@@ -3468,6 +3715,7 @@ function sheetSnapPoints(): SheetSnapPoints {
     ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
     : 0;
   const keyboardHeight = Math.min(viewportHeight - 160, rawKeyboardHeight);
+  patternWorkspace.style.setProperty('--sheet-keyboard-offset', `${String(rawKeyboardHeight)}px`);
   return calculateSheetSnapPoints({
     viewportHeight,
     peekContentHeight: 144,

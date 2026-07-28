@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { calculateStatistics, type BeadCell, type BeadProject } from '../src/domain/project';
-import { computePreviewCanvasLayout } from '../src/features/preview-workspace/previewRenderer';
+import {
+  computePreviewCanvasLayout,
+  computePreviewFrameSize,
+} from '../src/features/preview-workspace/previewRenderer';
 import {
   formatPreviewDoneStatus,
   formatPreviewSummary,
@@ -100,4 +103,20 @@ test('preview canvas layout fits an integer cell grid into the container and cen
   assert.equal(tight.gridWidth, 300);
   assert.throws(() => computePreviewCanvasLayout(0, 100, 48, 24), /容器尺寸/u);
   assert.throws(() => computePreviewCanvasLayout(100, 100, 0, 24), /行列/u);
+});
+
+test('preview frame preserves the project aspect ratio inside portrait and landscape slots', () => {
+  assert.deepEqual(computePreviewFrameSize(674, 900, 48, 31), {
+    width: 674,
+    height: 435,
+  });
+  assert.deepEqual(computePreviewFrameSize(900, 320, 48, 31), {
+    width: 495,
+    height: 320,
+  });
+  assert.deepEqual(computePreviewFrameSize(420, 700, 31, 48), {
+    width: 420,
+    height: 650,
+  });
+  assert.throws(() => computePreviewFrameSize(0, 100, 48, 31), /容器尺寸/u);
 });

@@ -10,9 +10,28 @@ export interface PreviewCanvasLayout {
   readonly canvasHeight: number;
 }
 
+export interface PreviewFrameSize {
+  readonly width: number;
+  readonly height: number;
+}
+
 const CHECKER_LIGHT = '#e8ebe9';
 const CHECKER_DARK = '#cfd6d2';
 const FALLBACK_COLOR = '#b9c2bd';
+
+export function computePreviewFrameSize(
+  containerWidth: number,
+  containerHeight: number,
+  columns: number,
+  rows: number,
+): PreviewFrameSize {
+  assertPreviewDimensions(containerWidth, containerHeight, columns, rows);
+  const scale = Math.min(containerWidth / columns, containerHeight / rows);
+  return Object.freeze({
+    width: Math.max(1, Math.floor(columns * scale)),
+    height: Math.max(1, Math.floor(rows * scale)),
+  });
+}
 
 export function computePreviewCanvasLayout(
   containerWidth: number,
@@ -20,17 +39,7 @@ export function computePreviewCanvasLayout(
   columns: number,
   rows: number,
 ): PreviewCanvasLayout {
-  if (
-    !Number.isFinite(containerWidth) ||
-    !Number.isFinite(containerHeight) ||
-    containerWidth <= 0 ||
-    containerHeight <= 0
-  ) {
-    throw new Error('预览画布容器尺寸必须是正数。');
-  }
-  if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1) {
-    throw new Error('预览矩阵行列必须是正整数。');
-  }
+  assertPreviewDimensions(containerWidth, containerHeight, columns, rows);
   const cellSize = Math.max(
     1,
     Math.floor(Math.min(containerWidth / columns, containerHeight / rows)),
@@ -46,6 +55,25 @@ export function computePreviewCanvasLayout(
     canvasWidth: Math.floor(containerWidth),
     canvasHeight: Math.floor(containerHeight),
   });
+}
+
+function assertPreviewDimensions(
+  containerWidth: number,
+  containerHeight: number,
+  columns: number,
+  rows: number,
+): void {
+  if (
+    !Number.isFinite(containerWidth) ||
+    !Number.isFinite(containerHeight) ||
+    containerWidth <= 0 ||
+    containerHeight <= 0
+  ) {
+    throw new Error('预览画布容器尺寸必须是正数。');
+  }
+  if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1) {
+    throw new Error('预览矩阵行列必须是正整数。');
+  }
 }
 
 export function drawPatternPreview(

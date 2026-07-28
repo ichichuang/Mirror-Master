@@ -1,11 +1,15 @@
 import type { BeadProject, ProjectStatistics } from '../../domain/project';
-import { clearPatternPreview, drawPatternPreview } from './previewRenderer';
+import {
+  clearPatternPreview,
+  computePreviewFrameSize,
+  drawPatternPreview,
+} from './previewRenderer';
 import { formatPreviewDoneStatus, formatPreviewSummary } from './previewSummary';
 
 export interface PreviewResultViewInput {
   readonly project: BeadProject | null;
   readonly statistics: ProjectStatistics | null;
-  readonly hasCurrentProject: boolean;
+  readonly canReturnToEditor: boolean;
   readonly generationActive: boolean;
 }
 
@@ -29,10 +33,13 @@ export interface PreviewViewController {
 export function createPreviewView(options: PreviewViewOptions): PreviewViewController {
   const { root } = options;
   const canvas = required(root, '[data-preview-canvas]') as HTMLCanvasElement;
+  const canvasSlot = required(root, '[data-preview-canvas-slot]') as HTMLElement;
+  const canvasStack = required(root, '[data-preview-canvas-stack]') as HTMLElement;
   const emptyHint = required(root, '[data-preview-empty]') as HTMLElement;
   const badge = required(root, '[data-preview-badge]') as HTMLElement;
   const status = required(root, '[data-preview-status]') as HTMLElement;
   const summary = required(root, '[data-preview-summary]') as HTMLElement;
+  const sheetSummary = required(root, '[data-preview-sheet-summary]') as HTMLElement;
   const estimate = required(root, '[data-color-count-estimate]') as HTMLElement;
   const editButton = required(root, '[data-edit-pattern]') as HTMLButtonElement;
   const returnEditorButton = required(root, '[data-return-editor]') as HTMLButtonElement;
@@ -48,6 +55,8 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
       if (status.textContent !== text) {
         status.textContent = text;
       }
+      status.dataset.state =
+        text.length === 0 ? 'empty' : hasResult && showBadge ? 'live-only' : 'message';
       badge.hidden = !showBadge;
       if (showBadge) {
         badge.textContent = text;
@@ -63,9 +72,11 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
       if (input.project && input.statistics) {
         summary.hidden = false;
         summary.textContent = formatPreviewSummary(input.project, input.statistics);
+        sheetSummary.textContent = '大小、颜色与风格';
       } else {
         summary.hidden = true;
         summary.textContent = '';
+        sheetSummary.textContent = '调整图案大小、颜色与风格';
       }
       updateEstimate(input.statistics?.usedColorCount ?? null);
       if (input.project && input.statistics && !input.generationActive) {
@@ -77,10 +88,11 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
         if (status.textContent !== doneText) {
           status.textContent = doneText;
         }
+        status.dataset.state = 'done';
         badge.hidden = true;
       }
       editButton.disabled = input.project === null;
-      returnEditorButton.hidden = !input.hasCurrentProject;
+      returnEditorButton.hidden = !input.canReturnToEditor;
     },
     updateEstimate,
     applyCompareView(view: 'original' | 'pattern'): void {
@@ -97,9 +109,23 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
   function drawPreview(project: BeadProject | null): void {
     lastProject = project;
     if (!project) {
+      canvasStack.style.removeProperty('inline-size');
+      canvasStack.style.removeProperty('block-size');
       clearPatternPreview(canvas);
       emptyHint.hidden = false;
       return;
+    }
+    const slotWidth = canvasSlot.clientWidth;
+    const slotHeight = canvasSlot.clientHeight;
+    if (slotWidth > 0 && slotHeight > 0) {
+      const frame = computePreviewFrameSize(
+        slotWidth,
+        slotHeight,
+        project.grid.columns,
+        project.grid.rows,
+      );
+      canvasStack.style.inlineSize = `${String(frame.width)}px`;
+      canvasStack.style.blockSize = `${String(frame.height)}px`;
     }
     emptyHint.hidden = true;
     drawPatternPreview(canvas, project.cells, options.colorHexById);

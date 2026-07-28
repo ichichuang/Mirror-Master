@@ -5,6 +5,7 @@ import test from 'node:test';
 import { renderApp } from '../src/app';
 
 const markup = renderApp();
+const mainSource = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
 const pageCss = readFileSync(new URL('../src/styles/page.css', import.meta.url), 'utf8');
 const vaadinThemeCss = readFileSync(
   new URL('../src/styles/vaadin-theme.css', import.meta.url),
@@ -141,6 +142,7 @@ test('preview is result-first with comparison controls and no generation button'
   assert.doesNotMatch(preview, /生成图纸/u);
   assert.equal(countMatches(preview, /data-edit-pattern/g), 1);
   assert.match(preview, /编辑图纸/u);
+  assert.match(preview, /data-preview-canvas-slot/u);
   assert.match(preview, /data-preview-canvas/u);
   assert.match(preview, /data-preview-summary[^>]*hidden/u);
   assert.match(preview, /data-preview-status[^>]*role="status"[^>]*aria-live="polite"/u);
@@ -149,14 +151,17 @@ test('preview is result-first with comparison controls and no generation button'
   assert.match(preview, /value="original"[^>]*label="原图"|label="原图"/u);
   assert.match(preview, /label="拼豆"[^>]*checked|checked[^>]*label="拼豆"/u);
   assert.match(preview, /data-hold-original/u);
-  assert.match(preview, /按住看原图/u);
+  assert.match(preview, /按住对比/u);
   assert.match(preview, /data-preview-original-view[^>]*hidden/u);
   assert.match(preview, /data-crop-canvas/u);
   assert.match(preview, /data-rotate-left/u);
   assert.match(preview, /data-rotate-right/u);
-  assert.match(preview, /data-preview-inspector/u);
-  assert.match(preview, /data-preview-panel-body/u);
-  assert.match(preview, /data-preview-panel-toggle[^>]*aria-expanded="true"/u);
+  assert.equal(countMatches(preview, /data-preview-control-surface/g), 1);
+  assert.match(preview, /data-preview-control-surface[\s\S]*data-preview-sheet-state="peek"/u);
+  assert.match(preview, /data-preview-sheet-drag-region/u);
+  assert.match(preview, /data-preview-controls-scroll[^>]*hidden/u);
+  assert.match(preview, /data-preview-panel-toggle[\s\S]*aria-expanded="false"/u);
+  assert.doesNotMatch(preview, /data-preview-inspector|data-preview-panel-body/u);
 });
 
 test('renderApp uses Vaadin selectors and dialogs without legacy overlay or mobile hosts', () => {
@@ -164,7 +169,8 @@ test('renderApp uses Vaadin selectors and dialogs without legacy overlay or mobi
   assert.match(markup, /<vaadin-select\b/u);
   assert.match(markup, /data-available-color-dialog/u);
   assert.match(markup, /data-confirmation-dialog/u);
-  assert.match(markup, /data-preview-controls-panel/u);
+  assert.equal(countMatches(markup, /data-preview-control-surface/g), 1);
+  assert.equal(countMatches(markup, /data-preview-controls-scroll/g), 1);
   assert.doesNotMatch(markup, /data-overlay-root/u);
   assert.doesNotMatch(markup, /data-mobile-stage-host/u);
   assert.doesNotMatch(markup, /data-prepare-picker-surface/u);
@@ -320,6 +326,116 @@ test('mobile sheet states use the shared height variable and disable drag transi
     pageCss,
     /\.workspace-sheet\[data-sheet-dragging='true'\]\s*\{[^}]*transition:\s*none/u,
   );
+});
+
+test('preview uses one responsive three-state control surface with isolated scrolling and actions', () => {
+  assert.match(
+    pageCss,
+    /\.preview-control-surface\s*\{[\s\S]*position:\s*absolute;[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.preview-control-surface\s*\{[\s\S]*bottom:\s*var\(--preview-sheet-keyboard-offset\);/u,
+  );
+  for (const state of ['peek', 'half', 'full']) {
+    assert.match(
+      pageCss,
+      new RegExp(
+        `\\.preview-control-surface\\[data-preview-sheet-state='${state}'\\]\\s*\\{[^}]*--preview-sheet-height:`,
+        'u',
+      ),
+    );
+  }
+  assert.match(
+    pageCss,
+    /\.preview-control-surface\[data-preview-sheet-dragging='true'\]\s*\{[^}]*transition:\s*none/u,
+  );
+  assert.match(
+    pageCss,
+    /\.preview-controls-scroll\s*\{[\s\S]*container-type:\s*inline-size;[\s\S]*overflow:\s*auto;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.preview-canvas-column\s*\{[\s\S]*padding:[^;]*var\(--preview-sheet-peek-height\)[^;]*;[\s\S]*overflow:\s*hidden;/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(orientation:\s*landscape\) and \(max-width:\s*1023px\) and \(max-height:\s*500px\)/u,
+  );
+  const actionDockRule = pageCss.match(/\.preview-action-dock\s*\{([^}]*)\}/u)?.[1] ?? '';
+  assert.doesNotMatch(actionDockRule, /position:\s*sticky/u);
+  assert.doesNotMatch(actionDockRule, /margin-inline:\s*calc/u);
+});
+
+test('preview sheet preserves focus and reachability across breakpoints, keyboards, and flicks', () => {
+  assert.match(
+    mainSource,
+    /crossingDesktopBoundary && previewFocusWasInSettings[\s\S]*previewSheetState = 'half'/u,
+  );
+  assert.match(
+    mainSource,
+    /const controlsShouldBeHidden = workspaceLayoutMode !== 'desktop' && nextState === 'peek'[\s\S]*controlsScroll\.hidden = controlsShouldBeHidden/u,
+  );
+  assert.match(
+    pageCss,
+    /\.preview-workspace\[data-preview-layout='desktop'\] \.preview-sheet-header\s*\{[^}]*display:\s*none/u,
+  );
+  assert.doesNotMatch(
+    pageCss,
+    /\.preview-control-surface\[data-preview-sheet-state='peek'\] \.preview-controls-scroll/u,
+  );
+  assert.match(mainSource, /--preview-sheet-keyboard-offset'[\s\S]*String\(rawKeyboardHeight\)/u);
+  assert.match(mainSource, /Math\.abs\(releaseDeltaY\) > 0\.5[\s\S]*else if \(elapsed > 80\)/u);
+});
+
+test('preview comparison and preset cards adapt without global radio width pollution', () => {
+  assert.doesNotMatch(
+    vaadinThemeCss,
+    /vaadin-radio-group\s*>\s*vaadin-radio-button[\s\S]*inline-size:\s*100%/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.compare-switch vaadin-radio-button::part\(radio\)\s*\{[\s\S]*opacity:\s*0;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.compare-switch::part\(group-field\)\s*\{[\s\S]*grid-template-columns:\s*repeat\(2,/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.preset-cards-four::part\(group-field\)\s*\{[^}]*grid-template-columns:\s*repeat\(2,/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /@container \(min-width:\s*35rem\)[\s\S]*\.preview-workspace\[data-preview-layout='desktop'\] \.preset-cards-four::part\(group-field\)[\s\S]*grid-template-columns:\s*repeat\(4,/u,
+  );
+});
+
+test('preview and editor reserve visible geometry and expose only valid return actions', () => {
+  assert.match(
+    pageCss,
+    /\.preview-canvas-slot\s*\{[^}]*place-items:\s*center;[^}]*overflow:\s*hidden;/u,
+  );
+  assert.match(pageCss, /\.preview-status\[data-state='done'\],[\s\S]*clip-path:\s*inset\(50%\)/u);
+  assert.match(
+    pageCss,
+    /\.canvas-workspace\s*\{[^}]*padding-bottom:\s*calc\(var\(--sheet-peek-height\) \+ var\(--sheet-keyboard-offset\)\)/u,
+  );
+  assert.match(pageCss, /\.workspace-sheet\s*\{[\s\S]*bottom:\s*var\(--sheet-keyboard-offset\);/u);
+  assert.match(
+    pageCss,
+    /\.sheet-handle\s*\{[^}]*left:\s*50%;[^}]*transform:\s*translateX\(-50%\)/u,
+  );
+  assert.match(
+    pageCss,
+    /\.completion-actions\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/u,
+  );
+  assert.match(mainSource, /canReturnToEditor:\s*previewReturnToEditorAvailable/u);
+  const previewEventHandler = mainSource.slice(
+    mainSource.indexOf('function handlePreviewCoordinatorEvent'),
+    mainSource.indexOf('function confirmPreviewAsEditorBaseline'),
+  );
+  assert.doesNotMatch(previewEventHandler, /currentProject\s*=/u);
 });
 
 test('new controls retain touch targets, visible focus, and status surfaces', () => {

@@ -29,6 +29,7 @@
 .ph-arrows-out-simple::before { content: "\E0A6"; }
 .ph-brackets-curly::before { content: "\E860"; }
 .ph-caret-down::before { content: "\E136"; }
+.ph-caret-up::before { content: "\E13C"; }
 .ph-check::before { content: "\E182"; }
 .ph-crosshair::before { content: "\E1D6"; }
 .ph-eraser::before { content: "\E21E"; }

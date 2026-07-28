@@ -10,56 +10,60 @@ export function renderPreviewWorkspace(): string {
               aria-label="在原图和拼豆预览之间切换"
               data-compare-switch
             >
-              <vaadin-radio-button value="original" label="原图"></vaadin-radio-button>
               <vaadin-radio-button value="pattern" label="拼豆" checked></vaadin-radio-button>
+              <vaadin-radio-button value="original" label="原图"></vaadin-radio-button>
             </vaadin-radio-group>
             <button class="secondary-button hold-original-button" type="button" data-hold-original>
               <i class="ph ph-eye" aria-hidden="true"></i>
-              按住看原图
+              按住对比
             </button>
             <button class="text-button" type="button" data-prepare-replace>更换图片</button>
           </div>
 
-          <div class="preview-canvas-stack" data-preview-canvas-stack>
-            <div class="preview-pattern-view" data-preview-pattern-view>
-              <canvas
-                class="preview-canvas"
-                data-preview-canvas
-                role="img"
-                aria-label="当前拼豆预览"
-              ></canvas>
-              <p class="preview-empty-hint" data-preview-empty>正在读取图片…</p>
-              <span class="preview-status-badge" data-preview-badge hidden>正在更新拼豆预览…</span>
-            </div>
-            <div class="preview-original-view" data-preview-original-view hidden>
-              <div class="crop-frame" data-crop-frame>
-                <canvas data-crop-canvas aria-label="待裁剪的图片"></canvas>
-                <div class="crop-mask" aria-hidden="true"></div>
-                <div
-                  class="crop-selection"
-                  data-crop-selection
-                  data-crop-keyboard-target
-                  aria-describedby="crop-keyboard-help"
-                  aria-label="裁剪范围。使用方向键移动，按住 Alt 加方向键调整大小。"
-                  role="group"
-                  tabindex="0"
+          <div class="preview-canvas-slot" data-preview-canvas-slot>
+            <div class="preview-canvas-stack" data-preview-canvas-stack>
+              <div class="preview-pattern-view" data-preview-pattern-view>
+                <canvas
+                  class="preview-canvas"
+                  data-preview-canvas
+                  role="img"
+                  aria-label="当前拼豆预览"
+                ></canvas>
+                <p class="preview-empty-hint" data-preview-empty>正在读取图片…</p>
+                <span class="preview-status-badge" data-preview-badge hidden
+                  >正在更新拼豆预览…</span
                 >
-                  <span class="crop-handle crop-handle-nw" aria-hidden="true"></span>
-                  <span class="crop-handle crop-handle-ne" aria-hidden="true"></span>
-                  <span class="crop-handle crop-handle-sw" aria-hidden="true"></span>
-                  <span class="crop-handle crop-handle-se" aria-hidden="true"></span>
-                </div>
               </div>
-              <div class="crop-actions" aria-label="图片方向">
-                <button class="secondary-button" type="button" data-rotate-left>
-                  <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
-                  向左旋转
-                </button>
-                <button class="secondary-button" type="button" data-rotate-right>
-                  <i class="ph ph-arrow-clockwise" aria-hidden="true"></i>
-                  向右旋转
-                </button>
-                <span data-image-summary></span>
+              <div class="preview-original-view" data-preview-original-view hidden>
+                <div class="crop-frame" data-crop-frame>
+                  <canvas data-crop-canvas aria-label="待裁剪的图片"></canvas>
+                  <div class="crop-mask" aria-hidden="true"></div>
+                  <div
+                    class="crop-selection"
+                    data-crop-selection
+                    data-crop-keyboard-target
+                    aria-describedby="crop-keyboard-help"
+                    aria-label="裁剪范围。使用方向键移动，按住 Alt 加方向键调整大小。"
+                    role="group"
+                    tabindex="0"
+                  >
+                    <span class="crop-handle crop-handle-nw" aria-hidden="true"></span>
+                    <span class="crop-handle crop-handle-ne" aria-hidden="true"></span>
+                    <span class="crop-handle crop-handle-sw" aria-hidden="true"></span>
+                    <span class="crop-handle crop-handle-se" aria-hidden="true"></span>
+                  </div>
+                </div>
+                <div class="crop-actions" aria-label="图片方向">
+                  <button class="secondary-button" type="button" data-rotate-left>
+                    <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
+                    向左旋转
+                  </button>
+                  <button class="secondary-button" type="button" data-rotate-right>
+                    <i class="ph ph-arrow-clockwise" aria-hidden="true"></i>
+                    向右旋转
+                  </button>
+                  <span data-image-summary></span>
+                </div>
               </div>
             </div>
           </div>
@@ -68,26 +72,39 @@ export function renderPreviewWorkspace(): string {
           <p class="preview-summary" data-preview-summary hidden></p>
         </div>
 
-        <aside class="preview-inspector" data-preview-inspector aria-label="预览设置">
-          <div class="preview-controls-panel" data-preview-controls-panel>
-            ${renderPreviewControlsPanel()}
-          </div>
-        </aside>
-
-        <section class="preview-panel" data-preview-panel aria-label="预览设置">
-          <header class="preview-panel-header">
+        <aside
+          class="preview-control-surface"
+          data-preview-control-surface
+          data-preview-sheet-state="peek"
+          aria-label="预览设置"
+        >
+          <header class="preview-sheet-header" data-preview-sheet-drag-region>
             <button
-              class="preview-panel-toggle"
+              class="preview-sheet-toggle"
               type="button"
               data-preview-panel-toggle
-              aria-expanded="true"
+              aria-controls="preview-settings-scroll"
+              aria-expanded="false"
+              aria-label="展开预览设置"
             >
-              <span>设置</span>
-              <i class="ph ph-caret-down" aria-hidden="true"></i>
+              <span class="preview-sheet-handle" aria-hidden="true"></span>
+              <span class="preview-sheet-heading">
+                <strong>设置</strong>
+                <small data-preview-sheet-summary>调整图案大小、颜色与风格</small>
+              </span>
+              <i class="ph ph-caret-up" aria-hidden="true"></i>
             </button>
           </header>
-          <div class="preview-panel-body" data-preview-panel-body></div>
-        </section>
+          <div
+            id="preview-settings-scroll"
+            class="preview-controls-scroll"
+            data-preview-controls-scroll
+            hidden
+          >
+            ${renderPreviewControlsPanel()}
+          </div>
+          ${renderPreviewActions()}
+        </aside>
       </div>
     </section>
   `;
@@ -515,10 +532,15 @@ function renderPreviewControlsPanel(): string {
       </div>
     </details>
 
+  `;
+}
+
+function renderPreviewActions(): string {
+  return `
     <div class="preview-action-dock">
       <div class="preview-completion-actions">
         <button class="secondary-button" type="button" data-return-editor hidden>
-          返回编辑
+          返回图纸
         </button>
         <button
           class="primary-button preview-primary"

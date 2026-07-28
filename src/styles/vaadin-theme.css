@@ -130,29 +130,60 @@ vaadin-radio-group::part(group-field) {
 }
 
 .preset-cards-four::part(group-field) {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compare-switch {
+  inline-size: auto;
+  flex: none;
 }
 
 .compare-switch::part(group-field) {
-  display: flex;
-  gap: var(--space-1);
+  display: grid;
+  inline-size: auto;
+  grid-template-columns: repeat(2, minmax(4rem, 1fr));
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: 0.18rem;
+  gap: 0.12rem;
+  background: var(--color-background-subtle);
 }
 
 .compare-switch vaadin-radio-button {
+  inline-size: auto;
+  min-inline-size: 0;
   min-height: 2.75rem;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 3px);
+  padding: 0 var(--space-2);
   color: var(--color-text-primary);
-  background: var(--color-background-panel);
+  background: transparent;
   cursor: pointer;
-  --vaadin-radio-button-gap: 0.35rem;
+  --vaadin-radio-button-gap: 0;
 }
 
 .compare-switch vaadin-radio-button[checked] {
-  border-color: var(--color-action-primary);
-  color: var(--color-text-on-primary);
-  background: var(--color-action-primary);
+  color: var(--color-action-primary-hover);
+  background: var(--color-action-primary-soft);
+  box-shadow: inset 0 0 0 1px var(--color-action-primary);
+}
+
+.compare-switch vaadin-radio-button::part(radio) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.compare-switch vaadin-radio-button::part(label) {
+  display: grid;
+  inline-size: 100%;
+  min-inline-size: 0;
+  place-items: center;
+  margin: 0;
+  color: inherit;
+  font-size: 0.8rem;
+  font-weight: 720;
 }
 
 .compare-switch vaadin-radio-button[focus-ring] {
@@ -169,11 +200,11 @@ vaadin-radio-group::part(group-field) {
   gap: var(--space-2);
 }
 
-vaadin-radio-group > vaadin-radio-button,
 vaadin-radio-button[theme~='card'],
 .mode-preference vaadin-radio-button,
 .sampling-options vaadin-radio-button,
-.export-template-options vaadin-radio-button {
+.export-template-options vaadin-radio-button,
+.palette-scope vaadin-radio-button {
   inline-size: 100%;
   min-inline-size: 0;
 }
@@ -238,7 +269,9 @@ vaadin-radio-button[theme~='card']::part(label),
 .preset-card-content > span {
   display: grid;
   min-inline-size: 0;
+  justify-items: center;
   gap: 0.2rem;
+  text-align: center;
 }
 
 .preset-card strong {
@@ -254,6 +287,9 @@ vaadin-radio-button[theme~='card']::part(label),
 }
 
 .preset-card-content > i {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
   color: transparent;
 }
 
@@ -288,8 +324,8 @@ vaadin-radio-button[theme~='card']::part(label),
   display: grid;
   inline-size: 100%;
   min-inline-size: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
   gap: var(--space-1);
 }
 
@@ -476,6 +512,12 @@ vaadin-confirm-dialog[theme~='destructive-confirmation']::part(reject-button) {
 
   .preset-cards-three > .preset-card:nth-of-type(3) {
     grid-column: 1 / -1;
+  }
+}
+
+@container (min-width: 35rem) {
+  .preview-workspace[data-preview-layout='desktop'] .preset-cards-four::part(group-field) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
