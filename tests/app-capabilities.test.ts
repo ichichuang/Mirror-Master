@@ -18,6 +18,14 @@ const VALID_CAPABILITIES = {
     maximumBytes: 20 * 1024 * 1024,
     maximumDecodedPixels: 25_000_000,
   },
+  backgroundRemoval: {
+    contractVersion: '1.0',
+    available: true,
+    outputMimeType: 'image/png',
+    maximumDecodedPixels: 12_000_000,
+    maximumConcurrentInferences: 1,
+    unavailableReason: null,
+  },
   grid: {
     minimumRows: 1,
     maximumRows: 300,
@@ -68,6 +76,14 @@ test('capabilities parser returns a typed versioned contract', () => {
   assert.equal(capabilities.contractVersion, CAPABILITIES_CONTRACT_VERSION);
   assert.deepEqual(capabilities.schemaVersions, ['1.0']);
   assert.equal(capabilities.upload.maximumDecodedPixels, 25_000_000);
+  assert.deepEqual(capabilities.backgroundRemoval, {
+    contractVersion: '1.0',
+    available: true,
+    outputMimeType: 'image/png',
+    maximumDecodedPixels: 12_000_000,
+    maximumConcurrentInferences: 1,
+    unavailableReason: null,
+  });
   assert.equal(capabilities.beads.pitchMustNotBeSmallerThanDiameter, true);
   assert.deepEqual(capabilities.boards.fixedPresets.standardSquare, {
     rows: 29,
@@ -78,6 +94,28 @@ test('capabilities parser returns a typed versioned contract', () => {
   assert.equal(capabilities.pdf.physicalScale, 'fit-with-declared-scale');
   assert.equal(capabilities.pdf.maximumPages, 500);
   assert.equal(capabilities.pdf.maximumRasterPixels, 1_100_000_000);
+});
+
+test('missing background removal capability disables only that feature', () => {
+  const { backgroundRemoval: _backgroundRemoval, ...withoutBackgroundRemoval } = VALID_CAPABILITIES;
+  const capabilities = parseAppCapabilities(withoutBackgroundRemoval);
+
+  assert.equal(capabilities.backgroundRemoval.available, false);
+  assert.equal(capabilities.backgroundRemoval.unavailableReason, 'MODEL_MISSING');
+  assert.equal(capabilities.upload.maximumBytes, 20 * 1024 * 1024);
+});
+
+test('invalid background removal capability disables only that feature', () => {
+  const capabilities = parseAppCapabilities({
+    ...VALID_CAPABILITIES,
+    backgroundRemoval: {
+      ...VALID_CAPABILITIES.backgroundRemoval,
+      contractVersion: '2.0',
+    },
+  });
+
+  assert.equal(capabilities.backgroundRemoval.available, false);
+  assert.equal(capabilities.backgroundRemoval.unavailableReason, 'MODEL_INVALID');
 });
 
 test('capabilities parser rejects malformed limits and unsupported values', () => {

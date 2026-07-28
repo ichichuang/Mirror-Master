@@ -1,0 +1,4 @@
+*.onnx
+*.part
+!.gitignore
+!background-removal-model.json

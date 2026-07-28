@@ -9,6 +9,10 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app import limits
+from app.background_removal import (
+    create_background_removed_png,
+    get_background_removal_capability,
+)
 from .generated_brand import PRODUCT_NAME
 from app.errors import ApiError
 from app.generated_palettes import (
@@ -114,6 +118,7 @@ async def capabilities() -> dict[str, object]:
         "pngTemplates": list(limits.PNG_TEMPLATES),
         "pdf": limits.PDF_PRODUCTION_CONTRACT,
         "gridMirrorAxes": list(limits.GRID_MIRROR_AXES),
+        "backgroundRemoval": get_background_removal_capability(),
     }
 
 
@@ -133,6 +138,16 @@ async def generate_pattern(
 ) -> JSONResponse:
     result = await create_pattern_project(file, settings)
     return JSONResponse(result.model_dump(by_alias=True))
+
+
+@app.post("/api/image/remove-background")
+async def remove_image_background(
+    file: Annotated[UploadFile, File()],
+) -> Response:
+    return Response(
+        await create_background_removed_png(file),
+        media_type="image/png",
+    )
 
 
 @app.post("/api/pattern/export")

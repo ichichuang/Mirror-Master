@@ -107,8 +107,18 @@ async def read_upload(upload: UploadFile) -> bytes:
 
 
 def decode_normalized_rgba(
-    image_bytes: bytes, declared_mime: str
+    image_bytes: bytes,
+    declared_mime: str,
+    *,
+    maximum_decoded_pixels: int | None = None,
+    pixel_error_code: str = "IMAGE_PIXEL_LIMIT_EXCEEDED",
+    pixel_error_message: str = "解码后的图片像素数量超过允许上限。",
 ) -> Image.Image:
+    pixel_limit = (
+        limits.MAX_DECODED_PIXELS
+        if maximum_decoded_pixels is None
+        else maximum_decoded_pixels
+    )
     try:
         with Image.open(io.BytesIO(image_bytes)) as decoded:
             if decoded.format not in ALLOWED_IMAGE_FORMATS[declared_mime]:
@@ -118,11 +128,11 @@ def decode_normalized_rgba(
                     "声明的图片类型与实际解码格式不一致。",
                 )
             width, height = decoded.size
-            if width * height > limits.MAX_DECODED_PIXELS:
+            if width * height > pixel_limit:
                 raise ApiError(
                     413,
-                    "IMAGE_PIXEL_LIMIT_EXCEEDED",
-                    "解码后的图片像素数量超过允许上限。",
+                    pixel_error_code,
+                    pixel_error_message,
                 )
             decoded.load()
             normalized = ImageOps.exif_transpose(decoded)

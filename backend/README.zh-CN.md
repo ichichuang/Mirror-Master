@@ -11,6 +11,7 @@
 - `GET /api/health`
 - `GET /api/capabilities`
 - `GET /api/palettes`
+- `POST /api/image/remove-background`
 - `POST /api/pattern/generate`
 - `POST /api/pattern/export`
 - `POST /api/grid/detect`
@@ -40,6 +41,20 @@ docker compose up -d --build
 ```
 
 容器内 Uvicorn 监听 `0.0.0.0:8000`，不启用 reload，也不输出访问日志。最终网络和发布方式由运维在 owner 本地验收后决定。
+
+## `POST /api/image/remove-background`
+
+该接口只接受一个 `multipart/form-data` 的 `file` 字段，支持经过真实 MIME 验证的 JPEG、PNG 或 WebP。上传仍使用全局 20 MiB 字节上限，但模型推理使用独立的 1200 万解码像素上限与 1 个并发槽位。EXIF 方向只归一化一次；成功响应为与归一化源图同尺寸的内存 RGBA PNG，并设置 `Cache-Control: no-store`。
+
+推理引擎固定为 `rembg==2.0.76`、`onnxruntime==1.23.2` CPU 与项目 manifest 中的 `isnet-general-use`。进程内只建立并复用一个 session，同步 ONNX 推理在线程池中执行，不阻塞 FastAPI event loop。模型不会在用户请求期间下载，也不读取 `~/.u2net`。
+
+模型权重不进入 Git、Docker build context 或运行镜像。维护者需要在启动服务前显式执行：
+
+```bash
+backend/.venv/bin/python scripts/fetch-background-removal-model.py
+```
+
+脚本根据 `backend/models/background-removal-model.json` 下载到同目录临时 `.part` 文件，逐字节校验大小和 SHA-256 后原子安装。模型缺失、校验失败或 session 初始化失败时，`GET /api/capabilities` 的 `backgroundRemoval.available` 为 `false`，接口返回稳定的 `503 BACKGROUND_REMOVAL_UNAVAILABLE`，不会回退到第三方服务或伪结果。
 
 ## `POST /api/grid/detect`
 

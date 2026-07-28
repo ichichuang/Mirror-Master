@@ -26,6 +26,8 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+backend/models/*.onnx
+backend/models/*.part
 
 # OS and editor state
 .DS_Store

@@ -24,6 +24,27 @@ import {
   loadAppCapabilities,
   type AppCapabilities,
 } from './features/app-capabilities/capabilities';
+import {
+  createBackgroundRemovalCoordinator,
+  type BackgroundRemovalCoordinator,
+  type BackgroundRemovalCoordinatorEvent,
+  type BackgroundRemovalRequest,
+} from './features/background-removal/backgroundRemovalCoordinator';
+import {
+  activateBackgroundRemovalVariant,
+  guardBackgroundRemovalChange,
+  resolveBackgroundRemovalActionState,
+} from './features/background-removal/backgroundRemovalFlow';
+import {
+  ImageTransformApiError,
+  removeImageBackground,
+} from './features/background-removal/client';
+import {
+  createSourceImageSession,
+  type SelectedImage,
+  type SourceImageSession,
+  type SourceImageVariant,
+} from './features/background-removal/sourceImageSession';
 import { normalizeCropPercent } from './features/crop-controls/cropControls';
 import {
   mirrorGrid,
@@ -188,14 +209,6 @@ import {
 
 type AppStage = 'start' | 'preview' | 'editor' | 'chart';
 type InspectorPanel = 'tools' | 'palette' | 'materials' | 'settings';
-interface SelectedImage {
-  readonly file: File;
-  readonly objectUrl: string;
-  readonly width: number;
-  readonly height: number;
-  readonly image: HTMLImageElement;
-  readonly mimeType: string;
-}
 
 interface CropPercent {
   readonly x: number;
@@ -292,7 +305,7 @@ let samplingSelection: SamplingSelection = createAutomaticSampling(
   'photo',
   FALLBACK_APP_CAPABILITIES.sampling,
 );
-let selectedImage: SelectedImage | null = null;
+let sourceImageSession: SourceImageSession | null = null;
 let rotation: ImageRotation = 0;
 let cropPercent: CropPercent = { x: 0, y: 0, width: 100, height: 100 };
 let aspectLocked = true;
@@ -306,6 +319,8 @@ let firstPreviewGenerationStarted = false;
 let previewRegenerationTimer: number | null = null;
 let hydratingPreviewControls = false;
 let holdOriginalActive = false;
+let backgroundRemovalStatusState: 'ready' | 'loading' | 'error' = 'ready';
+let backgroundRemovalStatusMessage = '';
 let history: MatrixHistory | null = null;
 let canvasController: PatternCanvasController | null = null;
 let gridContract: GridDetectionContract | null = null;
@@ -375,6 +390,197 @@ const previewCoordinator: PreviewCoordinator = createPreviewCoordinator({
   generate: ({ file, settings }, signal) => generatePattern(file, settings, signal),
   onEvent: handlePreviewCoordinatorEvent,
 });
+
+const backgroundRemovalCoordinator: BackgroundRemovalCoordinator =
+  createBackgroundRemovalCoordinator({
+    remove: createRemovedBackgroundImage,
+    currentSourceSessionId: () => sourceImageSession?.id ?? null,
+    onDiscard: (image) => {
+      objectUrls.revoke(image.objectUrl);
+    },
+    onEvent: handleBackgroundRemovalCoordinatorEvent,
+  });
+
+function activeSourceImage(): SelectedImage | null {
+  return sourceImageSession?.active() ?? null;
+}
+
+function disposeSourceImageSession(): void {
+  backgroundRemovalCoordinator.cancel();
+  sourceImageSession?.dispose();
+  sourceImageSession = null;
+  backgroundRemovalStatusState = 'ready';
+  backgroundRemovalStatusMessage = '';
+  syncBackgroundRemovalAction();
+}
+
+async function createRemovedBackgroundImage(
+  input: BackgroundRemovalRequest,
+  signal: AbortSignal,
+): Promise<SelectedImage> {
+  const output = await removeImageBackground(input.image.file, signal);
+  signal.throwIfAborted();
+
+  const file = new File([output], foregroundFileName(input.image.file.name), {
+    type: 'image/png',
+    lastModified: input.image.file.lastModified,
+  });
+  const objectUrl = objectUrls.create(file);
+  try {
+    const resource = await decodeImageResourceFromObjectUrl(objectUrl);
+    signal.throwIfAborted();
+    if (resource.width !== input.image.width || resource.height !== input.image.height) {
+      throw new ImageTransformApiError(
+        502,
+        'BACKGROUND_REMOVAL_DIMENSIONS_INVALID',
+        '去背景图片尺寸不一致。原图和当前图纸已保留，请稍后重试。',
+      );
+    }
+    return Object.freeze({
+      file,
+      objectUrl,
+      width: resource.width,
+      height: resource.height,
+      image: resource.image,
+      mimeType: 'image/png',
+    });
+  } catch (error) {
+    objectUrls.revoke(objectUrl);
+    throw error;
+  }
+}
+
+function foregroundFileName(fileName: string): string {
+  const baseName = fileName.replace(/\.[^.]+$/u, '').trim() || 'image';
+  return `${baseName}-foreground.png`;
+}
+
+function handleBackgroundRemovalCoordinatorEvent(event: BackgroundRemovalCoordinatorEvent): void {
+  if (event.type === 'started') {
+    setBackgroundRemovalStatus('正在本机去除背景，请稍候…', 'loading');
+    syncBackgroundRemovalAction();
+    return;
+  }
+  if (event.type === 'failed') {
+    const message =
+      event.error instanceof ImageTransformApiError
+        ? event.error.message
+        : '无法完成一键去背景。原图和当前图纸已保留，请稍后重试。';
+    setBackgroundRemovalStatus(message, 'error');
+    syncBackgroundRemovalAction();
+    announce(message);
+    return;
+  }
+
+  const session = sourceImageSession;
+  if (!session) {
+    objectUrls.revoke(event.result.objectUrl);
+    return;
+  }
+  session.cacheForeground(event.result);
+  setBackgroundRemovalStatus('已保留主体；可随时恢复原图。', 'ready');
+  activateSourceVariant('foreground');
+  announce('去背景完成，已更新拼豆预览。');
+}
+
+function requestBackgroundRemovalAction(): void {
+  const session = sourceImageSession;
+  if (!session || !appCapabilities.backgroundRemoval.available) {
+    return;
+  }
+  const hasEditedCells =
+    currentProject !== null &&
+    sourceGenerationRevision !== null &&
+    currentProject.revision !== sourceGenerationRevision;
+  guardBackgroundRemovalChange({
+    hasEditedCells,
+    openConfirmation(request) {
+      openConfirmation({
+        ...request,
+        onContinue() {
+          previewClobberAcknowledged = true;
+          request.onContinue();
+        },
+      });
+    },
+    apply() {
+      const currentSession = sourceImageSession;
+      if (!currentSession || currentSession.id !== session.id) {
+        return;
+      }
+      if (currentSession.hasForeground()) {
+        const variant = currentSession.activeVariant() === 'foreground' ? 'original' : 'foreground';
+        setBackgroundRemovalStatus(
+          variant === 'original'
+            ? '已恢复原图；可再次使用去背景图。'
+            : '已切换到去背景图；可随时恢复原图。',
+          'ready',
+        );
+        activateSourceVariant(variant);
+        return;
+      }
+      backgroundRemovalCoordinator.request({
+        sourceSessionId: currentSession.id,
+        image: currentSession.original,
+      });
+    },
+  });
+}
+
+function activateSourceVariant(variant: SourceImageVariant): void {
+  const session = sourceImageSession;
+  if (!session) return;
+  activateBackgroundRemovalVariant({
+    session,
+    variant,
+    onActiveImage(_image, activeVariant) {
+      required(
+        previewWorkspace,
+        '[data-preview-original-view]',
+        HTMLElement,
+      ).dataset.sourceImageVariant = activeVariant;
+      drawCropPreview();
+      renderCropSelection();
+      updatePrepareSummaries();
+      syncBackgroundRemovalAction();
+    },
+    regenerate() {
+      clearPreviewRegenerationTimer();
+      startPreviewGeneration();
+    },
+  });
+}
+
+function setBackgroundRemovalStatus(message: string, state: 'ready' | 'loading' | 'error'): void {
+  backgroundRemovalStatusMessage = message;
+  backgroundRemovalStatusState = state;
+  const status = required(previewWorkspace, '[data-background-removal-status]', HTMLElement);
+  status.textContent = message;
+  status.dataset.state = state;
+}
+
+function syncBackgroundRemovalAction(): void {
+  const control = required(previewWorkspace, '[data-background-removal-control]', HTMLElement);
+  const action = required(control, '[data-background-removal-action]', HTMLButtonElement);
+  const status = required(control, '[data-background-removal-status]', HTMLElement);
+  const available = appCapabilities.backgroundRemoval.available;
+  const session = sourceImageSession;
+  const busy = backgroundRemovalCoordinator.activeRequestId() !== null;
+  const actionState = resolveBackgroundRemovalActionState({
+    capabilityAvailable: available,
+    hasSource: session !== null,
+    hasForeground: session?.hasForeground() ?? false,
+    activeVariant: session?.activeVariant() ?? 'original',
+    busy,
+  });
+  control.hidden = actionState.hidden;
+  action.disabled = actionState.disabled;
+  action.textContent = actionState.label;
+  status.textContent = backgroundRemovalStatusMessage;
+  status.dataset.state = backgroundRemovalStatusState;
+  const originalView = required(previewWorkspace, '[data-preview-original-view]', HTMLElement);
+  originalView.dataset.sourceImageVariant = session?.activeVariant() ?? 'original';
+}
 
 const previewView: PreviewViewController = createPreviewView({
   root: previewWorkspace,
@@ -562,6 +768,7 @@ async function initializeCapabilities(): Promise<void> {
 
 function applyCapabilitiesToInterface(): void {
   fileInput.accept = appCapabilities.upload.mimeTypes.join(',');
+  syncBackgroundRemovalAction();
   const mimeLabels = appCapabilities.upload.mimeTypes
     .map((mimeType) =>
       mimeType === 'image/jpeg' ? 'JPEG' : mimeType === 'image/webp' ? 'WebP' : 'PNG',
@@ -786,7 +993,7 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
   recommendationRequests.cancel();
   setFileStatus(`正在读取 ${result.file.name}…`, 'loading');
   setPreviewStatus('reading');
-  objectUrls.revokeAll();
+  disposeSourceImageSession();
   const objectUrl = objectUrls.create(result.file);
 
   try {
@@ -797,7 +1004,6 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     }
     if (resource.width * resource.height > appCapabilities.upload.maximumDecodedPixels) {
       objectUrls.revoke(objectUrl);
-      selectedImage = null;
       setFileStatus(
         `图片解码后共有 ${String(resource.width * resource.height)} 像素，超过 ${String(
           appCapabilities.upload.maximumDecodedPixels,
@@ -806,14 +1012,19 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
       );
       return;
     }
-    selectedImage = {
-      file: result.file,
-      objectUrl,
-      width: resource.width,
-      height: resource.height,
-      image: resource.image,
-      mimeType: result.mimeType,
-    };
+    sourceImageSession = createSourceImageSession(
+      {
+        file: result.file,
+        objectUrl,
+        width: resource.width,
+        height: resource.height,
+        image: resource.image,
+        mimeType: result.mimeType,
+      },
+      { revokeObjectUrl: objectUrls.revoke },
+    );
+    setBackgroundRemovalStatus('', 'ready');
+    syncBackgroundRemovalAction();
     rotation = 0;
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
     currentProject = null;
@@ -854,8 +1065,12 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
     if (requestRevision !== loadRevision) {
       return;
     }
-    objectUrls.revoke(objectUrl);
-    selectedImage = null;
+    if (sourceImageSession?.original.objectUrl === objectUrl) {
+      disposeSourceImageSession();
+    } else {
+      objectUrls.revoke(objectUrl);
+    }
+    syncBackgroundRemovalAction();
     setFileStatus('无法读取这张图片，请确认文件没有损坏。', 'error');
   }
 }
@@ -966,8 +1181,7 @@ async function openProjectFile(file: File): Promise<void> {
     if (requestRevision !== loadRevision) {
       return;
     }
-    objectUrls.revokeAll();
-    selectedImage = null;
+    disposeSourceImageSession();
     rotation = project.source.rotation;
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
     mode = project.mode;
@@ -1013,6 +1227,11 @@ async function openProjectFile(file: File): Promise<void> {
 function setupPreview(): void {
   const prepareReplace = required(previewWorkspace, '[data-prepare-replace]', HTMLButtonElement);
   const holdOriginalButton = required(previewWorkspace, '[data-hold-original]', HTMLButtonElement);
+  const backgroundRemovalAction = required(
+    previewWorkspace,
+    '[data-background-removal-action]',
+    HTMLButtonElement,
+  );
   const panelToggle = required(previewWorkspace, '[data-preview-panel-toggle]', HTMLButtonElement);
   const previewControlSurface = required(
     previewWorkspace,
@@ -1093,6 +1312,7 @@ function setupPreview(): void {
   const returnEditorButton = required(previewWorkspace, '[data-return-editor]', HTMLButtonElement);
 
   prepareReplace.addEventListener('click', handleReplaceImageClick);
+  backgroundRemovalAction.addEventListener('click', requestBackgroundRemovalAction);
   holdOriginalButton.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     holdOriginalActive = true;
@@ -1566,7 +1786,7 @@ function setupPreview(): void {
 }
 
 function openPreviewWorkspace(preserveProjectSettings = false): void {
-  if (!selectedImage) {
+  if (!activeSourceImage()) {
     return;
   }
   previewReturnToEditorAvailable = preserveProjectSettings && currentProject !== null;
@@ -1701,10 +1921,11 @@ function openPreviewWorkspace(preserveProjectSettings = false): void {
 }
 
 function drawCropPreview(): void {
-  if (!selectedImage) {
+  const image = activeSourceImage();
+  if (!image) {
     return;
   }
-  drawRotatedCropPreview(previewWorkspace, selectedImage.image, rotation);
+  drawRotatedCropPreview(previewWorkspace, image.image, rotation);
 }
 
 function renderCropSelection(editingInput?: HTMLInputElement): void {
@@ -1712,7 +1933,7 @@ function renderCropSelection(editingInput?: HTMLInputElement): void {
 }
 
 function updatePrepareSummaries(): void {
-  if (!selectedImage) {
+  if (!activeSourceImage()) {
     return;
   }
   const dimensions = rotatedDimensions();
@@ -1851,7 +2072,7 @@ function clearPreviewRegenerationTimer(): void {
 }
 
 function startPreviewGeneration(): void {
-  const image = selectedImage;
+  const image = activeSourceImage();
   if (!image || stage !== 'preview') {
     return;
   }
@@ -2146,7 +2367,7 @@ function setupPatternWorkspace(): void {
       return;
     }
     if (target.closest('[data-return-prepare]')) {
-      if (selectedImage) {
+      if (activeSourceImage()) {
         openPreviewWorkspace(true);
       } else {
         announce('已保存项目不包含源图片，无法重新生成；你仍可继续编辑和导出。');
@@ -2517,8 +2738,8 @@ function openPatternEditor(project: BeadProject): void {
   syncFirstUseHint();
   resetExportSurface();
   for (const button of queryPatternWorkspaceAll('[data-return-prepare]', HTMLButtonElement)) {
-    button.disabled = selectedImage === null;
-    button.title = selectedImage
+    button.disabled = activeSourceImage() === null;
+    button.title = activeSourceImage()
       ? '保留当前矩阵并返回预览调整设置'
       : '已保存项目不包含源图片，无法重新生成';
   }
@@ -3211,7 +3432,7 @@ function setupChartWorkspace(): GridEditorController {
     if (chartResultUrl) {
       const anchor = document.createElement('a');
       anchor.href = chartResultUrl;
-      anchor.download = `${safeDownloadBaseName(selectedImage?.file.name ?? 'chart')}-${chartAxis}-mirror.png`;
+      anchor.download = `${safeDownloadBaseName(activeSourceImage()?.file.name ?? 'chart')}-${chartAxis}-mirror.png`;
       anchor.click();
     }
   });
@@ -3219,22 +3440,23 @@ function setupChartWorkspace(): GridEditorController {
 }
 
 function openChartWorkspace(): void {
-  if (!selectedImage) {
+  const image = activeSourceImage();
+  if (!image) {
     return;
   }
   showStage('chart');
   gridContract = null;
   clearChartResult();
   gridController.setImage({
-    file: selectedImage.file,
-    fileName: selectedImage.file.name,
-    objectUrl: selectedImage.objectUrl,
-    naturalImage: { width: selectedImage.width, height: selectedImage.height },
+    file: image.file,
+    fileName: image.file.name,
+    objectUrl: image.objectUrl,
+    naturalImage: { width: image.width, height: image.height },
   });
 }
 
 async function generateChartMirror(): Promise<void> {
-  const image = selectedImage;
+  const image = activeSourceImage();
   const contract = gridContract;
   if (!image || !contract) {
     return;
@@ -3377,7 +3599,7 @@ function resetToStart(): void {
   firstPreviewGenerationStarted = false;
   mirrorChartIntent = false;
   holdOriginalActive = false;
-  selectedImage = null;
+  disposeSourceImageSession();
   currentSelection = null;
   currentSelectionViewportRect = null;
   selectionTransferMode = null;
@@ -3696,12 +3918,13 @@ function getPalette(paletteId: string) {
 }
 
 function rotatedDimensions(): { readonly width: number; readonly height: number } {
-  if (!selectedImage) {
+  const image = activeSourceImage();
+  if (!image) {
     return { width: 1, height: 1 };
   }
   return rotation === 90 || rotation === 270
-    ? { width: selectedImage.height, height: selectedImage.width }
-    : { width: selectedImage.width, height: selectedImage.height };
+    ? { width: image.height, height: image.width }
+    : { width: image.width, height: image.height };
 }
 
 function selectedBoardSize(): { readonly rows: number; readonly columns: number } {
@@ -3947,6 +4170,7 @@ function cleanup(): void {
   }
   clearPreviewRegenerationTimer();
   previewCoordinator.destroy();
+  backgroundRemovalCoordinator.destroy();
   exportCoordinator.destroy();
   chartMirrorController?.abort();
   recommendationRequests.cancel();
@@ -3976,6 +4200,8 @@ function cleanup(): void {
   responsiveWorkspaceMount.destroy();
   for (const controller of workspacePanelControllers) controller.destroy();
   clearChartResult();
+  sourceImageSession?.dispose();
+  sourceImageSession = null;
   objectUrls.revokeAll();
 }
 

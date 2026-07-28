@@ -158,6 +158,9 @@ test('preview is result-first with comparison controls and no generation button'
   assert.match(preview, /value="pattern"[^>]*checked[\s\S]*<label slot="label">拼豆<\/label>/u);
   assert.match(preview, /data-hold-original/u);
   assert.match(preview, /按住对比/u);
+  assert.match(preview, /data-background-removal-action[^>]*disabled[\s\S]*一键去背景/u);
+  assert.match(preview, /自动保留主要人物或物体，处理后可恢复原图/u);
+  assert.match(preview, /data-background-removal-status[^>]*role="status"[^>]*aria-live="polite"/u);
   assert.match(preview, /data-preview-original-view[^>]*hidden/u);
   assert.match(preview, /data-crop-canvas/u);
   assert.match(preview, /data-rotate-left/u);

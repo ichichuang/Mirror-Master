@@ -7,6 +7,17 @@ export type AppDitheringMode = 'none' | 'floydSteinberg';
 export type AppExportFormat = 'png' | 'pdf' | 'csv' | 'projectJson';
 export type AppPngTemplate = 'pure' | 'annotated';
 export type AppGridMirrorAxis = 'horizontal' | 'vertical';
+export type BackgroundRemovalUnavailableReason =
+  'MODEL_MISSING' | 'MODEL_INVALID' | 'ENGINE_INITIALIZATION_FAILED';
+
+export interface BackgroundRemovalCapability {
+  readonly contractVersion: '1.0';
+  readonly available: boolean;
+  readonly outputMimeType: 'image/png';
+  readonly maximumDecodedPixels: number;
+  readonly maximumConcurrentInferences: number;
+  readonly unavailableReason: BackgroundRemovalUnavailableReason | null;
+}
 
 export interface AppBoardSize {
   readonly rows: number;
@@ -22,6 +33,7 @@ export interface AppCapabilities {
     readonly maximumBytes: number;
     readonly maximumDecodedPixels: number;
   };
+  readonly backgroundRemoval: BackgroundRemovalCapability;
   readonly grid: {
     readonly minimumRows: number;
     readonly maximumRows: number;
@@ -99,6 +111,20 @@ const PNG_TEMPLATES = ['pure', 'annotated'] as const;
 const GRID_MIRROR_AXES = ['horizontal', 'vertical'] as const;
 const PDF_PAGE_SIZES = ['A4'] as const;
 const PDF_PHYSICAL_SCALES = ['fit-with-declared-scale'] as const;
+const BACKGROUND_REMOVAL_UNAVAILABLE_REASONS = [
+  'MODEL_MISSING',
+  'MODEL_INVALID',
+  'ENGINE_INITIALIZATION_FAILED',
+] as const;
+
+const UNAVAILABLE_BACKGROUND_REMOVAL_CAPABILITY: BackgroundRemovalCapability = Object.freeze({
+  contractVersion: '1.0',
+  available: false,
+  outputMimeType: 'image/png',
+  maximumDecodedPixels: 12_000_000,
+  maximumConcurrentInferences: 1,
+  unavailableReason: 'MODEL_MISSING',
+});
 
 export const FALLBACK_APP_CAPABILITIES: AppCapabilities = Object.freeze({
   contractVersion: CAPABILITIES_CONTRACT_VERSION,
@@ -109,6 +135,7 @@ export const FALLBACK_APP_CAPABILITIES: AppCapabilities = Object.freeze({
     maximumBytes: 20 * 1024 * 1024,
     maximumDecodedPixels: 25_000_000,
   }),
+  backgroundRemoval: UNAVAILABLE_BACKGROUND_REMOVAL_CAPABILITY,
   grid: Object.freeze({
     minimumRows: 1,
     maximumRows: 300,
@@ -204,6 +231,7 @@ export function parseAppCapabilities(value: unknown): AppCapabilities {
       maximumBytes: readPositiveInteger(upload.maximumBytes),
       maximumDecodedPixels: readPositiveInteger(upload.maximumDecodedPixels),
     }),
+    backgroundRemoval: readBackgroundRemovalCapability(root.backgroundRemoval),
     grid: Object.freeze({
       minimumRows,
       maximumRows,
@@ -290,6 +318,39 @@ function readRecord(value: unknown): Record<string, unknown> {
     throw invalidCapabilities();
   }
   return value as Record<string, unknown>;
+}
+
+function readBackgroundRemovalCapability(value: unknown): BackgroundRemovalCapability {
+  if (value === undefined) {
+    return UNAVAILABLE_BACKGROUND_REMOVAL_CAPABILITY;
+  }
+  try {
+    const capability = readRecord(value);
+    if (capability.contractVersion !== '1.0' || capability.outputMimeType !== 'image/png') {
+      throw invalidCapabilities();
+    }
+    const available = readBoolean(capability.available);
+    const unavailableReason =
+      capability.unavailableReason === null
+        ? null
+        : readEnumValue(capability.unavailableReason, BACKGROUND_REMOVAL_UNAVAILABLE_REASONS);
+    if (available !== (unavailableReason === null)) {
+      throw invalidCapabilities();
+    }
+    return Object.freeze({
+      contractVersion: '1.0',
+      available,
+      outputMimeType: 'image/png',
+      maximumDecodedPixels: readPositiveInteger(capability.maximumDecodedPixels),
+      maximumConcurrentInferences: readPositiveInteger(capability.maximumConcurrentInferences),
+      unavailableReason,
+    });
+  } catch {
+    return Object.freeze({
+      ...UNAVAILABLE_BACKGROUND_REMOVAL_CAPABILITY,
+      unavailableReason: 'MODEL_INVALID',
+    });
+  }
 }
 
 function rootValue(record: Record<string, unknown>, key: string): unknown {

@@ -21,6 +21,24 @@ export function renderPreviewWorkspace(): string {
               <i class="ph ph-eye" aria-hidden="true"></i>
               按住对比
             </button>
+            <div class="background-removal-control" data-background-removal-control hidden>
+              <button
+                class="secondary-button background-removal-button"
+                type="button"
+                data-background-removal-action
+                disabled
+              >
+                一键去背景
+              </button>
+              <span class="background-removal-copy">
+                自动保留主要人物或物体，处理后可恢复原图
+                <span
+                  data-background-removal-status
+                  role="status"
+                  aria-live="polite"
+                ></span>
+              </span>
+            </div>
             <button class="text-button" type="button" data-prepare-replace>更换图片</button>
           </div>
 

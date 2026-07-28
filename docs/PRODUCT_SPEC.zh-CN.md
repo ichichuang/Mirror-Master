@@ -1,8 +1,8 @@
 # 豆图设计台产品规范（Mirror Master 仓库唯一权威）
 
 - 状态：重建中
-- 规范版本：`1.1.0-draft.1`
-- 基线日期：2026-07-27
+- 规范版本：`1.2.0-draft.1`
+- 基线日期：2026-07-28
 - 语言：简体中文
 
 ## 0. 文档权威与变更规则
@@ -25,6 +25,7 @@
 | 产品返工审查基线 HEAD / `origin/main`          | `4cc7f75f90d8c1f4aa6d7238e88e21d8b1896e17`                                                                                        |
 | 顾客化交互重构基线 HEAD / `origin/main`        | `ee671c8416f5c6b807bbed7ba15b315cef05f589`                                                                                        |
 | Stage 4A 结果优先流程基线 HEAD / `origin/main` | `d8f38d5829cdc63bf9e69837481d5b37a7e281cd`                                                                                        |
+| Stage 4A.1 一键去背景实施基线                  | `3845fd0ae368ceec52b3a5e35b66cf9c27600efb`                                                                                        |
 | Stage 4A 实施蓝图                              | `docs/plans/2026-07-27-mirror-master-product-design-codex-blueprint.zh-CN.md`，非规范性设计与实施蓝图；与本文件冲突时以本文件为准 |
 | 顾客化交互方案                                 | 方案 A：保留领域、API 与 Canvas 引擎，模块化重建交互层；owner 已于 2026-07-24 批准                                                |
 | owner seed                                     | `拼豆颜色对照表.txt`                                                                                                              |
@@ -55,10 +56,11 @@
 
 1. 在开始页使用唯一占主导的上传入口选择图片；也可通过次级入口打开已保存项目，或在“更多制作方式”中选择镜像已有图纸，JSON 只作为次级格式说明。
 2. 上传后自动进入预览并自动生成第一个可制作结果，不需要理解照片/像素画算法差异，也不需要在上传前回答任何设置。
-3. 在预览中对照原图，只用图案大小、颜色数量、效果风格和拼豆品牌四组普通设置调整结果；需要时再展开一个默认折叠的“专业设置”。
-4. 任何设置变化都自动重新生成确定性的拼豆矩阵，旧任务被取消，只有最新结果生效。
-5. 通过“编辑图纸”把当前权威矩阵确认为编辑基线，用触控编辑、撤销、重做、镜像和复核统计。
-6. 按“分享图片、打印制作、材料清单、保存项目”四个顾客任务完成导出。
+3. 在服务能力可用时，可在预览的图片对比控件附近使用一次“一键去背景”，把当前源图片切换为保留主要人物或物体的透明 PNG；原图始终保留，可恢复并可再次使用已缓存的去背景结果。
+4. 在预览中对照原图，只用图案大小、颜色数量、效果风格和拼豆品牌四组普通设置调整结果；需要时再展开一个默认折叠的“专业设置”。
+5. 任何设置变化都自动重新生成确定性的拼豆矩阵，旧任务被取消，只有最新结果生效。
+6. 通过“编辑图纸”把当前权威矩阵确认为编辑基线，用触控编辑、撤销、重做、镜像和复核统计。
+7. 按“分享图片、打印制作、材料清单、保存项目”四个顾客任务完成导出。
 
 桌面端提供更高密度的编辑和检查能力，但不得成为完成核心流程的必要条件。
 
@@ -560,6 +562,34 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 「编辑图纸」是预览阶段唯一主操作：把当前权威矩阵确认为编辑历史基线；原图片、裁剪和生成设置继续保存在会话中；用户可返回预览调整设置。
 - 从编辑器返回预览不清空当前矩阵；重新生成前如存在生成后的编辑，使用 `vaadin-confirm-dialog` 按既有合同提示将以新矩阵替换这些编辑，操作固定为“先保存项目”“放弃修改并继续”“取消”。
 
+### 7.6 Stage 4A.1 一键去背景源图片转换
+
+“一键去背景”是对当前源图片执行一次的可恢复转换，不是图案生成参数、效果风格或需要在每次预览生成时重复执行的设置。
+
+后端合同：
+
+- 只提供 `POST /api/image/remove-background`，接收一个字段名为 `file` 的 JPEG、PNG 或 WebP；沿用第 7.1 节的 20 MiB 上传字节上限、声明 MIME 校验、实际解码格式核对、一次 EXIF 方向归一化、内存处理、`UploadFile` 关闭、隐私响应头和结构化中文错误。
+- 模型推理使用独立的 12,000,000 解码像素上限和最多 1 个并发推理任务，不与普通生成的 25,000,000 像素预算混用。像素超限返回 `BACKGROUND_REMOVAL_PIXEL_LIMIT_EXCEEDED`；并发限制通过服务端等待队列施加，不创建无界工作线程或并行 ONNX session。
+- 成功响应必须是与方向归一化输入宽高完全相同的内存 RGBA PNG，媒体类型为 `image/png`，透明背景保留为 alpha，不写临时文件或持久目录，并设置 `Cache-Control: no-store` 与 `X-Content-Type-Options: nosniff`。
+- 推理必须通过窄接口 `BackgroundRemovalEngine` 调用本地 CPU ONNX 引擎；同步 session 初始化和推理必须在 FastAPI event loop 之外执行。进程内只复用一个初始化成功的 inference session。
+- 固定引擎为 `rembg==2.0.76` 与 CPU `onnxruntime==1.23.2`，固定模型为通用 `isnet-general-use`：上游身份为 DIS 官方 2022-08-17 发布的 `isnet-general-use` optimized model，固定上游提交 `b6764e20381f6f42a70f83fa3324181529ed1403`，预期本地文件名 `isnet-general-use.onnx`，大小 178,648,008 bytes，SHA-256 `60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a`。rembg 使用 MIT License，DIS / IS-Net 使用 Apache License 2.0，均允许商业使用但分发时必须保留相应许可与声明。
+- 模型选择必须以同一人物样例、同一 Python 3.12 / Apple Silicon CPU 环境、2 个推理线程和同一无 arena / 无 memory pattern session 配置为基准。2026-07-28 实测：`birefnet-general-lite` 为 224,005,088 bytes，首次冷 session 初始化 50.085 s、首次推理 6.188 s、warm 推理 6.712 s、peak RSS 7,339.2 MiB、参考 mask IoU 0.9659；`u2netp` 为 4,574,861 bytes，session 初始化 0.020 s、首次推理 0.256 s、warm 推理 0.242 s、peak RSS 404.1 MiB、参考 mask IoU 0.4930，人物双臂出现明显缺失；最终采用的 `isnet-general-use` 为 178,648,008 bytes，session 初始化 0.042 s、首次推理 1.785 s、warm 推理 1.757 s、peak RSS 1,033.1 MiB、参考 mask IoU 0.9699。参考 mask 来自 rembg 同版本示例，仅作为相对一致性代理，不视为真实标注或生产 SLA。
+- 仓库必须保留项目内模型 manifest，记录 manifest 版本、引擎与模型身份、版本、来源、许可证、许可证来源、准确文件名、大小和 SHA-256；模型权重本身不得提交、不得进入默认 Docker build context 或前端产物。
+- 权重只能由显式运行的受控 fetch 脚本下载到项目内模型目录。脚本先下载到临时 `.part` 文件，核对大小与 SHA-256 后原子替换目标；校验失败必须删除半成品。任何顾客请求、模块导入、应用启动或 capabilities 请求都不得下载权重，也不得读取或依赖 `~/.u2net`。
+- 模型不存在、大小或校验和不符时，能力必须报告不可用且接口返回 `503 BACKGROUND_REMOVAL_UNAVAILABLE`；session 初始化失败后同样把本进程能力标记为不可用并返回同一码。推理失败返回 `500 BACKGROUND_REMOVAL_FAILED`。错误不得暴露本地路径、堆栈、上传文件名、图片哈希或模型内部细节。
+
+前端源图片会话合同：
+
+- 当前图片必须由显式 source-image session 管理：始终保存原始 `SelectedImage`，最多缓存一个由接口返回的 foreground PNG variant，并记录当前激活的是 `original` 或 `foreground`。不得破坏性覆盖原图，不得向第 6.1 节 project schema 添加 source variant 字段。
+- 能力合同不可用或使用内置 fallback 时隐藏“一键去背景”；可用时在原图/拼豆对比控件附近显示次级操作“一键去背景”，辅助说明固定为“自动保留主要人物或物体，随时可以恢复原图。”
+- 首次成功后切换到 foreground variant，保留当前 rotation、crop、图案大小、颜色数量、效果风格、palette、`availableColorIds`、拼豆尺寸、拼板设置、当前 Preview 几何与展开/滚动状态，并且只自动触发 1 次权威预览生成。
+- foreground 激活时显示“恢复原图”；恢复后显示“使用去背景图”。原图与已缓存 foreground 之间切换不得再次调用去背景接口，但应按当前既有设置各触发一次普通权威预览生成。
+- 去背景请求期间保留当前拼豆预览和当前活动源图，禁用重复请求，并显示稳定的进行中状态。请求必须使用 `AbortController`、源图片 token 和最新请求 guard；更换图片、打开项目、重置或销毁工作区时取消请求。取消、迟到成功或迟到失败不得切换源图、替换矩阵、显示错误或泄漏 Object URL。
+- 只有完整 PNG 响应成功解码并确认仍属于当前 source-image session 后，才能缓存并激活 foreground；每个原图、foreground 和被丢弃结果的 Object URL 都必须在替换、重置、迟到丢弃或页面卸载时准确释放。
+- 失败时原图、当前活动源图、当前矩阵、当前预览、设置、历史和几何均保持不变；稳定错误固定为“无法完成一键去背景。原图和当前图纸已保留，请稍后重试。”
+- 透明度棋盘格只可出现在原图/foreground、裁剪和图案 Canvas 等图片工作表面，不得成为页面、设置区或普通控件背景。
+- 用户已逐格编辑矩阵并返回 Preview 时，执行首次去背景或切换 source variant 之前必须复用第 3.3 节现有 `vaadin-confirm-dialog`，明确后续重新生成会替换编辑；取消不得发起推理、切换源图或重新生成。
+
 ## 8. 生成算法
 
 ### 8.1 坐标映射
@@ -808,7 +838,8 @@ nonEmptyBeadCount + blankCount === totalCellCount
 
 `GET /api/capabilities`
 
-- 返回 schema versions、上传限制、行列限制、拼豆直径/间距限制、自定义拼板限制、支持模式、采样、抖动、导出格式、PNG 模板、PDF 页面合同（含最大页数与总 raster pixel 预算）与 grid mirror 轴。
+- 返回 schema versions、上传限制、行列限制、拼豆直径/间距限制、自定义拼板限制、支持模式、采样、抖动、导出格式、PNG 模板、PDF 页面合同（含最大页数与总 raster pixel 预算）、versioned background removal 能力与 grid mirror 轴。
+- `backgroundRemoval` 固定为 `{ contractVersion: '1.0', available: boolean, outputMimeType: 'image/png', maximumDecodedPixels: 12000000, maximumConcurrentInferences: 1, unavailableReason: null | 'MODEL_MISSING' | 'MODEL_INVALID' | 'ENGINE_INITIALIZATION_FAILED' }`。该对象缺失或合同版本不兼容时，前端按不可用处理，不得猜测接口存在。
 - 前端启动时必须获取并校验该合同；成功时由能力响应设置 `accept`、输入 `min/max`、可见格式和校验提示。
 - 服务不可达或返回不兼容合同，前端使用与本规范一致、显式版本化的内置 fallback，并通过状态文本告知当前使用兼容限制；不得静默混用服务值和硬编码值。
 
@@ -828,7 +859,15 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 返回完整项目矩阵、统计与必要的规范化尺寸。
 - 不持久化图片或结果。
 
-### 13.4 导出
+### 13.4 一键去背景
+
+`POST /api/image/remove-background`
+
+- multipart 单文件字段 `file`；不接受模型选择、手工蒙版、SAM 点选、羽化、腐蚀或其他控制字段。
+- 返回同尺寸 RGBA PNG；不返回 URL、任务 ID、项目字段或占位结果。
+- 支持第 7.6 节的能力门控、资源预算、session 复用、无临时文件、取消与稳定错误合同。
+
+### 13.5 导出
 
 `POST /api/pattern/export`
 
@@ -836,18 +875,19 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 返回 PNG、PDF 或 CSV。
 - 项目 JSON 可由前端直接生成，但必须使用同一验证器。
 
-### 13.5 保留接口
+### 13.6 保留接口
 
 - `POST /api/grid/detect`
 - `POST /api/grid/mirror`
 - `GET /api/health`
 
-### 13.6 中文状态
+### 13.7 中文状态
 
 至少覆盖：
 
 - 等待上传、正在读取图片、正在为这张图片选择合适设置、正在更新拼豆预览、已更新。
 - 正在读取、正在解码、正在裁剪。
+- 正在去除背景、一键去背景完成、已恢复原图、去背景不可用、去背景失败。
 - 正在生成、正在取消、已生成。
 - 正在保存编辑、已撤销、已重做。
 - 正在检测网格、等待确认、正在智能镜像。
@@ -874,6 +914,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 10 MiB 内图片选取后 500 ms 内显示本地预览或加载状态。
 - 100 × 100 矩阵编辑保持目标 50–60 FPS；单个普通画笔 transaction 的 UI 反馈低于 50 ms。
 - 100 × 100、260 色、无抖动生成目标 3 秒内；超出时持续显示可取消状态。
+- 一键去背景必须记录固定 `isnet-general-use` 模型在项目 Python 3.12 CPU 环境中的模型大小、兼容性、冷 session 初始化、首个推理、至少一个复用 session 的 warm 推理和进程 peak RSS；该记录是实施验收证据，不是生产吞吐承诺。
 - 300 × 300 为硬上限；不得因预览创建 90,000 个 DOM cell。
 - Canvas 只重绘脏区或在 requestAnimationFrame 合并更新。
 - 大计算不得阻塞输入；优先后端执行，纯前端派生统计应为线性复杂度。
@@ -886,6 +927,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 不持久化上传或生成图片。
 - 不把项目自动写入 localStorage、IndexedDB 或服务端。
 - Object URL 在替换图片、离开项目和页面卸载时释放。
+- 去背景模型只能由显式受控脚本下载到项目内、被 Git 与默认 Docker build 排除的模型目录；顾客请求期间不得联网下载模型，不得访问用户主目录模型缓存。
 - FastAPI 校验 MIME、实际格式、字节、像素、JSON 大小和所有矩阵维度。
 - SVG/HTML 不作为图片输入，避免主动内容。
 - 下载文件名清理控制字符和路径分隔符。
@@ -986,6 +1028,9 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - API 错误均为稳定 code + 可操作中文 message。
 - 请求取消不会覆盖新项目状态；被编辑、换图、开项目或新导出淘汰的迟到导出响应不会触发下载。
 - 上传内容未写入持久存储。
+- 一键去背景支持 JPEG、PNG、WebP，输出为保持方向归一化宽高的 RGBA PNG，并在有背景的 fixture 上产生至少一个 alpha 小于 255 的像素。
+- 去背景接口复用上传字节、MIME、EXIF、关闭与隐私合同，同时独立验证 12,000,000 像素和 1 并发推理预算；空文件、超字节、MIME 不匹配、像素超限、模型缺失、初始化失败和推理失败返回逐项稳定 code + 中文 message。
+- 两次成功请求复用同一个 inference session；测试不得创建真实临时图片文件，服务实现不得写任何上传或输出临时文件。
 
 ### 18.5 响应式与恢复
 
@@ -1009,6 +1054,8 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 自动推荐在固定图片 fixtures 上稳定解析为 `photo` 或 `pixelArt`，专业设置手动覆盖后生成请求和项目 JSON 使用覆盖值。
 - 普通设置只有图案大小、颜色数量、效果风格和拼豆品牌四组；“专业设置”默认折叠。小巧/推荐/细致、自定义宽高、简单/推荐/细致/自定义颜色数量和清晰色块/自然还原/鲜艳突出/细腻渐变逐项映射到第 3.4.9 节与第 8.7 节合同；预计成品尺寸与项目摘要随每次改动更新。
 - 设置变化自动重新生成；快速连续改变设置时只有最后一次结果生效，旧请求被取消、迟到结果被丢弃且不把取消显示为错误；新结果就绪前旧预览保持可见，不清空成加载页。
+- 一键去背景按 capability 显示；处理时旧预览可见且不可重复提交。成功只触发一次普通预览生成，原图与缓存 foreground 可反复切换且不重复推理；恢复/切换保持 rotation、crop、四组普通设置、全部专业设置、palette、可用色、拼豆、拼板、Preview 几何与 DOM 状态。
+- 更换图片、重置或打开项目会取消去背景请求并拒绝迟到结果；失败不改变源图或矩阵；所有生成 Object URL 在替换、迟到、重置和销毁路径释放。存在生成后编辑时先显示既有 ConfirmDialog，取消后零推理、零切换、零重新生成。
 - 默认预览表面不出现最大颜色数值、可用色 IDs、采样、抖动、透明阈值、间距或自定义拼板尺寸；这些值在展开“专业设置”后可编辑并保持既有项目值。
 - “编辑图纸”把当前权威矩阵建立为新的差异历史基线；undo 不跨生成结果；存在生成后编辑时重新生成必须使用规定的确认对话。
 - 顾客主流程没有原生 `<select>`。短单值列表使用锚定 `vaadin-select`；需要同时看见全部选项的预设使用 Vaadin radio cards；颜色多选使用单一 `vaadin-dialog`。
@@ -1048,6 +1095,7 @@ nonEmptyBeadCount + blankCount === totalCellCount
 | 新增 new     | backend pattern/palette/export 模块                                | 后端权威生成、校验、统计与 Pillow 导出。                                                                                             |
 | 新增 new     | `src/features/start-workspace/*`                                   | 开始页单一主上传入口、打开已保存项目与“更多制作方式”次级入口、隐私说明。                                                             |
 | 新增 new     | `src/features/preview-workspace/*`                                 | 自动首个预览、原图对比、持久项目摘要、四组普通设置映射、请求取消与迟到丢弃协调。                                                     |
+| 新增 new     | background removal backend 与前端 source-image session             | 一次性本地 ONNX 源图转换、版本化能力门控、原图/foreground 缓存切换、取消与 Object URL 生命周期。                                     |
 | 修复 repair  | backend 生成服务                                                   | 兼容扩展可选 `colorBoost` 请求字段，提供确定性风格预处理；缺省行为逐 cell 不变。                                                     |
 
 ### 19.2 合同边界
@@ -1105,7 +1153,9 @@ nonEmptyBeadCount + blankCount === totalCellCount
 - 前端：palette validation、schema、deterministic mapping、transparency、statistics、dimensions、undo/redo、horizontal/vertical double mirror、export consistency。
 - 前端补充：gesture state、pinch/pan bounds、pointer cancellation、stroke interpolation、diff history、palette restriction、项目 JSON round-trip、custom board、capabilities fallback、inspector focus/scroll、bottom sheet drag、keyboard crop 和 tabs semantics。
 - 顾客交互聚焦测试：开始页单入口与次级入口降级、上传后自动首个预览、四组普通设置与专业设置折叠、效果风格映射、预览请求协调（取消、迟到丢弃、旧预览保留）、原图对比、编辑基线确认、自动推荐与手动覆盖、全部预设映射、Vaadin radio cards、Select、ComboBox、颜色 Dialog、ConfirmDialog、值同步、关闭后焦点、滚动保持、sheet peek 精确内容、完整标题拖拽区、首次提示、定位格子、选择上下文栏、单层导出、术语负向扫描，以及 320/375/390/430/768/1024/1440 响应式状态。
+- Stage 4A.1 前端聚焦测试：capability 门控、原图/foreground source session 状态、缓存切换、请求取消、迟到丢弃、单次自动生成、恢复原图、Object URL 清理、编辑项目确认和全部设置不变。
 - 后端：`colorBoost` 缺省逐 cell 等价、`vivid` 确定性、非法值稳定拒绝。
+- Stage 4A.1 后端：三种输入格式、RGBA、方向归一化尺寸、透明输出、session 复用、模型缺失、MIME 不匹配、空/超字节、独立像素上限、初始化/推理失败、无临时文件和确定性错误合同。
 - 后端：palette parity、project validation、generate determinism、alpha zero、API errors、existing-chart label/coordinate/legend preservation、double mirror RGBA identity、pure/annotated PNG、multi-page PDF coverage、CSV parity、custom board 和 immutable revision consistency。
 - 不添加 Playwright。
 - 依次运行 `pnpm run generate:palettes`、`pnpm run generate:icons`、`pnpm run generate:tokens`、`pnpm run generate:brand`，确认生成 diff 只包含预期变化；随后运行总门禁 `pnpm run check` 并单独记录其中测试、类型、lint、格式和 production build 结果。

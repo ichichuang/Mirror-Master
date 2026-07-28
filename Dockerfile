@@ -27,6 +27,7 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN python -m pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend/app ./backend/app
+COPY backend/models/background-removal-model.json ./backend/models/background-removal-model.json
 COPY backend/pyproject.toml ./backend/pyproject.toml
 COPY --from=frontend /workspace/dist ./dist
 

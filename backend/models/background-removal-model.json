@@ -1,0 +1,22 @@
+{
+  "manifestVersion": "1.0",
+  "engine": {
+    "name": "rembg",
+    "version": "2.0.76",
+    "source": "https://github.com/danielgatis/rembg/tree/v2.0.76",
+    "license": "MIT",
+    "licenseSource": "https://github.com/danielgatis/rembg/blob/v2.0.76/LICENSE.txt"
+  },
+  "model": {
+    "id": "isnet-general-use",
+    "version": "DIS-isnet-general-use-2022-08-17",
+    "source": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx",
+    "upstreamCommit": "b6764e20381f6f42a70f83fa3324181529ed1403",
+    "upstreamSource": "https://github.com/xuebinqin/DIS/tree/b6764e20381f6f42a70f83fa3324181529ed1403",
+    "license": "Apache-2.0",
+    "licenseSource": "https://github.com/xuebinqin/DIS/blob/b6764e20381f6f42a70f83fa3324181529ed1403/LICENSE.md",
+    "expectedFilename": "isnet-general-use.onnx",
+    "sizeBytes": 178648008,
+    "sha256": "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a"
+  }
+}
