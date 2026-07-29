@@ -282,6 +282,22 @@ test('horizontal keyboard movement follows screen direction in reverse view', ()
   harness.destroy();
 });
 
+test('viewing the reverse side alone does not commit or mutate the project matrix', () => {
+  const project = patternProject([
+    [bead('default:A01'), bead('default:A02')],
+    [EMPTY, bead('default:A06')],
+  ]);
+  const originalCells = structuredClone(project.cells);
+  const harness = createHarness(false, project);
+
+  harness.setReverseView(true);
+  harness.setReverseView(false);
+
+  assert.equal(harness.commits.length, 0);
+  assert.deepEqual(project.cells, originalCells);
+  harness.destroy();
+});
+
 test('row and column jump clamps, reveals, focuses, and announces the target cell', () => {
   const harness = createHarness(false, sizedProject(30, 30));
   harness.actualSize();
@@ -499,7 +515,7 @@ test('move placement renders snapshot destinations and cleared sources before co
   harness.destroy();
 });
 
-test('explicit move placement crops a partial out-of-bounds target at commit', () => {
+test('explicit move placement bounds a partial out-of-bounds target before commit', () => {
   const harness = createHarness(
     false,
     patternProject([
@@ -524,7 +540,7 @@ test('explicit move placement crops a partial out-of-bounds target at commit', (
   assert.deepEqual(
     harness.commits[0]?.cells,
     matrix([
-      [EMPTY, EMPTY, EMPTY, bead('default:A01')],
+      [EMPTY, EMPTY, bead('default:A01'), bead('default:A02')],
       [EMPTY, EMPTY, EMPTY, EMPTY],
       [EMPTY, EMPTY, EMPTY, EMPTY],
       [EMPTY, EMPTY, EMPTY, EMPTY],
@@ -532,7 +548,7 @@ test('explicit move placement crops a partial out-of-bounds target at commit', (
   );
   assert.deepEqual(harness.selections.at(-1), {
     startRow: 0,
-    startColumn: 3,
+    startColumn: 2,
     endRow: 0,
     endColumn: 3,
   });

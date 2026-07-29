@@ -11,7 +11,6 @@ import { MatrixHistory } from './domain/history';
 import {
   calculatePhysicalLayout,
   calculateStatistics,
-  mirrorCells,
   withProjectCells,
   type BeadProject,
   type ImageRotation,
@@ -51,6 +50,8 @@ import {
   MirrorMasterApiError,
   type GridDetectionContract,
 } from './features/grid-api/client';
+import { createChartMirrorCoordinator } from './features/grid-editor/chartMirrorCoordinator';
+import { resolveGridConfirmation } from './features/grid-editor/confirmationState';
 import { mountGridEditor, type GridEditorController } from './features/grid-editor/gridEditor';
 import { decodeImageResourceFromObjectUrl } from './features/local-image-input/imageDecoder';
 import {
@@ -89,11 +90,16 @@ import {
   createFirstUseHintSession,
   type FirstUseGesture,
 } from './features/pattern-editor/firstUseHint';
+import { createVerifiedMatrixMirror } from './features/pattern-editor/mirrorCommand';
 import {
   describeSelection,
   positionSelectionContextBar,
   type ViewportRect,
 } from './features/pattern-editor/selectionContext';
+import {
+  createPatternTrustSummary,
+  formatPatternTrustSummary,
+} from './features/pattern-trust/patternTrust';
 import { recommendDecodedImageMode } from './features/customer-flow/imageRecommendation';
 import {
   setModePreference,
@@ -175,6 +181,14 @@ import {
   mountCropInteractions,
   renderCropSelectionOverlay,
 } from './features/preview-workspace/previewCrop';
+import {
+  createPreviewModeSelection,
+  DEFAULT_PREVIEW_RENDER_MODE,
+  PREVIEW_RENDER_MODES,
+  parsePreviewRenderMode,
+  type PreviewModeSelection,
+  type PreviewRenderMode,
+} from './features/preview-workspace/previewMode';
 import { formatPreviewDoneStatus } from './features/preview-workspace/previewSummary';
 import {
   createPreviewView,
@@ -293,6 +307,9 @@ const firstUseHintSession = createFirstUseHintSession();
 const previewColorHexById: ReadonlyMap<string, string> = new Map(
   PALETTE_COLORS.map((color) => [color.id, color.displayHex]),
 );
+const previewColorCodeById: ReadonlyMap<string, string> = new Map(
+  PALETTE_COLORS.map((color) => [color.id, color.code]),
+);
 let firstUseHintTimer: number | null = null;
 let appCapabilities: AppCapabilities = FALLBACK_APP_CAPABILITIES;
 let capabilitiesDegraded = false;
@@ -320,6 +337,7 @@ let firstPreviewGenerationStarted = false;
 let previewRegenerationTimer: number | null = null;
 let hydratingPreviewControls = false;
 let holdOriginalActive = false;
+let previewRenderMode: PreviewRenderMode = DEFAULT_PREVIEW_RENDER_MODE;
 let backgroundRemovalStatusState: 'ready' | 'loading' | 'error' = 'ready';
 let backgroundRemovalStatusMessage = '';
 let history: MatrixHistory | null = null;
@@ -345,7 +363,8 @@ let prepareColorSeries = '';
 let recentColorIds: readonly string[] = Object.freeze([]);
 let exportCompletionState: ExportCompletionState = createExportCompletionState();
 let exportReturnFocus: HTMLElement | null = null;
-let chartMirrorController: AbortController | null = null;
+let chartWarningAcknowledged = false;
+let chartDetectionRunning = false;
 let chartResultUrl: string | null = null;
 let chartAxis: 'horizontal' | 'vertical' = 'horizontal';
 let loadRevision = 0;
@@ -385,6 +404,10 @@ const exportCoordinator = createExportCoordinator({
     window.setTimeout(callback, 0);
   },
   onEvent: handleExportEvent,
+});
+
+const chartMirrorCoordinator = createChartMirrorCoordinator({
+  request: (file, contract, axis, signal) => mirrorGrid(file, contract, axis, signal),
 });
 
 const previewCoordinator: PreviewCoordinator = createPreviewCoordinator({
@@ -540,7 +563,13 @@ function activateSourceVariant(variant: SourceImageVariant): void {
         '[data-preview-original-view]',
         HTMLElement,
       ).dataset.sourceImageVariant = activeVariant;
+      required(
+        previewWorkspace,
+        '[data-preview-adjust-view]',
+        HTMLElement,
+      ).dataset.sourceImageVariant = activeVariant;
       drawCropPreview();
+      drawAlignedOriginalCanvas();
       renderCropSelection();
       updatePrepareSummaries();
       syncBackgroundRemovalAction();
@@ -563,7 +592,9 @@ function setBackgroundRemovalStatus(message: string, state: 'ready' | 'loading' 
 function syncBackgroundRemovalAction(): void {
   const control = required(previewWorkspace, '[data-background-removal-control]', HTMLElement);
   const action = required(control, '[data-background-removal-action]', HTMLButtonElement);
-  const status = required(control, '[data-background-removal-status]', HTMLElement);
+  const compactLabel = required(action, '[data-background-removal-label-short]', HTMLElement);
+  const longLabel = required(action, '[data-background-removal-label-long]', HTMLElement);
+  const status = required(previewWorkspace, '[data-background-removal-status]', HTMLElement);
   const available = appCapabilities.backgroundRemoval.available;
   const session = sourceImageSession;
   const busy = backgroundRemovalCoordinator.activeRequestId() !== null;
@@ -576,19 +607,23 @@ function syncBackgroundRemovalAction(): void {
   });
   control.hidden = actionState.hidden;
   action.disabled = actionState.disabled;
-  action.textContent = actionState.label;
+  action.setAttribute('aria-label', actionState.label);
+  compactLabel.textContent = actionState.compactLabel;
+  longLabel.textContent = actionState.label;
   status.textContent = backgroundRemovalStatusMessage;
   status.dataset.state = backgroundRemovalStatusState;
   const originalView = required(previewWorkspace, '[data-preview-original-view]', HTMLElement);
   originalView.dataset.sourceImageVariant = session?.activeVariant() ?? 'original';
+  required(previewWorkspace, '[data-preview-adjust-view]', HTMLElement).dataset.sourceImageVariant =
+    session?.activeVariant() ?? 'original';
 }
 
 const previewView: PreviewViewController = createPreviewView({
   root: previewWorkspace,
   colorHexById: previewColorHexById,
+  colorCodeById: previewColorCodeById,
   onShowOriginal() {
-    drawCropPreview();
-    renderCropSelection();
+    drawAlignedOriginalCanvas();
   },
 });
 
@@ -990,7 +1025,7 @@ async function acceptFiles(files: readonly File[]): Promise<void> {
   previewCoordinator.cancel();
   clearPreviewRegenerationTimer();
   exportCoordinator.invalidate();
-  chartMirrorController?.abort();
+  chartMirrorCoordinator.cancel();
   recommendationRequests.cancel();
   setFileStatus(`正在读取 ${result.file.name}…`, 'loading');
   setPreviewStatus('reading');
@@ -1165,7 +1200,7 @@ async function openProjectFile(file: File): Promise<void> {
   previewCoordinator.cancel();
   clearPreviewRegenerationTimer();
   exportCoordinator.invalidate();
-  chartMirrorController?.abort();
+  chartMirrorCoordinator.cancel();
   recommendationRequests.cancel();
   if (file.size > MAX_PROJECT_JSON_BYTES) {
     projectFileStatus.textContent = `项目文件超过 ${formatFileSize(
@@ -1228,6 +1263,12 @@ async function openProjectFile(file: File): Promise<void> {
 function setupPreview(): void {
   const prepareReplace = required(previewWorkspace, '[data-prepare-replace]', HTMLButtonElement);
   const holdOriginalButton = required(previewWorkspace, '[data-hold-original]', HTMLButtonElement);
+  const adjustSourceButton = required(previewWorkspace, '[data-adjust-source]', HTMLButtonElement);
+  const finishSourceAdjustButton = required(
+    previewWorkspace,
+    '[data-finish-source-adjust]',
+    HTMLButtonElement,
+  );
   const backgroundRemovalAction = required(
     previewWorkspace,
     '[data-background-removal-action]',
@@ -1314,6 +1355,24 @@ function setupPreview(): void {
 
   prepareReplace.addEventListener('click', handleReplaceImageClick);
   backgroundRemovalAction.addEventListener('click', requestBackgroundRemovalAction);
+  for (const button of previewWorkspace.querySelectorAll<HTMLButtonElement>(
+    '[data-preview-mode]',
+  )) {
+    button.addEventListener('click', () => {
+      setPreviewRenderMode(createPreviewModeSelection(button.dataset.previewMode));
+    });
+  }
+  adjustSourceButton.addEventListener('click', () => {
+    previewView.applyCompareView('adjust');
+    drawCropPreview();
+    renderCropSelection();
+    announce('正在调整原图；完成后可继续严格对比。');
+  });
+  finishSourceAdjustButton.addEventListener('click', () => {
+    previewCompareRadioController.setValue('original');
+    applyPreviewCompareView('original');
+    announce('原图调整完成，已返回对齐对比。');
+  });
   holdOriginalButton.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     holdOriginalActive = true;
@@ -1482,6 +1541,7 @@ function setupPreview(): void {
     rotation = normalizeRotation(rotation - 90);
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
     drawCropPreview();
+    drawAlignedOriginalCanvas();
     renderCropSelection();
     updatePrepareSummaries();
     announce('图片已向左旋转。');
@@ -1491,6 +1551,7 @@ function setupPreview(): void {
     rotation = normalizeRotation(rotation + 90);
     cropPercent = { x: 0, y: 0, width: 100, height: 100 };
     drawCropPreview();
+    drawAlignedOriginalCanvas();
     renderCropSelection();
     updatePrepareSummaries();
     announce('图片已向右旋转。');
@@ -1635,6 +1696,7 @@ function setupPreview(): void {
     },
     onLiveChange(editingInput) {
       renderCropSelection(editingInput);
+      drawAlignedOriginalCanvas();
       updatePrepareSummaries();
     },
     onGestureEnd() {
@@ -1912,11 +1974,13 @@ function openPreviewWorkspace(preserveProjectSettings = false): void {
   required(previewWorkspace, '[data-return-editor]', HTMLButtonElement).hidden =
     !previewReturnToEditorAvailable;
   syncPreviewResult();
+  syncPreviewModeControls();
   applyPreviewCompareView(currentPreviewCompareValue());
   applyPrepareModeState(false);
   initializePrepareColorSeries();
   renderAvailableColorFilter();
   drawCropPreview();
+  drawAlignedOriginalCanvas();
   renderCropSelection();
   updatePrepareSummaries();
 }
@@ -1927,6 +1991,14 @@ function drawCropPreview(): void {
     return;
   }
   drawRotatedCropPreview(previewWorkspace, image.image, rotation);
+}
+
+function drawAlignedOriginalCanvas(): void {
+  const image = activeSourceImage();
+  if (!image) {
+    return;
+  }
+  previewView.drawAlignedOriginal(image.image, rotation, cropPercent);
 }
 
 function renderCropSelection(editingInput?: HTMLInputElement): void {
@@ -2209,6 +2281,31 @@ function drawPreviewCanvas(): void {
   previewView.drawPreview(previewProject);
 }
 
+function setPreviewRenderMode(selection: PreviewModeSelection): void {
+  previewCompareRadioController.setValue(selection.compareView);
+  previewView.applyCompareView(selection.compareView);
+  previewRenderMode = selection.mode;
+  previewView.setRenderMode(selection.mode);
+  syncPreviewModeControls();
+  announce(selection.announcement);
+}
+
+function syncPreviewModeControls(): void {
+  const definition =
+    PREVIEW_RENDER_MODES.find(({ id }) => id === previewRenderMode) ??
+    PREVIEW_RENDER_MODES.find(({ id }) => id === DEFAULT_PREVIEW_RENDER_MODE);
+  for (const button of previewWorkspace.querySelectorAll<HTMLButtonElement>(
+    '[data-preview-mode]',
+  )) {
+    button.setAttribute(
+      'aria-pressed',
+      String(parsePreviewRenderMode(button.dataset.previewMode) === previewRenderMode),
+    );
+  }
+  const note = required(previewWorkspace, '[data-preview-mode-note]', HTMLElement);
+  note.textContent = definition?.description ?? '';
+}
+
 function updateColorCountEstimate(): void {
   const usedColors = previewStatistics
     ? previewStatistics.usedColorCount
@@ -2232,10 +2329,9 @@ function setupPreviewCanvasResize(): void {
   const observer = new ResizeObserver(() => {
     if (stage === 'preview' && previewProject) {
       drawPreviewCanvas();
-      if (currentPreviewCompareValue() === 'original') {
-        drawCropPreview();
-        renderCropSelection();
-      }
+      drawAlignedOriginalCanvas();
+      drawCropPreview();
+      renderCropSelection();
     }
   });
   observer.observe(slot);
@@ -2779,8 +2875,16 @@ function mirrorProject(axis: 'horizontal' | 'vertical'): void {
   if (!currentProject || !history) {
     return;
   }
+  let cells: BeadProject['cells'];
+  try {
+    cells = createVerifiedMatrixMirror(currentProject, axis).cells;
+  } catch (error) {
+    announce(
+      error instanceof Error ? error.message : '无法安全翻转图案，当前图纸和材料统计已保留。',
+    );
+    return;
+  }
   abortActiveExport();
-  const cells = mirrorCells(currentProject.cells, axis);
   const snapshot = history.commit(cells);
   currentProject = withProjectCells(
     currentProject,
@@ -2792,7 +2896,7 @@ function mirrorProject(axis: 'horizontal' | 'vertical'): void {
   updateHistoryButtons();
   updateInspectorDynamicContent();
   schedulePerformanceCapture();
-  announce(axis === 'horizontal' ? '图案已左右镜像。' : '图案已上下镜像。');
+  announce(axis === 'horizontal' ? '图案已水平翻转。' : '图案已垂直翻转。');
 }
 
 function undo(): void {
@@ -3072,6 +3176,7 @@ function updateInspectorDynamicContent(): void {
 function createWorkspacePanelsView(project: BeadProject): WorkspacePanelsView {
   const selected = PALETTE_COLORS.find((color) => color.id === selectedColorId);
   const statistics = calculateStatistics(project.cells);
+  const trustCopy = formatPatternTrustSummary(createPatternTrustSummary(project));
   const layout = calculatePhysicalLayout(project);
   const size = `${(layout.widthMm / 10).toFixed(1)} × ${(layout.heightMm / 10).toFixed(1)} cm`;
   const paletteColors = PALETTE_COLORS.filter((color) =>
@@ -3122,6 +3227,8 @@ function createWorkspacePanelsView(project: BeadProject): WorkspacePanelsView {
     materialHeading: `${String(statistics.nonEmptyBeadCount)} 颗 · ${String(
       statistics.usedColorCount,
     )} 色`,
+    trustPrimary: trustCopy.primary,
+    trustVerification: trustCopy.verification,
     materialSize: size,
     materialBoards: `${String(layout.boardCount)} 块`,
     materialBlanks: `${String(statistics.blankCount)} 格`,
@@ -3324,7 +3431,7 @@ function setExportSurfacesOpen(open: boolean): void {
 function syncExportCompletionUi(): void {
   const definition = exportTaskDefinition(exportCompletionState.selectedTask);
   const project = currentProject;
-  const statistics = project ? calculateStatistics(project.cells) : null;
+  const trustCopy = project ? formatPatternTrustSummary(createPatternTrustSummary(project)) : null;
   const panels = queryPatternWorkspaceAll('[data-export-completion]', HTMLElement);
   for (const [index, panel] of panels.entries()) {
     for (const button of panel.querySelectorAll<HTMLButtonElement>('[data-export-task]')) {
@@ -3350,11 +3457,9 @@ function syncExportCompletionUi(): void {
         definition.format === 'json' ? 'projectJson' : definition.format,
       );
     required(panel, '[data-export-summary]', HTMLElement).textContent =
-      statistics === null
-        ? '当前没有可导出的图纸。'
-        : `${String(statistics.nonEmptyBeadCount)} 颗拼豆 · ${String(
-            statistics.usedColorCount,
-          )} 色 · ${String(project?.grid.columns ?? 0)} × ${String(project?.grid.rows ?? 0)} 格`;
+      trustCopy === null ? '当前没有可导出的图纸。' : trustCopy.primary;
+    required(panel, '[data-export-trust-verification]', HTMLElement).textContent =
+      trustCopy?.verification ?? '';
     panel.setAttribute('aria-busy', String(exportCompletionState.status.phase === 'running'));
     required(panel, '[data-export-status]', HTMLElement).textContent = exportStatusMessage();
   }
@@ -3393,14 +3498,27 @@ function abortActiveExport(): void {
 function setupChartWorkspace(): GridEditorController {
   const generateButton = required(chartWorkspace, '[data-chart-generate]', HTMLButtonElement);
   const downloadButton = required(chartWorkspace, '[data-chart-download]', HTMLButtonElement);
+  const dimensionForm = required(chartWorkspace, '[data-chart-dimension-form]', HTMLFormElement);
+  const columnsInput = required(chartWorkspace, '[data-chart-columns]', HTMLInputElement);
+  const rowsInput = required(chartWorkspace, '[data-chart-rows]', HTMLInputElement);
   const controller = mountGridEditor(chartWorkspace, {
     onContractChange(contract) {
+      chartMirrorCoordinator.cancel();
       gridContract = contract;
-      generateButton.disabled = contract === null;
+      chartWarningAcknowledged = false;
+      if (contract) {
+        columnsInput.value = String(contract.columns);
+        rowsInput.value = String(contract.rows);
+      } else {
+        columnsInput.value = '';
+        rowsInput.value = '';
+      }
       clearChartResult();
+      syncChartConfirmationUi();
     },
     onDetectionChange(detecting) {
-      generateButton.disabled = detecting || gridContract === null;
+      chartDetectionRunning = detecting;
+      syncChartConfirmationUi();
     },
   });
   required(chartWorkspace, '[data-chart-redetect]', HTMLButtonElement).addEventListener(
@@ -3411,10 +3529,17 @@ function setupChartWorkspace(): GridEditorController {
     'click',
     controller.resetSelection,
   );
+  dimensionForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    chartWarningAcknowledged = false;
+    controller.adjustDimensions(columnsInput.valueAsNumber, rowsInput.valueAsNumber);
+    syncChartConfirmationUi();
+  });
   for (const axisButton of chartWorkspace.querySelectorAll<HTMLButtonElement>(
     '[data-chart-axis]',
   )) {
     axisButton.addEventListener('click', () => {
+      chartMirrorCoordinator.cancel();
       chartAxis = axisButton.dataset.chartAxis === 'vertical' ? 'vertical' : 'horizontal';
       for (const button of chartWorkspace.querySelectorAll<HTMLButtonElement>(
         '[data-chart-axis]',
@@ -3424,9 +3549,19 @@ function setupChartWorkspace(): GridEditorController {
         button.setAttribute('aria-pressed', String(active));
       }
       clearChartResult();
+      syncChartConfirmationUi();
     });
   }
   generateButton.addEventListener('click', () => {
+    const confirmation = resolveGridConfirmation(gridContract, chartWarningAcknowledged);
+    if (confirmation.requiresWarningAcknowledgement) {
+      chartWarningAcknowledged = true;
+      syncChartConfirmationUi();
+      gridController.setMessage(
+        `${confirmation.warning ?? '请复核当前网格。'} 请再次点击“仍要镜像”。`,
+      );
+      return;
+    }
     void generateChartMirror();
   });
   downloadButton.addEventListener('click', () => {
@@ -3437,7 +3572,42 @@ function setupChartWorkspace(): GridEditorController {
       anchor.click();
     }
   });
+  syncChartConfirmationUi();
   return controller;
+}
+
+function syncChartConfirmationUi(): void {
+  const confirmation = resolveGridConfirmation(gridContract, chartWarningAcknowledged);
+  const dimensions = required(chartWorkspace, '[data-chart-dimensions]', HTMLElement);
+  const confidence = required(chartWorkspace, '[data-chart-confidence]', HTMLElement);
+  const warning = required(chartWorkspace, '[data-chart-warning]', HTMLElement);
+  const columns = required(chartWorkspace, '[data-chart-columns]', HTMLInputElement);
+  const rows = required(chartWorkspace, '[data-chart-rows]', HTMLInputElement);
+  const applyDimensions = required(
+    chartWorkspace,
+    '[data-chart-apply-dimensions]',
+    HTMLButtonElement,
+  );
+  const generate = required(chartWorkspace, '[data-chart-generate]', HTMLButtonElement);
+  const hasContract = gridContract !== null;
+  const mirrorRunning = chartMirrorCoordinator.isRunning();
+
+  dimensions.textContent = confirmation.dimensions;
+  confidence.textContent = confirmation.confidenceLabel;
+  confidence.dataset.state = confirmation.level;
+  warning.textContent = confirmation.warning ?? '';
+  warning.hidden = confirmation.warning === null;
+  columns.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
+  rows.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
+  applyDimensions.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
+  generate.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
+  generate.textContent = mirrorRunning
+    ? '正在镜像图纸…'
+    : confirmation.requiresWarningAcknowledgement
+      ? '确认识别结果'
+      : confirmation.level === 'review'
+        ? '仍要镜像'
+        : '确认并镜像';
 }
 
 function openChartWorkspace(): void {
@@ -3445,9 +3615,13 @@ function openChartWorkspace(): void {
   if (!image) {
     return;
   }
+  chartMirrorCoordinator.cancel();
+  chartWarningAcknowledged = false;
+  chartDetectionRunning = false;
   showStage('chart');
   gridContract = null;
   clearChartResult();
+  syncChartConfirmationUi();
   gridController.setImage({
     file: image.file,
     fileName: image.file.name,
@@ -3462,42 +3636,40 @@ async function generateChartMirror(): Promise<void> {
   if (!image || !contract) {
     return;
   }
-  chartMirrorController?.abort();
-  const controller = new AbortController();
-  chartMirrorController = controller;
-  const button = required(chartWorkspace, '[data-chart-generate]', HTMLButtonElement);
-  button.disabled = true;
-  button.textContent = '正在镜像图纸…';
+  const confirmation = resolveGridConfirmation(contract, chartWarningAcknowledged);
+  if (!confirmation.canSubmit || chartMirrorCoordinator.isRunning()) {
+    return;
+  }
   gridController.setMessage('正在镜像完整拼豆格，坐标和图例会保持原位…');
-  clearChartResult();
+  const task = chartMirrorCoordinator.run(image.file, contract, chartAxis);
+  syncChartConfirmationUi();
 
   try {
-    const blob = await mirrorGrid(image.file, contract, chartAxis, controller.signal);
-    if (controller.signal.aborted) {
+    const blob = await task;
+    if (!blob) {
       return;
     }
-    chartResultUrl = URL.createObjectURL(blob);
-    gridController.showResult(chartResultUrl);
+    const previousResultUrl = chartResultUrl;
+    const nextResultUrl = URL.createObjectURL(blob);
+    chartResultUrl = nextResultUrl;
+    gridController.showResult(nextResultUrl);
+    if (previousResultUrl) {
+      URL.revokeObjectURL(previousResultUrl);
+    }
     gridController.setMessage(
       chartAxis === 'horizontal'
-        ? '左右镜像已完成，网格外坐标和图例保持不变。'
-        : '上下镜像已完成，网格外坐标和图例保持不变。',
+        ? '水平镜像已完成，网格外坐标和图例保持不变。'
+        : '垂直镜像已完成，网格外坐标和图例保持不变。',
     );
     const download = required(chartWorkspace, '[data-chart-download]', HTMLButtonElement);
     download.hidden = false;
     download.disabled = false;
   } catch (error) {
-    if (!controller.signal.aborted && !isAbortError(error)) {
-      gridController.setMessage(
-        error instanceof MirrorMasterApiError ? error.message : '智能镜像失败，请重新识别后再试。',
-      );
-    }
+    gridController.setMessage(
+      error instanceof MirrorMasterApiError ? error.message : '镜像失败，请重新识别后再试。',
+    );
   } finally {
-    button.disabled = gridContract === null;
-    button.textContent = '智能镜像图纸';
-    if (chartMirrorController === controller) {
-      chartMirrorController = null;
-    }
+    syncChartConfirmationUi();
   }
 }
 
@@ -3585,7 +3757,7 @@ function resetToStart(): void {
   previewCoordinator.cancel();
   clearPreviewRegenerationTimer();
   exportCoordinator.invalidate();
-  chartMirrorController?.abort();
+  chartMirrorCoordinator.cancel();
   recommendationRequests.cancel();
   availableColorDialogController?.close();
   canvasController?.destroy();
@@ -3600,12 +3772,15 @@ function resetToStart(): void {
   firstPreviewGenerationStarted = false;
   mirrorChartIntent = false;
   holdOriginalActive = false;
+  previewRenderMode = DEFAULT_PREVIEW_RENDER_MODE;
   disposeSourceImageSession();
   currentSelection = null;
   currentSelectionViewportRect = null;
   selectionTransferMode = null;
   recentColorIds = Object.freeze([]);
   gridContract = null;
+  chartWarningAcknowledged = false;
+  chartDetectionRunning = false;
   applyUploadPrepareFlow(resetFlowForReplacement(currentUploadPrepareFlow()));
   mode = 'photo';
   samplingSelection = createAutomaticSampling('photo', appCapabilities.sampling);
@@ -3617,6 +3792,8 @@ function resetToStart(): void {
   projectFileStatus.textContent = '';
   setFileStatus('', 'ready');
   previewCompareRadioController.setValue('pattern');
+  previewView.setRenderMode(previewRenderMode);
+  syncPreviewModeControls();
   applyPreviewCompareView('pattern');
   setPreviewStatusText('');
   syncPreviewResult();
@@ -4173,7 +4350,7 @@ function cleanup(): void {
   previewCoordinator.destroy();
   backgroundRemovalCoordinator.destroy();
   exportCoordinator.destroy();
-  chartMirrorController?.abort();
+  chartMirrorCoordinator.cancel();
   recommendationRequests.cancel();
   canvasController?.destroy();
   preparePresetControls?.destroy();

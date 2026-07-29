@@ -185,6 +185,8 @@ function panelView(overrides: Partial<WorkspacePanelsView> = {}): WorkspacePanel
       },
     ],
     materialHeading: '12 颗 · 1 色',
+    trustPrimary: '总格数 48 · 实际用豆 12 · 空白 36 · 1 种颜色',
+    trustVerification: '图纸统计校验通过',
     materialSize: '4.0 × 3.0 cm',
     materialBoards: '1 块',
     materialBlanks: '2 格',
@@ -212,8 +214,16 @@ test('workspace panel updates retain every panel and keyed palette/material node
   const settingsPanel = controller.panelFor('settings');
   const colorNode = controller.colorNodeFor('mard:A1');
   const materialNode = controller.materialNodeFor('mard:A1');
+  const trustSummary = materialPanel.querySelector<HTMLElement>('[data-workspace-trust-summary]');
+  const trustVerification = materialPanel.querySelector<HTMLElement>(
+    '[data-workspace-trust-verification]',
+  );
   assert.ok(colorNode);
   assert.ok(materialNode);
+  assert.ok(trustSummary);
+  assert.ok(trustVerification);
+  assert.match(settingsPanel.textContent ?? '', /水平翻转图案/u);
+  assert.match(settingsPanel.textContent ?? '', /垂直翻转图案/u);
   colorNode.focus();
   const paletteGrid = palettePanel.querySelector<HTMLElement>('[data-workspace-palette-list]');
   assert.ok(paletteGrid);
@@ -258,6 +268,7 @@ test('workspace panel updates retain every panel and keyed palette/material node
           count: 13,
         },
       ],
+      trustPrimary: '总格数 48 · 实际用豆 13 · 空白 35 · 1 种颜色',
     }),
   );
 
@@ -267,6 +278,12 @@ test('workspace panel updates retain every panel and keyed palette/material node
   assert.equal(controller.panelFor('settings') === settingsPanel, true);
   assert.equal(controller.colorNodeFor('mard:A1') === colorNode, true);
   assert.equal(controller.materialNodeFor('mard:A1') === materialNode, true);
+  assert.equal(
+    materialPanel.querySelector('[data-workspace-trust-summary]') === trustSummary,
+    true,
+  );
+  assert.equal(trustSummary.textContent, '总格数 48 · 实际用豆 13 · 空白 35 · 1 种颜色');
+  assert.equal(trustVerification.textContent, '图纸统计校验通过');
   assert.equal(document.activeElement === colorNode, true);
   assert.equal(paletteGrid.scrollTop, 55);
   assert.equal(colorNode.textContent?.includes('暖白'), true);

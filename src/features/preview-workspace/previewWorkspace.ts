@@ -1,45 +1,79 @@
+import { DEFAULT_PREVIEW_RENDER_MODE, PREVIEW_RENDER_MODES } from './previewMode';
+
 export function renderPreviewWorkspace(): string {
   return `
     <section class="preview-workspace stage-panel" data-preview-workspace hidden aria-labelledby="preview-title">
       <h1 id="preview-title" class="visually-hidden">预览图纸</h1>
       <div class="preview-layout">
         <div class="preview-canvas-column">
-          <div class="preview-compare-bar">
-            <vaadin-radio-group
-              class="compare-switch"
-              aria-label="在原图和拼豆预览之间切换"
-              data-compare-switch
-            >
-              <vaadin-radio-button value="pattern" checked>
-                <label slot="label">拼豆</label>
-              </vaadin-radio-button>
-              <vaadin-radio-button value="original">
-                <label slot="label">原图</label>
-              </vaadin-radio-button>
-            </vaadin-radio-group>
-            <button class="secondary-button hold-original-button" type="button" data-hold-original>
-              <i class="ph ph-eye" aria-hidden="true"></i>
-              按住对比
-            </button>
-            <div class="background-removal-control" data-background-removal-control hidden>
-              <button
-                class="secondary-button background-removal-button"
-                type="button"
-                data-background-removal-action
-                disabled
+          <div class="preview-toolbar">
+            <div class="preview-compare-bar">
+              <vaadin-radio-group
+                class="compare-switch"
+                aria-label="在原图和拼豆预览之间切换"
+                data-compare-switch
               >
-                一键去背景
+                <vaadin-radio-button value="pattern" checked>
+                  <label slot="label">拼豆</label>
+                </vaadin-radio-button>
+                <vaadin-radio-button value="original">
+                  <label slot="label">原图</label>
+                </vaadin-radio-button>
+              </vaadin-radio-group>
+              <button class="secondary-button hold-original-button" type="button" data-hold-original>
+                <i class="ph ph-eye" aria-hidden="true"></i>
+                按住对比
               </button>
-              <span class="background-removal-copy">
-                自动保留主要人物或物体，处理后可恢复原图
-                <span
-                  data-background-removal-status
-                  role="status"
-                  aria-live="polite"
-                ></span>
-              </span>
+              <div class="preview-image-actions" data-preview-image-actions>
+                <button
+                  class="secondary-button preview-image-action adjust-source-button"
+                  type="button"
+                  aria-label="调整原图"
+                  data-adjust-source
+                >
+                  <i class="ph ph-crop" aria-hidden="true"></i>
+                  <span data-action-label-short>裁剪</span>
+                  <span data-action-label-long>调整原图</span>
+                </button>
+                <div class="background-removal-control" data-background-removal-control hidden>
+                  <button
+                    class="secondary-button preview-image-action background-removal-button"
+                    type="button"
+                    aria-label="一键去背景"
+                    data-background-removal-action
+                    disabled
+                  >
+                    <i class="ph ph-person-simple-circle" aria-hidden="true"></i>
+                    <span data-background-removal-label-short>去背</span>
+                    <span data-background-removal-label-long>一键去背景</span>
+                  </button>
+                </div>
+                <button
+                  class="secondary-button preview-image-action replace-source-button"
+                  type="button"
+                  aria-label="更换图片"
+                  data-prepare-replace
+                >
+                  <i class="ph ph-image" aria-hidden="true"></i>
+                  <span data-action-label-short>换图</span>
+                  <span data-action-label-long>更换图片</span>
+                </button>
+              </div>
+              <p data-background-removal-status role="status" aria-live="polite"></p>
             </div>
-            <button class="text-button" type="button" data-prepare-replace>更换图片</button>
+            <div class="preview-mode-control">
+              <div
+                class="preview-mode-strip"
+                role="group"
+                aria-label="切换拼豆预览样式"
+                data-preview-mode-strip
+              >
+                ${renderPreviewModeButtons()}
+              </div>
+              <p class="preview-mode-note" data-preview-mode-note aria-live="polite">
+                模拟带中心孔的实体拼豆外观
+              </p>
+            </div>
           </div>
 
           <div class="preview-canvas-slot" data-preview-canvas-slot>
@@ -57,6 +91,14 @@ export function renderPreviewWorkspace(): string {
                 >
               </div>
               <div class="preview-original-view" data-preview-original-view hidden>
+                <canvas
+                  class="preview-canvas preview-original-canvas"
+                  data-preview-original-canvas
+                  role="img"
+                  aria-label="与拼豆预览严格对齐的原图"
+                ></canvas>
+              </div>
+              <div class="preview-adjust-view" data-preview-adjust-view hidden>
                 <div class="crop-frame" data-crop-frame>
                   <canvas data-crop-canvas aria-label="待裁剪的图片"></canvas>
                   <div class="crop-mask" aria-hidden="true"></div>
@@ -85,6 +127,9 @@ export function renderPreviewWorkspace(): string {
                     向右旋转
                   </button>
                   <span data-image-summary></span>
+                  <button class="primary-button" type="button" data-finish-source-adjust>
+                    完成调整
+                  </button>
                 </div>
               </div>
             </div>
@@ -92,6 +137,15 @@ export function renderPreviewWorkspace(): string {
 
           <p class="preview-status" data-preview-status role="status" aria-live="polite"></p>
           <p class="preview-summary" data-preview-summary hidden></p>
+          <div class="pattern-trust preview-trust" data-preview-trust hidden>
+            <p data-preview-trust-summary></p>
+            <p
+              class="pattern-trust-verification"
+              data-preview-trust-verification
+              role="status"
+              aria-live="polite"
+            ></p>
+          </div>
         </div>
 
         <aside
@@ -130,6 +184,21 @@ export function renderPreviewWorkspace(): string {
       </div>
     </section>
   `;
+}
+
+function renderPreviewModeButtons(): string {
+  return PREVIEW_RENDER_MODES.map(
+    ({ id, label }) => `
+      <button
+        class="preview-mode-button"
+        type="button"
+        data-preview-mode="${id}"
+        aria-pressed="${String(id === DEFAULT_PREVIEW_RENDER_MODE)}"
+      >
+        ${label}
+      </button>
+    `,
+  ).join('');
 }
 
 function renderPreviewControlsPanel(): string {

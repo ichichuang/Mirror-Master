@@ -1,17 +1,15 @@
-import {
-  calculatePhysicalLayout,
-  type BeadProject,
-  type ProjectStatistics,
-} from '../../domain/project';
+import { calculatePhysicalLayout, type BeadProject } from '../../domain/project';
+import { createPatternTrustSummary } from '../pattern-trust/patternTrust';
 
-export function formatPreviewSummary(project: BeadProject, statistics: ProjectStatistics): string {
+export function formatPreviewSummary(project: BeadProject): string {
   const layout = calculatePhysicalLayout(project);
+  const trust = createPatternTrustSummary(project);
   return (
     `${String(project.grid.columns)} × ${String(project.grid.rows)} 颗 · ` +
-    `${String(statistics.usedColorCount)} 色 · ` +
+    `${String(trust.usedColorCount)} 色 · ` +
     `约 ${formatCentimeters(layout.widthMm)} × ${formatCentimeters(layout.heightMm)} cm · ` +
     `${String(layout.boardCount)} 块拼板 · ` +
-    `共 ${statistics.nonEmptyBeadCount.toLocaleString('zh-CN')} 颗`
+    `共 ${trust.nonEmptyBeadCount.toLocaleString('zh-CN')} 颗`
   );
 }
 

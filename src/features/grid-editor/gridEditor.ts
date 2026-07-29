@@ -11,6 +11,7 @@ import {
   translateNaturalRect,
 } from '../grid-selection/geometry';
 import type { NaturalImageRect, NaturalImageSize } from '../grid-selection/types';
+import { createGridDimensionContract } from './confirmationState';
 
 type HandleType = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
 type ZoomMode = 'fit' | 'manual';
@@ -64,6 +65,7 @@ export interface GridEditorController {
   readonly setImage: (image: GridEditorImage) => void;
   readonly redetect: () => void;
   readonly resetSelection: () => void;
+  readonly adjustDimensions: (columns: number, rows: number) => boolean;
   readonly clearResult: () => void;
   readonly showResult: (objectUrl: string) => void;
   readonly showOriginal: () => void;
@@ -210,6 +212,29 @@ export function mountGridEditor(
     }
 
     redetect();
+  }
+
+  function adjustDimensions(columns: number, rows: number): boolean {
+    if (!contract || !currentImage) {
+      setHint('请先完成网格识别，再修改行列数。');
+      return false;
+    }
+
+    const nextContract = createGridDimensionContract(contract, columns, rows);
+    if (!nextContract) {
+      setHint('当前图片无法容纳这个行列数，请缩小数值后重试。');
+      return false;
+    }
+
+    cancelDetection();
+    contract = nextContract;
+    lastValidContract = nextContract;
+    searchRect = rectangleFromContract(nextContract, currentImage.naturalImage);
+    clearResult();
+    renderOverlay();
+    lifecycle.onContractChange?.(nextContract, currentImage.file);
+    setHint(formatContractStatus(nextContract));
+    return true;
   }
 
   async function runDetection(
@@ -684,6 +709,7 @@ export function mountGridEditor(
     setImage,
     redetect,
     resetSelection,
+    adjustDimensions,
     clearResult,
     showResult,
     showOriginal,

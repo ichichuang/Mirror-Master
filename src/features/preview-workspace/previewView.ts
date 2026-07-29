@@ -1,9 +1,16 @@
-import type { BeadProject, ProjectStatistics } from '../../domain/project';
+import type { BeadProject, ImageRotation, ProjectStatistics } from '../../domain/project';
+import type { CropPercent } from '../crop-controls/cropControls';
 import {
   clearPatternPreview,
   computePreviewFrameSize,
   drawPatternPreview,
 } from './previewRenderer';
+import { drawAlignedOriginalPreview } from './previewCrop';
+import { DEFAULT_PREVIEW_RENDER_MODE, type PreviewRenderMode } from './previewMode';
+import {
+  createPatternTrustSummary,
+  formatPatternTrustSummary,
+} from '../pattern-trust/patternTrust';
 import { formatPreviewDoneStatus, formatPreviewSummary } from './previewSummary';
 
 export interface PreviewResultViewInput {
@@ -16,6 +23,7 @@ export interface PreviewResultViewInput {
 export interface PreviewViewOptions {
   readonly root: HTMLElement;
   readonly colorHexById: ReadonlyMap<string, string>;
+  readonly colorCodeById?: ReadonlyMap<string, string>;
   readonly onShowOriginal: () => void;
 }
 
@@ -27,7 +35,13 @@ export interface PreviewViewController {
   readonly drawPreview: (project: BeadProject | null) => void;
   readonly syncResult: (input: PreviewResultViewInput) => void;
   readonly updateEstimate: (usedColors: number) => void;
-  readonly applyCompareView: (view: 'original' | 'pattern') => void;
+  readonly setRenderMode: (mode: PreviewRenderMode) => void;
+  readonly drawAlignedOriginal: (
+    image: HTMLImageElement,
+    rotation: ImageRotation,
+    crop: CropPercent,
+  ) => void;
+  readonly applyCompareView: (view: 'adjust' | 'original' | 'pattern') => void;
 }
 
 export function createPreviewView(options: PreviewViewOptions): PreviewViewController {
@@ -39,13 +53,19 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
   const badge = required(root, '[data-preview-badge]') as HTMLElement;
   const status = required(root, '[data-preview-status]') as HTMLElement;
   const summary = required(root, '[data-preview-summary]') as HTMLElement;
+  const trust = required(root, '[data-preview-trust]') as HTMLElement;
+  const trustSummary = required(root, '[data-preview-trust-summary]') as HTMLElement;
+  const trustVerification = required(root, '[data-preview-trust-verification]') as HTMLElement;
   const sheetSummary = required(root, '[data-preview-sheet-summary]') as HTMLElement;
   const estimate = required(root, '[data-color-count-estimate]') as HTMLElement;
   const editButton = required(root, '[data-edit-pattern]') as HTMLButtonElement;
   const returnEditorButton = required(root, '[data-return-editor]') as HTMLButtonElement;
   const originalView = required(root, '[data-preview-original-view]') as HTMLElement;
+  const originalCanvas = required(root, '[data-preview-original-canvas]') as HTMLCanvasElement;
+  const adjustView = required(root, '[data-preview-adjust-view]') as HTMLElement;
   const patternView = required(root, '[data-preview-pattern-view]') as HTMLElement;
   let lastProject: BeadProject | null = null;
+  let renderMode: PreviewRenderMode = DEFAULT_PREVIEW_RENDER_MODE;
 
   return Object.freeze({
     setStatusText(
@@ -70,12 +90,19 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
     syncResult(input: PreviewResultViewInput): void {
       drawPreview(input.project);
       if (input.project && input.statistics) {
+        const trustCopy = formatPatternTrustSummary(createPatternTrustSummary(input.project));
         summary.hidden = false;
-        summary.textContent = formatPreviewSummary(input.project, input.statistics);
+        summary.textContent = formatPreviewSummary(input.project);
+        trust.hidden = false;
+        trustSummary.textContent = trustCopy.primary;
+        trustVerification.textContent = trustCopy.verification;
         sheetSummary.textContent = '大小、颜色与风格';
       } else {
         summary.hidden = true;
         summary.textContent = '';
+        trust.hidden = true;
+        trustSummary.textContent = '';
+        trustVerification.textContent = '';
         sheetSummary.textContent = '调整图案大小、颜色与风格';
       }
       updateEstimate(input.statistics?.usedColorCount ?? null);
@@ -95,12 +122,20 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
       returnEditorButton.hidden = !input.canReturnToEditor;
     },
     updateEstimate,
-    applyCompareView(view: 'original' | 'pattern'): void {
+    setRenderMode(mode: PreviewRenderMode): void {
+      renderMode = mode;
+      drawPreview(lastProject);
+    },
+    drawAlignedOriginal(image: HTMLImageElement, rotation: ImageRotation, crop: CropPercent): void {
+      drawAlignedOriginalPreview(originalCanvas, image, rotation, crop);
+    },
+    applyCompareView(view: 'adjust' | 'original' | 'pattern'): void {
       originalView.hidden = view !== 'original';
-      patternView.hidden = view === 'original';
+      patternView.hidden = view !== 'pattern';
+      adjustView.hidden = view !== 'adjust';
       if (view === 'original') {
         options.onShowOriginal();
-      } else {
+      } else if (view === 'pattern') {
         drawPreview(lastProject);
       }
     },
@@ -133,7 +168,13 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
       canvasStack.style.blockSize = `${String(frame.height)}px`;
     }
     emptyHint.hidden = true;
-    drawPatternPreview(canvas, project.cells, options.colorHexById);
+    drawPatternPreview(
+      canvas,
+      project.cells,
+      options.colorHexById,
+      renderMode,
+      options.colorCodeById,
+    );
   }
 
   function updateEstimate(usedColors: number | null): void {

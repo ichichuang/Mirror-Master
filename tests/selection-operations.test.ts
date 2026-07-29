@@ -92,7 +92,7 @@ test('move snapshots the source before deterministic overlapping writes', () => 
   });
 });
 
-test('copy clips cells and the resulting selection at the matrix boundary', () => {
+test('copy bounds the full selection inside the matrix', () => {
   const cells = matrix([[EMPTY, bead('A'), bead('B'), EMPTY]]);
   const selection: CellSelection = {
     startRow: 0,
@@ -102,16 +102,16 @@ test('copy clips cells and the resulting selection at the matrix boundary', () =
   };
   const result = copySelectedCells(cells, selection, 0, 2);
 
-  assert.deepEqual(result.cells, matrix([[EMPTY, bead('A'), bead('B'), bead('A')]]));
+  assert.deepEqual(result.cells, matrix([[EMPTY, bead('A'), bead('A'), bead('B')]]));
   assert.deepEqual(result.selection, {
     startRow: 0,
-    startColumn: 3,
+    startColumn: 2,
     endRow: 0,
     endColumn: 3,
   });
 });
 
-test('a partially out-of-bounds move clears the full source and keeps only valid targets', () => {
+test('a partially out-of-bounds move is bounded before committing', () => {
   const cells = matrix([
     [bead('A'), bead('B'), EMPTY],
     [bead('C'), bead('D'), EMPTY],
@@ -128,13 +128,13 @@ test('a partially out-of-bounds move clears the full source and keeps only valid
   assert.deepEqual(
     result.cells,
     matrix([
-      [EMPTY, EMPTY, bead('A')],
-      [EMPTY, EMPTY, bead('C')],
+      [EMPTY, bead('A'), bead('B')],
+      [EMPTY, bead('C'), bead('D')],
     ]),
   );
   assert.deepEqual(result.selection, {
     startRow: 0,
-    startColumn: 2,
+    startColumn: 1,
     endRow: 1,
     endColumn: 2,
   });

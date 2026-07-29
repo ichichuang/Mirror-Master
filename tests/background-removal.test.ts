@@ -260,7 +260,7 @@ test('capability gating hides unavailable background removal and disables incomp
       activeVariant: 'original',
       busy: false,
     }),
-    { hidden: true, disabled: true, label: '一键去背景' },
+    { hidden: true, disabled: true, label: '一键去背景', compactLabel: '去背' },
   );
   assert.deepEqual(
     resolveBackgroundRemovalActionState({
@@ -270,17 +270,42 @@ test('capability gating hides unavailable background removal and disables incomp
       activeVariant: 'original',
       busy: false,
     }),
-    { hidden: false, disabled: true, label: '一键去背景' },
+    { hidden: false, disabled: true, label: '一键去背景', compactLabel: '去背' },
   );
-  assert.equal(
+  assert.deepEqual(
+    resolveBackgroundRemovalActionState({
+      capabilityAvailable: true,
+      hasSource: true,
+      hasForeground: false,
+      activeVariant: 'original',
+      busy: true,
+    }),
+    { hidden: false, disabled: true, label: '正在去背景…', compactLabel: '处理中' },
+  );
+  assert.deepEqual(
     resolveBackgroundRemovalActionState({
       capabilityAvailable: true,
       hasSource: true,
       hasForeground: true,
       activeVariant: 'foreground',
       busy: false,
-    }).label,
-    '恢复原图',
+    }),
+    { hidden: false, disabled: false, label: '恢复原图', compactLabel: '恢复' },
+  );
+  assert.deepEqual(
+    resolveBackgroundRemovalActionState({
+      capabilityAvailable: true,
+      hasSource: true,
+      hasForeground: true,
+      activeVariant: 'original',
+      busy: false,
+    }),
+    {
+      hidden: false,
+      disabled: false,
+      label: '使用去背景图',
+      compactLabel: '使用去背图',
+    },
   );
 });
 

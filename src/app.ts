@@ -75,7 +75,7 @@ function renderPatternWorkspace(): string {
         <div class="canvas-toolbar">
           <div class="view-switch" role="group" aria-label="图案视图">
             <button type="button" class="is-active" aria-pressed="true" data-front-view>正面</button>
-            <button type="button" aria-pressed="false" data-reverse-view>反面</button>
+            <button type="button" aria-pressed="false" data-reverse-view>查看反面</button>
           </div>
           <div class="canvas-toolbar-group" aria-label="编辑历史">
             <button class="icon-button" type="button" data-undo disabled aria-label="撤销">
@@ -411,7 +411,17 @@ function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
           <i class="ph ph-arrow-left" aria-hidden="true"></i>
         </button>
       </div>
-      <p class="export-summary" data-export-summary>当前图纸已可分享、打印或继续保存。</p>
+      <div class="pattern-trust export-pattern-trust">
+        <p class="export-summary" data-export-summary data-export-trust-summary>
+          当前图纸已可分享、打印或继续保存。
+        </p>
+        <p
+          class="pattern-trust-verification"
+          data-export-trust-verification
+          role="status"
+          aria-live="polite"
+        ></p>
+      </div>
       <div class="export-task-grid" role="group" aria-label="导出任务">
         ${EXPORT_TASKS.map((task) => renderExportTask(task)).join('')}
       </div>
@@ -485,6 +495,47 @@ function renderChartWorkspace(): string {
           <button class="secondary-button" type="button" data-chart-reset>重置选区</button>
         </div>
       </div>
+      <div class="chart-confirmation-summary" data-chart-confirmation>
+        <div class="chart-confirmation-status">
+          <strong data-chart-dimensions>尚未检测到有效网格</strong>
+          <span data-chart-confidence data-state="insufficient">网格置信度：不足</span>
+        </div>
+        <p data-chart-warning role="status" aria-live="polite" hidden></p>
+        <form class="chart-dimension-form" data-chart-dimension-form>
+          <label>
+            <span>列数</span>
+            <input
+              type="number"
+              data-chart-columns
+              inputmode="numeric"
+              min="2"
+              max="300"
+              step="1"
+              disabled
+            />
+          </label>
+          <label>
+            <span>行数</span>
+            <input
+              type="number"
+              data-chart-rows
+              inputmode="numeric"
+              min="2"
+              max="300"
+              step="1"
+              disabled
+            />
+          </label>
+          <button
+            class="secondary-button"
+            type="submit"
+            data-chart-apply-dimensions
+            disabled
+          >
+            修改行列数
+          </button>
+        </form>
+      </div>
       <div class="editor-chrome">
         <div class="view-tabs" role="tablist" aria-label="图纸视图" aria-orientation="horizontal">
           <button
@@ -547,15 +598,15 @@ function renderChartWorkspace(): string {
       <div class="chart-primary-bar">
         <div class="chart-axis" role="group" aria-label="镜像方向">
           <button type="button" class="is-active" aria-pressed="true" data-chart-axis="horizontal">
-            左右镜像
+            水平镜像
           </button>
           <button type="button" aria-pressed="false" data-chart-axis="vertical">
-            上下镜像
+            垂直镜像
           </button>
         </div>
         <button class="secondary-button" type="button" data-return-adjust hidden>返回调整</button>
         <button class="primary-button" type="button" data-chart-generate disabled>
-          智能镜像图纸
+          确认并镜像
         </button>
         <button class="secondary-button" type="button" data-chart-download hidden disabled>
           下载镜像图纸

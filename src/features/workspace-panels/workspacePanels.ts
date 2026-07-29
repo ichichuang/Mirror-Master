@@ -36,6 +36,8 @@ export interface WorkspacePanelsView {
   readonly paletteColors: readonly WorkspacePaletteColor[];
   readonly materials: readonly WorkspaceMaterial[];
   readonly materialHeading: string;
+  readonly trustPrimary: string;
+  readonly trustVerification: string;
   readonly materialSize: string;
   readonly materialBoards: string;
   readonly materialBlanks: string;
@@ -316,6 +318,8 @@ function updateSharedPanelContent(root: HTMLElement, view: WorkspacePanelsView):
   }
 
   setText(root, '[data-material-heading]', view.materialHeading);
+  setText(root, '[data-workspace-trust-summary]', view.trustPrimary);
+  setText(root, '[data-workspace-trust-verification]', view.trustVerification);
   setText(root, '[data-material-size]', view.materialSize);
   setText(root, '[data-material-boards]', view.materialBoards);
   setText(root, '[data-material-blanks]', view.materialBlanks);
@@ -389,8 +393,19 @@ function buildPalettePanel(document: Document): HTMLElement {
 function buildMaterialsPanel(document: Document): HTMLElement {
   const panel = panelElement(document, 'materials');
   const heading = panelHeading(document, '材料清单', 'data-material-heading');
+  const trust = document.createElement('div');
+  const trustSummary = document.createElement('p');
+  const trustVerification = document.createElement('p');
   const summary = document.createElement('dl');
   const list = document.createElement('ul');
+  trust.className = 'pattern-trust workspace-pattern-trust';
+  trust.dataset.workspaceTrust = '';
+  trustSummary.dataset.workspaceTrustSummary = '';
+  trustVerification.className = 'pattern-trust-verification';
+  trustVerification.dataset.workspaceTrustVerification = '';
+  trustVerification.setAttribute('role', 'status');
+  trustVerification.setAttribute('aria-live', 'polite');
+  trust.append(trustSummary, trustVerification);
   summary.className = 'material-summary';
   summary.append(
     definitionRow(document, '成品大小', 'data-material-size'),
@@ -400,7 +415,7 @@ function buildMaterialsPanel(document: Document): HTMLElement {
   list.className = 'material-list';
   list.dataset.workspaceMaterialList = '';
   list.dataset.materialList = '';
-  panel.append(heading, summary, list);
+  panel.append(heading, trust, summary, list);
   return panel;
 }
 
@@ -419,8 +434,8 @@ function buildSettingsPanel(document: Document): HTMLElement {
   );
   actions.className = 'panel-actions';
   actions.append(
-    mirrorButton(document, 'horizontal', 'ph-arrows-left-right', '左右镜像'),
-    mirrorButton(document, 'vertical', 'ph-arrows-down-up', '上下镜像'),
+    mirrorButton(document, 'horizontal', 'ph-arrows-left-right', '水平翻转图案'),
+    mirrorButton(document, 'vertical', 'ph-arrows-down-up', '垂直翻转图案'),
   );
   panel.append(heading, settings, actions);
   return panel;

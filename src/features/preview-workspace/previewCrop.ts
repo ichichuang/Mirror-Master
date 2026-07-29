@@ -7,6 +7,20 @@ import {
 import { syncCropNumericInputValues } from '../prepare-workspace/prepareWorkspace';
 import type { ImageRotation } from '../../domain/project';
 
+export interface SourceDimensions {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface RotatedCropSourceRect {
+  readonly rotatedWidth: number;
+  readonly rotatedHeight: number;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 export interface CropNumericInputs {
   readonly x: HTMLInputElement;
   readonly y: HTMLInputElement;
@@ -64,6 +78,72 @@ export function drawRotatedCropPreview(
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
   }
   context.restore();
+}
+
+export function computeRotatedCropSourceRect(
+  source: SourceDimensions,
+  rotation: ImageRotation,
+  crop: CropPercent,
+): RotatedCropSourceRect {
+  if (
+    !Number.isFinite(source.width) ||
+    !Number.isFinite(source.height) ||
+    source.width <= 0 ||
+    source.height <= 0
+  ) {
+    throw new Error('原图尺寸必须是正数。');
+  }
+  const rotatedWidth = rotation === 90 || rotation === 270 ? source.height : source.width;
+  const rotatedHeight = rotation === 90 || rotation === 270 ? source.width : source.height;
+  const xPercent = clamp(crop.x, 0, 100);
+  const yPercent = clamp(crop.y, 0, 100);
+  const widthPercent = clamp(crop.width, 0, 100 - xPercent);
+  const heightPercent = clamp(crop.height, 0, 100 - yPercent);
+  return Object.freeze({
+    rotatedWidth,
+    rotatedHeight,
+    x: rotatedWidth * (xPercent / 100),
+    y: rotatedHeight * (yPercent / 100),
+    width: Math.max(1, rotatedWidth * (widthPercent / 100)),
+    height: Math.max(1, rotatedHeight * (heightPercent / 100)),
+  });
+}
+
+export function drawAlignedOriginalPreview(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement,
+  rotation: ImageRotation,
+  crop: CropPercent,
+): boolean {
+  const context = canvas.getContext('2d');
+  if (!context || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return false;
+  }
+  const host = canvas.parentElement;
+  const canvasWidth = Math.max(1, Math.floor(canvas.clientWidth || host?.clientWidth || 1));
+  const canvasHeight = Math.max(1, Math.floor(canvas.clientHeight || host?.clientHeight || 1));
+  const pixelRatio = Math.max(
+    1,
+    canvas.ownerDocument.defaultView?.devicePixelRatio || globalThis.devicePixelRatio || 1,
+  );
+  const backingWidth = Math.max(1, Math.round(canvasWidth * pixelRatio));
+  const backingHeight = Math.max(1, Math.round(canvasHeight * pixelRatio));
+  if (canvas.width !== backingWidth) canvas.width = backingWidth;
+  if (canvas.height !== backingHeight) canvas.height = backingHeight;
+
+  const sourceRect = computeRotatedCropSourceRect(
+    { width: image.naturalWidth, height: image.naturalHeight },
+    rotation,
+    crop,
+  );
+  context.save();
+  context.scale(pixelRatio, pixelRatio);
+  context.clearRect(0, 0, canvasWidth, canvasHeight);
+  context.scale(canvasWidth / sourceRect.width, canvasHeight / sourceRect.height);
+  context.translate(-sourceRect.x, -sourceRect.y);
+  drawRotatedSource(context, image, rotation, sourceRect.rotatedWidth, sourceRect.rotatedHeight);
+  context.restore();
+  return true;
 }
 
 export function renderCropSelectionOverlay(
@@ -244,6 +324,27 @@ function isCropArrowKey(value: string): value is CropArrowKey {
   return ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(value);
 }
 
+function drawRotatedSource(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  rotation: ImageRotation,
+  rotatedWidth: number,
+  rotatedHeight: number,
+): void {
+  if (rotation === 90) {
+    context.translate(rotatedWidth, 0);
+    context.rotate(Math.PI / 2);
+  } else if (rotation === 180) {
+    context.translate(rotatedWidth, rotatedHeight);
+    context.rotate(Math.PI);
+  } else if (rotation === 270) {
+    context.translate(0, rotatedHeight);
+    context.rotate(-Math.PI / 2);
+  }
+  context.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
+}
+
 function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value));
+  const finite = Number.isFinite(value) ? value : minimum;
+  return Math.min(maximum, Math.max(minimum, finite));
 }

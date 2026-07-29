@@ -151,6 +151,11 @@ test('preview is result-first with comparison controls and no generation button'
   assert.match(preview, /data-preview-canvas-slot/u);
   assert.match(preview, /data-preview-canvas/u);
   assert.match(preview, /data-preview-summary[^>]*hidden/u);
+  assert.match(preview, /data-preview-trust-summary/u);
+  assert.match(
+    preview,
+    /data-preview-trust-verification[^>]*role="status"[^>]*aria-live="polite"/u,
+  );
   assert.match(preview, /data-preview-status[^>]*role="status"[^>]*aria-live="polite"/u);
   assert.match(preview, /data-preview-badge[^>]*hidden/u);
   assert.match(preview, /data-compare-switch/u);
@@ -158,10 +163,26 @@ test('preview is result-first with comparison controls and no generation button'
   assert.match(preview, /value="pattern"[^>]*checked[\s\S]*<label slot="label">拼豆<\/label>/u);
   assert.match(preview, /data-hold-original/u);
   assert.match(preview, /按住对比/u);
-  assert.match(preview, /data-background-removal-action[^>]*disabled[\s\S]*一键去背景/u);
-  assert.match(preview, /自动保留主要人物或物体，处理后可恢复原图/u);
+  assert.match(preview, /data-preview-image-actions/u);
+  assert.match(preview, /data-action-label-short>裁剪</u);
+  assert.match(preview, /data-action-label-long>调整原图</u);
+  assert.match(preview, /data-action-label-short>换图</u);
+  assert.match(preview, /data-action-label-long>更换图片</u);
+  assert.match(preview, /data-background-removal-action[^>]*disabled/u);
+  assert.match(preview, /data-background-removal-label-short>去背</u);
+  assert.match(preview, /data-background-removal-label-long>一键去背景</u);
+  assert.doesNotMatch(preview, /自动保留主要人物或物体，处理后可恢复原图/u);
   assert.match(preview, /data-background-removal-status[^>]*role="status"[^>]*aria-live="polite"/u);
   assert.match(preview, /data-preview-original-view[^>]*hidden/u);
+  assert.match(
+    preview,
+    /data-preview-canvas-stack[\s\S]*data-preview-canvas[\s\S]*data-preview-original-canvas/u,
+  );
+  assert.match(preview, /data-preview-original-canvas/u);
+  assert.match(preview, /data-preview-adjust-view[^>]*hidden/u);
+  assert.match(preview, /data-adjust-source/u);
+  assert.match(preview, /data-finish-source-adjust/u);
+  assert.equal(countMatches(preview, /value="original"/g), 1);
   assert.match(preview, /data-crop-canvas/u);
   assert.match(preview, /data-rotate-left/u);
   assert.match(preview, /data-rotate-right/u);
@@ -212,6 +233,7 @@ test('short prepare choices use anchored Select and available colors use one res
 test('editor markup provides canvas fit and actual-size hooks', () => {
   assert.match(markup, /data-canvas-zoom-fit/u);
   assert.match(markup, /data-canvas-zoom-actual/u);
+  assert.match(markup, /data-reverse-view>查看反面<\/button>/u);
 });
 
 test('editor markup provides bounded row and column jump controls', () => {
@@ -222,6 +244,17 @@ test('editor markup provides bounded row and column jump controls', () => {
   assert.match(markup, /data-canvas-jump-column[^>]*min="1"[^>]*max="300"/u);
   assert.match(markup, /data-canvas-jump-submit/u);
   assert.match(markup, /data-canvas-jump-cancel/u);
+});
+
+test('existing-chart confirmation exposes dimensions, confidence, editable row and column counts', () => {
+  const chart = markup.slice(markup.indexOf('data-chart-workspace'));
+  assert.match(chart, /data-chart-dimensions/u);
+  assert.match(chart, /data-chart-confidence/u);
+  assert.match(chart, /data-chart-warning[^>]*role="status"/u);
+  assert.match(chart, /data-chart-columns[^>]*min="2"[^>]*max="300"/u);
+  assert.match(chart, /data-chart-rows[^>]*min="2"[^>]*max="300"/u);
+  assert.match(chart, /data-chart-apply-dimensions[\s\S]*修改行列数/u);
+  assert.match(chart, /data-chart-generate[^>]*disabled[\s\S]*确认并镜像/u);
 });
 
 test('desktop and mobile inspector tabs are roving-ready and control tabpanels', () => {
@@ -344,6 +377,8 @@ test('export completion reuses inspector and sheet surfaces without a modal', ()
   assert.doesNotMatch(markup, /data-export-popover/u);
   assert.doesNotMatch(markup, /aria-modal="true"/u);
   assert.equal(countMatches(markup, /data-export-completion\b/g), 2);
+  assert.equal(countMatches(markup, /data-export-trust-summary/g), 2);
+  assert.equal(countMatches(markup, /data-export-trust-verification/g), 2);
   assert.deepEqual(
     [...markup.matchAll(/data-export-surface="([^"]+)"/gu)].map((match) => match[1]),
     ['desktop', 'mobile'],
@@ -487,6 +522,64 @@ test('preview comparison and preset cards adapt without global radio width pollu
   );
 });
 
+test('preview exposes five local render modes without removing original comparison', () => {
+  const preview = sectionMarkup('data-preview-workspace', 'data-pattern-workspace');
+  assert.deepEqual(
+    [...preview.matchAll(/data-preview-mode="([^"]+)"/gu)].map((match) => match[1]),
+    ['pure', 'annotated', 'numbered', 'rounded', 'ring'],
+  );
+  assert.match(preview, /data-preview-mode-note[^>]*aria-live="polite"/u);
+  assert.match(
+    pageCss,
+    /\.preview-mode-strip\s*\{[^}]*overflow-x:\s*auto;[^}]*white-space:\s*nowrap;/u,
+  );
+  assert.match(pageCss, /\.preview-mode-button\s*\{[^}]*min-height:\s*2\.75rem;/u);
+  assert.match(
+    pageCss,
+    /\.preview-canvas\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*width:\s*100%;[^}]*height:\s*100%;/u,
+  );
+  assert.doesNotMatch(pageCss, /value=['"]original['"][^{]*\{[^}]*display:\s*none/u);
+  assert.equal(countMatches(preview, /value="original"/g), 1);
+});
+
+test('preview mode selection reveals the pattern before drawing and preserves action label nodes', () => {
+  assert.match(
+    mainSource,
+    /setPreviewRenderMode\(createPreviewModeSelection\(button\.dataset\.previewMode\)\)/u,
+  );
+  const selectionHandler = mainSource.match(/function setPreviewRenderMode\([\s\S]*?\n\}/u)?.[0];
+  assert.ok(selectionHandler);
+  const compareIndex = selectionHandler.indexOf(
+    'previewCompareRadioController.setValue(selection.compareView)',
+  );
+  const applyIndex = selectionHandler.indexOf(
+    'previewView.applyCompareView(selection.compareView)',
+  );
+  const drawIndex = selectionHandler.indexOf('previewView.setRenderMode(selection.mode)');
+  assert.ok(compareIndex >= 0);
+  assert.ok(applyIndex > compareIndex);
+  assert.ok(drawIndex > applyIndex);
+  assert.match(mainSource, /\[data-background-removal-label-short\][\s\S]*compactLabel/u);
+  assert.match(mainSource, /\[data-background-removal-label-long\][\s\S]*actionState\.label/u);
+  assert.doesNotMatch(mainSource, /action\.textContent\s*=/u);
+});
+
+test('preview image actions stay touch-safe while responsive labels and status save canvas space', () => {
+  assert.match(
+    pageCss,
+    /\.preview-image-action\s*\{[^}]*min-width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/u,
+  );
+  assert.match(pageCss, /\[data-background-removal-status\]:empty\s*\{[^}]*display:\s*none;/u);
+  assert.match(
+    pageCss,
+    /@media \(max-width:\s*767px\)[\s\S]*\[data-action-label-long\],[\s\S]*\[data-background-removal-label-long\]\s*\{[^}]*display:\s*none;/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(min-width:\s*768px\)[\s\S]*\[data-action-label-short\],[\s\S]*\[data-background-removal-label-short\]\s*\{[^}]*display:\s*none;/u,
+  );
+});
+
 test('mobile preview keeps the comparison, canvas, and settings choices visually compact', () => {
   assert.match(
     previewViewSource,
@@ -502,7 +595,7 @@ test('mobile preview keeps the comparison, canvas, and settings choices visually
   );
   assert.match(
     pageCss,
-    /@media \(max-width:\s*767px\)[\s\S]*\.preview-compare-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto minmax\(0,\s*1fr\);/u,
+    /@media \(max-width:\s*767px\)[\s\S]*\.preview-compare-bar\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\);/u,
   );
   assert.match(
     pageCss,

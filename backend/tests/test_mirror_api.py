@@ -127,6 +127,83 @@ def test_vertical_mirror_preserves_outside_labels_and_is_an_involution(
     assert np.array_equal(restored, original)
 
 
+@pytest.mark.parametrize("axis", ["horizontal", "vertical"])
+def test_mirror_moves_whole_cells_without_reversing_cell_contents(
+    client: TestClient,
+    png_bytes,
+    axis: str,
+) -> None:
+    pixels = np.zeros((10, 10, 4), dtype=np.uint8)
+    for y in range(10):
+        for x in range(10):
+            pixels[y, x] = (
+                (x * 19 + y * 7) % 256,
+                (x * 5 + y * 23) % 256,
+                (x * 31 + y * 11) % 256,
+                255,
+            )
+
+    for row in range(2):
+        for column in range(2):
+            top = 2 + row * 3
+            left = 2 + column * 3
+            base = np.array(
+                [40 + row * 70, 50 + column * 80, 90 + row * 30, 255],
+                dtype=np.uint8,
+            )
+            pixels[top : top + 3, left : left + 3] = base
+            pixels[top, left + 1] = [250, 10 + row, 20 + column, 255]
+            pixels[top + 2, left] = [15 + column, 240, 30 + row, 255]
+
+    source = Image.fromarray(pixels, mode="RGBA")
+    image_bytes = png_bytes(source)
+    contract = make_contract(
+        image_bytes,
+        width=10,
+        height=10,
+        cell_size=3,
+        x_boundaries=[2, 5, 8],
+        y_boundaries=[2, 5, 8],
+    )
+    contract["axis"] = axis
+
+    first_response = post_mirror(client, image_bytes, contract)
+
+    assert first_response.status_code == 200
+    actual = np.asarray(decode_normalized_rgba(first_response.content))
+    outside_mask = np.ones(pixels.shape[:2], dtype=bool)
+    outside_mask[2:8, 2:8] = False
+    assert np.array_equal(actual[outside_mask], pixels[outside_mask])
+
+    for source_row in range(2):
+        for source_column in range(2):
+            target_row = 1 - source_row if axis == "vertical" else source_row
+            target_column = (
+                1 - source_column if axis == "horizontal" else source_column
+            )
+            source_cell = pixels[
+                2 + source_row * 3 : 5 + source_row * 3,
+                2 + source_column * 3 : 5 + source_column * 3,
+            ]
+            target_cell = actual[
+                2 + target_row * 3 : 5 + target_row * 3,
+                2 + target_column * 3 : 5 + target_column * 3,
+            ]
+            assert np.array_equal(target_cell, source_cell)
+
+    second_contract = copy.deepcopy(contract)
+    second_contract["imageSha256"] = hashlib.sha256(
+        first_response.content
+    ).hexdigest()
+    second_response = post_mirror(
+        client, first_response.content, second_contract
+    )
+
+    assert second_response.status_code == 200
+    restored = np.asarray(decode_normalized_rgba(second_response.content))
+    assert np.array_equal(restored, pixels)
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_code"),
     [

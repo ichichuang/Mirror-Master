@@ -53,21 +53,23 @@ export interface BackgroundRemovalActionState {
   readonly hidden: boolean;
   readonly disabled: boolean;
   readonly label: '一键去背景' | '正在去背景…' | '恢复原图' | '使用去背景图';
+  readonly compactLabel: '去背' | '处理中' | '恢复' | '使用去背图';
 }
 
 export function resolveBackgroundRemovalActionState(
   input: BackgroundRemovalActionStateInput,
 ): BackgroundRemovalActionState {
-  const label = input.busy
-    ? '正在去背景…'
+  const { label, compactLabel } = input.busy
+    ? ({ label: '正在去背景…', compactLabel: '处理中' } as const)
     : input.hasForeground
       ? input.activeVariant === 'foreground'
-        ? '恢复原图'
-        : '使用去背景图'
-      : '一键去背景';
+        ? ({ label: '恢复原图', compactLabel: '恢复' } as const)
+        : ({ label: '使用去背景图', compactLabel: '使用去背图' } as const)
+      : ({ label: '一键去背景', compactLabel: '去背' } as const);
   return Object.freeze({
     hidden: !input.capabilityAvailable,
     disabled: !input.capabilityAvailable || !input.hasSource || input.busy,
     label,
+    compactLabel,
   });
 }
