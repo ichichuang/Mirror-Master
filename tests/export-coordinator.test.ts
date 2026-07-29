@@ -230,3 +230,24 @@ test('offline material export uses the byte-identical local CSV without a remote
   const bytes = new Uint8Array((await blobs[0]?.arrayBuffer()) ?? new ArrayBuffer(0));
   assert.deepEqual([...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf]);
 });
+
+test('share image downloads the exact ready local PNG without a remote request', async () => {
+  let remoteCalls = 0;
+  const readyPng = new Blob(['ready preview'], { type: 'image/png' });
+  const harness = createHarness(async () => {
+    remoteCalls += 1;
+    return new Blob(['unexpected remote image'], { type: 'image/png' });
+  });
+
+  const result = await harness.coordinator.start({
+    project: projectFixture(),
+    task: 'shareImage',
+    pngTemplate: 'annotated',
+    pngBlob: readyPng,
+  });
+
+  assert.equal(result.outcome, 'downloaded');
+  assert.equal(remoteCalls, 0);
+  assert.equal(harness.blobs[0], readyPng);
+  assert.equal(harness.downloads[0]?.fileName, '豆图设计台-分享图-20260726.png');
+});

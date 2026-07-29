@@ -1,3 +1,8 @@
+import {
+  configurationForPngExportPreset,
+  type PngExportConfiguration,
+} from './pngExportConfiguration';
+
 export type ExportTaskId = 'shareImage' | 'printMaking' | 'materialsList' | 'saveProject';
 export type ExportFormat = 'png' | 'pdf' | 'csv' | 'json';
 export type ExportPngTemplate = 'pure' | 'annotated' | 'numbered' | 'rounded';
@@ -83,6 +88,7 @@ export interface ExportCompletionState {
   readonly phase: 'closed' | 'open';
   readonly selectedTask: ExportTaskId;
   readonly pngTemplate: ExportPngTemplate;
+  readonly pngConfiguration: PngExportConfiguration;
   readonly returnContext: ExportReturnContext | null;
   readonly status: ExportCompletionStatus;
 }
@@ -92,6 +98,7 @@ export function createExportCompletionState(): ExportCompletionState {
     phase: 'closed',
     selectedTask: 'shareImage',
     pngTemplate: 'annotated',
+    pngConfiguration: configurationForPngExportPreset('annotated'),
     returnContext: null,
     status: Object.freeze({ phase: 'idle' }),
   });
@@ -133,6 +140,17 @@ export function setExportPngTemplate(
   pngTemplate: ExportPngTemplate,
 ): ExportCompletionState {
   return freezeState({ ...state, pngTemplate });
+}
+
+export function setExportPngConfiguration(
+  state: ExportCompletionState,
+  pngConfiguration: PngExportConfiguration,
+): ExportCompletionState {
+  return freezeState({
+    ...state,
+    pngConfiguration: Object.freeze({ ...pngConfiguration }),
+    status: Object.freeze({ phase: 'idle' }),
+  });
 }
 
 export function parseExportPngTemplate(value: string): ExportPngTemplate {

@@ -59,8 +59,32 @@ export function renderPreviewWorkspace(): string {
                   <span data-action-label-long>更换图片</span>
                 </button>
               </div>
-              <p data-background-removal-status role="status" aria-live="polite"></p>
             </div>
+            <p
+              class="background-removal-status"
+              data-background-removal-status
+              data-state="ready"
+              hidden
+              role="status"
+              aria-live="polite"
+            >
+              <i
+                class="ph ph-check-circle"
+                data-background-removal-status-icon="ready"
+                aria-hidden="true"
+              ></i>
+              <i
+                class="ph ph-circle-notch spin"
+                data-background-removal-status-icon="loading"
+                aria-hidden="true"
+              ></i>
+              <i
+                class="ph ph-warning-circle"
+                data-background-removal-status-icon="error"
+                aria-hidden="true"
+              ></i>
+              <span data-background-removal-status-message></span>
+            </p>
             <div class="preview-mode-control">
               <div
                 class="preview-mode-strip"

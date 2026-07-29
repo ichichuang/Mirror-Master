@@ -128,13 +128,33 @@ import {
   exportTaskDefinition,
   failExport,
   openExportCompletion,
-  parseExportPngTemplate,
   selectExportTask,
-  setExportPngTemplate,
+  setExportPngConfiguration,
   type ExportCompletionState,
-  type ExportPngTemplate,
   type ExportTaskId,
 } from './features/export-completion/exportState';
+import {
+  configurationForPngExportPreset,
+  configurationForPreviewMode,
+  describePngExportConfiguration,
+  resolvePngExportPreset,
+  updatePngExportConfiguration,
+  type PngExportAppearance,
+  type PngExportBackground,
+  type PngExportConfiguration,
+  type PngExportContentOption,
+  type PngExportPreset,
+} from './features/export-completion/pngExportConfiguration';
+import {
+  createPngExportPreviewCoordinator,
+  type PngExportPreviewResult,
+  type PngExportPreviewState,
+} from './features/export-completion/pngExportPreviewCoordinator';
+import {
+  encodeCanvasAsPng,
+  pngExportConfigurationSignature,
+  renderPngExportCanvas,
+} from './features/export-completion/pngExportRenderer';
 import {
   createAvailableColorDialog,
   type AvailableColorDialogController,
@@ -386,9 +406,12 @@ let preparePresetRadioGroupControllers: PreparePresetRadioGroupControllers;
 let samplingRadioController: VaadinRadioGroupController;
 let previewCompareRadioController: VaadinRadioGroupController;
 let paletteScopeRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
-let exportTemplateRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
+let exportPresetRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
+let exportBackgroundRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
+let exportAppearanceRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let responsiveWorkspaceMount: ResponsiveWorkspaceMount;
 let gridController: GridEditorController;
+let pngExportPreviewState: PngExportPreviewState = Object.freeze({ phase: 'idle' });
 
 const exportCoordinator = createExportCoordinator({
   requestPatternExport: ({ project, format, template, signal }) =>
@@ -404,6 +427,23 @@ const exportCoordinator = createExportCoordinator({
     window.setTimeout(callback, 0);
   },
   onEvent: handleExportEvent,
+});
+
+const pngExportPreviewCoordinator = createPngExportPreviewCoordinator({
+  createCanvas: () => document.createElement('canvas'),
+  render: renderPngExportCanvas,
+  encode: encodeCanvasAsPng,
+  scheduleFrame: (callback) => window.requestAnimationFrame(callback),
+  cancelFrame: (handle) => {
+    window.cancelAnimationFrame(handle);
+  },
+  onStateChange(state) {
+    pngExportPreviewState = state;
+    if (state.phase === 'ready') {
+      presentPngExportPreview(state.result);
+    }
+    syncExportCompletionUi();
+  },
 });
 
 const chartMirrorCoordinator = createChartMirrorCoordinator({
@@ -584,9 +624,15 @@ function activateSourceVariant(variant: SourceImageVariant): void {
 function setBackgroundRemovalStatus(message: string, state: 'ready' | 'loading' | 'error'): void {
   backgroundRemovalStatusMessage = message;
   backgroundRemovalStatusState = state;
+  syncBackgroundRemovalStatus();
+}
+
+function syncBackgroundRemovalStatus(): void {
   const status = required(previewWorkspace, '[data-background-removal-status]', HTMLElement);
-  status.textContent = message;
-  status.dataset.state = state;
+  const messageNode = required(status, '[data-background-removal-status-message]', HTMLElement);
+  messageNode.textContent = backgroundRemovalStatusMessage;
+  status.dataset.state = backgroundRemovalStatusState;
+  status.hidden = backgroundRemovalStatusMessage.length === 0;
 }
 
 function syncBackgroundRemovalAction(): void {
@@ -594,7 +640,6 @@ function syncBackgroundRemovalAction(): void {
   const action = required(control, '[data-background-removal-action]', HTMLButtonElement);
   const compactLabel = required(action, '[data-background-removal-label-short]', HTMLElement);
   const longLabel = required(action, '[data-background-removal-label-long]', HTMLElement);
-  const status = required(previewWorkspace, '[data-background-removal-status]', HTMLElement);
   const available = appCapabilities.backgroundRemoval.available;
   const session = sourceImageSession;
   const busy = backgroundRemovalCoordinator.activeRequestId() !== null;
@@ -610,8 +655,7 @@ function syncBackgroundRemovalAction(): void {
   action.setAttribute('aria-label', actionState.label);
   compactLabel.textContent = actionState.compactLabel;
   longLabel.textContent = actionState.label;
-  status.textContent = backgroundRemovalStatusMessage;
-  status.dataset.state = backgroundRemovalStatusState;
+  syncBackgroundRemovalStatus();
   const originalView = required(previewWorkspace, '[data-preview-original-view]', HTMLElement);
   originalView.dataset.sourceImageVariant = session?.activeVariant() ?? 'original';
   required(previewWorkspace, '[data-preview-adjust-view]', HTMLElement).dataset.sourceImageVariant =
@@ -714,8 +758,16 @@ async function initializeRadioGroupControllers(): Promise<void> {
     ),
   };
   const paletteGroups = queryPatternWorkspaceElements('[data-color-filter]', 'vaadin-radio-group');
-  const exportGroups = queryPatternWorkspaceElements(
-    '[data-export-template-options]',
+  const exportPresetGroups = queryPatternWorkspaceElements(
+    '[data-export-preset-options]',
+    'vaadin-radio-group',
+  );
+  const exportBackgroundGroups = queryPatternWorkspaceElements(
+    '[data-export-background-options]',
+    'vaadin-radio-group',
+  );
+  const exportAppearanceGroups = queryPatternWorkspaceElements(
+    '[data-export-appearance-options]',
     'vaadin-radio-group',
   );
 
@@ -728,7 +780,9 @@ async function initializeRadioGroupControllers(): Promise<void> {
     colorCountController,
     visualStyleController,
     nextPaletteControllers,
-    nextExportControllers,
+    nextExportPresetControllers,
+    nextExportBackgroundControllers,
+    nextExportAppearanceControllers,
   ] = await Promise.all([
     createVaadinRadioGroupController({
       element: modePreferenceGroup,
@@ -764,10 +818,26 @@ async function initializeRadioGroupControllers(): Promise<void> {
       ),
     ),
     Promise.all(
-      exportGroups.map((element) =>
+      exportPresetGroups.map((element) =>
         createVaadinRadioGroupController({
           element,
-          initialValue: exportCompletionState.pngTemplate,
+          initialValue: 'annotated',
+        }),
+      ),
+    ),
+    Promise.all(
+      exportBackgroundGroups.map((element) =>
+        createVaadinRadioGroupController({
+          element,
+          initialValue: exportCompletionState.pngConfiguration.background,
+        }),
+      ),
+    ),
+    Promise.all(
+      exportAppearanceGroups.map((element) =>
+        createVaadinRadioGroupController({
+          element,
+          initialValue: exportCompletionState.pngConfiguration.appearance,
         }),
       ),
     ),
@@ -785,7 +855,9 @@ async function initializeRadioGroupControllers(): Promise<void> {
     visualStyle: visualStyleController,
   });
   paletteScopeRadioControllers = Object.freeze(nextPaletteControllers);
-  exportTemplateRadioControllers = Object.freeze(nextExportControllers);
+  exportPresetRadioControllers = Object.freeze(nextExportPresetControllers);
+  exportBackgroundRadioControllers = Object.freeze(nextExportBackgroundControllers);
+  exportAppearanceRadioControllers = Object.freeze(nextExportAppearanceControllers);
 }
 
 async function initializeCapabilities(): Promise<void> {
@@ -932,24 +1004,9 @@ function applyCapabilitiesToInterface(): void {
   for (const button of queryPatternWorkspaceAll('[data-export-format]', HTMLButtonElement)) {
     const format =
       button.dataset.exportFormat === 'json' ? 'projectJson' : button.dataset.exportFormat;
-    button.disabled = !appCapabilities.exports.includes(
-      format as 'png' | 'pdf' | 'csv' | 'projectJson',
-    );
-  }
-  for (const option of queryPatternWorkspaceElements(
-    '[data-export-template]',
-    'vaadin-radio-button',
-  )) {
-    option.disabled = !appCapabilities.pngTemplates.includes(option.value as ExportPngTemplate);
-  }
-  const supportedTemplate = appCapabilities.pngTemplates.includes('annotated')
-    ? 'annotated'
-    : (appCapabilities.pngTemplates[0] ?? 'annotated');
-  if (!appCapabilities.pngTemplates.includes(exportCompletionState.pngTemplate)) {
-    exportCompletionState = setExportPngTemplate(exportCompletionState, supportedTemplate);
-  }
-  for (const controller of exportTemplateRadioControllers) {
-    controller.setValue(exportCompletionState.pngTemplate);
+    button.disabled =
+      button.dataset.exportTask !== 'shareImage' &&
+      !appCapabilities.exports.includes(format as 'png' | 'pdf' | 'csv' | 'projectJson');
   }
   syncExportCompletionUi();
   for (const button of chartWorkspace.querySelectorAll<HTMLButtonElement>('[data-chart-axis]')) {
@@ -2282,10 +2339,10 @@ function drawPreviewCanvas(): void {
 }
 
 function setPreviewRenderMode(selection: PreviewModeSelection): void {
-  previewCompareRadioController.setValue(selection.compareView);
-  previewView.applyCompareView(selection.compareView);
   previewRenderMode = selection.mode;
   previewView.setRenderMode(selection.mode);
+  previewCompareRadioController.setValue(selection.compareView);
+  previewView.applyCompareView(selection.compareView);
   syncPreviewModeControls();
   announce(selection.announcement);
 }
@@ -2480,17 +2537,37 @@ function setupPatternWorkspace(): void {
       exportTaskButton?.dataset.exportTask &&
       isExportTaskId(exportTaskButton.dataset.exportTask)
     ) {
+      if (exportTaskButton.dataset.exportTask !== exportCompletionState.selectedTask) {
+        exportCoordinator.invalidate();
+      }
       exportCompletionState = selectExportTask(
         exportCompletionState,
         exportTaskButton.dataset.exportTask,
       );
       syncExportCompletionUi();
+      schedulePngExportPreview();
       return;
     }
     if (target.closest('[data-export-run]')) {
       void startSelectedExport();
       return;
     }
+  });
+  patternWorkspace.addEventListener('change', (event) => {
+    const target = event.target;
+    const option = target instanceof HTMLElement ? target.dataset.exportContentOption : undefined;
+    if (
+      !(target instanceof HTMLElement) ||
+      target.localName !== 'vaadin-checkbox' ||
+      !isPngExportContentOption(option)
+    ) {
+      return;
+    }
+
+    const checkbox = target as HTMLElementTagNameMap['vaadin-checkbox'];
+    applyPngExportConfigurationPatch({
+      [option]: checkbox.checked,
+    });
   });
   patternWorkspace.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && exportCompletionState.phase === 'open') {
@@ -2534,12 +2611,29 @@ function setupPatternWorkspace(): void {
       nextTab.focus();
     }
   });
-  for (const controller of exportTemplateRadioControllers) {
+  for (const controller of exportPresetRadioControllers) {
     controller.subscribe((value) => {
-      const template = parseExportPngTemplate(value);
-      if (template === exportCompletionState.pngTemplate) return;
-      exportCompletionState = setExportPngTemplate(exportCompletionState, template);
+      if (!isPngExportPreset(value)) return;
+      const next = configurationForPngExportPreset(value);
+      if (pngExportConfigurationSignature(next) === currentPngExportConfigurationSignature()) {
+        return;
+      }
+      exportCompletionState = setExportPngConfiguration(exportCompletionState, next);
+      abortRunningExportForConfigurationChange();
       syncExportCompletionUi();
+      schedulePngExportPreview();
+    });
+  }
+  for (const controller of exportBackgroundRadioControllers) {
+    controller.subscribe((value) => {
+      if (!isPngExportBackground(value)) return;
+      applyPngExportConfigurationPatch({ background: value });
+    });
+  }
+  for (const controller of exportAppearanceRadioControllers) {
+    controller.subscribe((value) => {
+      if (!isPngExportAppearance(value)) return;
+      applyPngExportConfigurationPatch({ appearance: value });
     });
   }
 
@@ -3339,6 +3433,131 @@ function setTextAll(selector: string, text: string): void {
   }
 }
 
+function applyPngExportConfigurationPatch(patch: Partial<PngExportConfiguration>): void {
+  const next = updatePngExportConfiguration(exportCompletionState.pngConfiguration, patch);
+  if (pngExportConfigurationSignature(next) === currentPngExportConfigurationSignature()) {
+    return;
+  }
+
+  exportCompletionState = setExportPngConfiguration(exportCompletionState, next);
+  abortRunningExportForConfigurationChange();
+  syncExportCompletionUi();
+  schedulePngExportPreview();
+}
+
+function abortRunningExportForConfigurationChange(): void {
+  exportCoordinator.invalidate();
+}
+
+function schedulePngExportPreview(): void {
+  if (
+    exportCompletionState.phase !== 'open' ||
+    exportCompletionState.selectedTask !== 'shareImage' ||
+    !currentProject
+  ) {
+    if (pngExportPreviewState.phase !== 'idle') {
+      pngExportPreviewCoordinator.invalidate();
+    }
+    return;
+  }
+
+  pngExportPreviewCoordinator.schedule({
+    project: currentProject,
+    configuration: exportCompletionState.pngConfiguration,
+    colorHexById: previewColorHexById,
+    colorCodeById: previewColorCodeById,
+  });
+}
+
+function currentPngExportConfigurationSignature(): string {
+  return pngExportConfigurationSignature(exportCompletionState.pngConfiguration);
+}
+
+function currentReadyPngExportPreview(): PngExportPreviewResult | null {
+  if (!currentProject) {
+    return null;
+  }
+  const result = pngExportPreviewCoordinator.result();
+  return result &&
+    result.revision === currentProject.revision &&
+    result.configurationSignature === currentPngExportConfigurationSignature()
+    ? result
+    : null;
+}
+
+function presentPngExportPreview(result: PngExportPreviewResult): void {
+  const maximumWidth = 1600;
+  const maximumHeight = 1200;
+  const scale = Math.min(
+    1,
+    maximumWidth / result.canvas.width,
+    maximumHeight / result.canvas.height,
+  );
+  const width = Math.max(1, Math.round(result.canvas.width * scale));
+  const height = Math.max(1, Math.round(result.canvas.height * scale));
+
+  for (const canvas of queryPatternWorkspaceAll(
+    '[data-export-preview-canvas]',
+    HTMLCanvasElement,
+  )) {
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      continue;
+    }
+    context.clearRect(0, 0, width, height);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(result.canvas, 0, 0, width, height);
+  }
+}
+
+function pngExportPreviewStatusMessage(): string {
+  if (pngExportPreviewState.phase === 'rendering') {
+    return '正在更新最终图片…';
+  }
+  if (pngExportPreviewState.phase === 'error') {
+    return pngExportPreviewState.message;
+  }
+  const ready = currentReadyPngExportPreview();
+  if (ready) {
+    return `${String(ready.canvas.width)} × ${String(ready.canvas.height)} px · 可下载`;
+  }
+  return '正在生成预览…';
+}
+
+function isPngExportPreset(value: string): value is PngExportPreset {
+  return (
+    value === 'pure' ||
+    value === 'annotated' ||
+    value === 'numbered' ||
+    value === 'rounded' ||
+    value === 'ring'
+  );
+}
+
+function isPngExportBackground(value: string): value is PngExportBackground {
+  return value === 'transparent' || value === 'white';
+}
+
+function isPngExportAppearance(value: string): value is PngExportAppearance {
+  return (
+    value === 'bead' || value === 'solidSquare' || value === 'roundedSquare' || value === 'ring'
+  );
+}
+
+function isPngExportContentOption(value: string | undefined): value is PngExportContentOption {
+  return (
+    value === 'includeGrid' ||
+    value === 'includeCoordinates' ||
+    value === 'includeCellCodes' ||
+    value === 'includeStatistics' ||
+    value === 'includeMaterialCounts' ||
+    value === 'includeColorLegend'
+  );
+}
+
 async function startSelectedExport(): Promise<void> {
   if (!currentProject) {
     return;
@@ -3346,14 +3565,25 @@ async function startSelectedExport(): Promise<void> {
   const task = exportCompletionState.selectedTask;
   const definition = exportTaskDefinition(task);
   const capabilityFormat = definition.format === 'json' ? 'projectJson' : definition.format;
-  if (!appCapabilities.exports.includes(capabilityFormat)) {
+  if (task !== 'shareImage' && !appCapabilities.exports.includes(capabilityFormat)) {
     announce('当前服务不支持这种导出格式。');
+    return;
+  }
+  const readyPreview = task === 'shareImage' ? currentReadyPngExportPreview() : null;
+  if (task === 'shareImage' && !readyPreview) {
+    announce(
+      pngExportPreviewState.phase === 'error'
+        ? pngExportPreviewState.message
+        : '最终图片仍在更新，请稍候。',
+    );
+    schedulePngExportPreview();
     return;
   }
   await exportCoordinator.start({
     project: currentProject,
     task,
     pngTemplate: exportCompletionState.pngTemplate,
+    ...(readyPreview ? { pngBlob: readyPreview.blob } : {}),
   });
 }
 
@@ -3370,11 +3600,16 @@ function openExportSurface(opener: HTMLButtonElement): void {
     triggerKey: mobile ? 'mobile-export' : 'desktop-export',
     scrollTop: content.scrollTop,
   });
+  exportCompletionState = setExportPngConfiguration(
+    exportCompletionState,
+    configurationForPreviewMode(previewRenderMode),
+  );
   if (mobile) {
     setSheetState('full');
   }
   setExportSurfacesOpen(true);
   syncExportCompletionUi();
+  schedulePngExportPreview();
   const surfaceRoot = mobile ? workspaceSheet : workspaceInspector;
   surfaceRoot
     .querySelector<HTMLButtonElement>(`[data-export-task="${exportCompletionState.selectedTask}"]`)
@@ -3384,6 +3619,7 @@ function openExportSurface(opener: HTMLButtonElement): void {
 function closeExportSurface(restoreFocus = true): void {
   const returnContext = exportCompletionState.returnContext;
   exportCoordinator.invalidate();
+  pngExportPreviewCoordinator.invalidate();
   exportCompletionState = closeExportCompletion(exportCompletionState);
   setExportSurfacesOpen(false);
   if (returnContext) {
@@ -3402,12 +3638,18 @@ function closeExportSurface(restoreFocus = true): void {
 
 function resetExportSurface(): void {
   exportCoordinator.invalidate();
+  pngExportPreviewCoordinator.invalidate();
   exportCompletionState = createExportCompletionState();
   setExportSurfacesOpen(false);
   exportReturnFocus = null;
 }
 
 function setExportSurfacesOpen(open: boolean): void {
+  patternWorkspace.dataset.exportOpen = String(open);
+  if (!open) {
+    patternWorkspace.dataset.exportPreviewOpen = 'false';
+    required(patternWorkspace, '[data-export-preview-stage]', HTMLElement).hidden = true;
+  }
   for (const panel of queryPatternWorkspaceAll('[data-export-completion]', HTMLElement)) {
     const surface = panel.dataset.exportSurface;
     const container = panel.parentElement;
@@ -3439,13 +3681,33 @@ function syncExportCompletionUi(): void {
       button.classList.toggle('is-active', selected);
       button.setAttribute('aria-pressed', String(selected));
     }
-    const templates = requiredVaadinElement(
-      panel,
-      '[data-export-template-options]',
-      'vaadin-radio-group',
+    const isPngTask = exportCompletionState.selectedTask === 'shareImage';
+    required(panel, '[data-export-png-controls]', HTMLElement).hidden = !isPngTask;
+    required(panel, '.export-mobile-preview', HTMLElement).hidden = !isPngTask;
+    const presetMatch = resolvePngExportPreset(exportCompletionState.pngConfiguration);
+    exportPresetRadioControllers[index]?.setValue(presetMatch === 'custom' ? '' : presetMatch);
+    exportBackgroundRadioControllers[index]?.setValue(
+      exportCompletionState.pngConfiguration.background,
     );
-    templates.hidden = exportCompletionState.selectedTask !== 'shareImage';
-    exportTemplateRadioControllers[index]?.setValue(exportCompletionState.pngTemplate);
+    exportAppearanceRadioControllers[index]?.setValue(
+      exportCompletionState.pngConfiguration.appearance,
+    );
+    required(panel, '[data-export-preset-match]', HTMLElement).textContent =
+      presetMatch === 'custom'
+        ? '自定义搭配'
+        : (PREVIEW_RENDER_MODES.find((mode) => mode.id === presetMatch)?.label ?? '常用样式');
+    required(panel, '[data-export-configuration-summary]', HTMLElement).textContent =
+      describePngExportConfiguration(exportCompletionState.pngConfiguration);
+    for (const option of panel.querySelectorAll<HTMLElementTagNameMap['vaadin-checkbox']>(
+      '[data-export-content-option]',
+    )) {
+      const key = option.dataset.exportContentOption;
+      if (isPngExportContentOption(key)) {
+        option.checked = exportCompletionState.pngConfiguration[key];
+      }
+    }
+    required(panel, '[data-export-preview-status]', HTMLElement).textContent =
+      pngExportPreviewStatusMessage();
     const runButton = required(panel, '[data-export-run]', HTMLButtonElement);
     runButton.textContent =
       exportCompletionState.selectedTask === 'saveProject'
@@ -3453,15 +3715,27 @@ function syncExportCompletionUi(): void {
         : `下载${definition.label}`;
     runButton.disabled =
       exportCompletionState.status.phase === 'running' ||
-      !appCapabilities.exports.includes(
-        definition.format === 'json' ? 'projectJson' : definition.format,
-      );
+      (isPngTask
+        ? currentReadyPngExportPreview() === null
+        : !appCapabilities.exports.includes(
+            definition.format === 'json' ? 'projectJson' : definition.format,
+          ));
     required(panel, '[data-export-summary]', HTMLElement).textContent =
       trustCopy === null ? '当前没有可导出的图纸。' : trustCopy.primary;
     required(panel, '[data-export-trust-verification]', HTMLElement).textContent =
       trustCopy?.verification ?? '';
     panel.setAttribute('aria-busy', String(exportCompletionState.status.phase === 'running'));
     required(panel, '[data-export-status]', HTMLElement).textContent = exportStatusMessage();
+  }
+  const showWorkspacePreview =
+    exportCompletionState.phase === 'open' && exportCompletionState.selectedTask === 'shareImage';
+  required(patternWorkspace, '[data-export-preview-stage]', HTMLElement).hidden =
+    !showWorkspacePreview;
+  required(patternWorkspace, '[data-export-preview-workspace-status]', HTMLElement).textContent =
+    pngExportPreviewStatusMessage();
+  patternWorkspace.dataset.exportPreviewOpen = String(showWorkspacePreview);
+  for (const frame of queryPatternWorkspaceAll('[data-export-preview-frame]', HTMLElement)) {
+    frame.dataset.background = exportCompletionState.pngConfiguration.background;
   }
 }
 
@@ -3493,6 +3767,12 @@ function handleExportEvent(event: ExportCoordinatorEvent): void {
 
 function abortActiveExport(): void {
   exportCoordinator.invalidate('图纸已更新，请重新导出');
+  if (
+    exportCompletionState.phase === 'open' &&
+    exportCompletionState.selectedTask === 'shareImage'
+  ) {
+    schedulePngExportPreview();
+  }
 }
 
 function setupChartWorkspace(): GridEditorController {
@@ -4350,6 +4630,7 @@ function cleanup(): void {
   previewCoordinator.destroy();
   backgroundRemovalCoordinator.destroy();
   exportCoordinator.destroy();
+  pngExportPreviewCoordinator.destroy();
   chartMirrorCoordinator.cancel();
   recommendationRequests.cancel();
   canvasController?.destroy();
@@ -4372,7 +4653,9 @@ function cleanup(): void {
     controller.destroy();
   }
   for (const controller of paletteScopeRadioControllers) controller.destroy();
-  for (const controller of exportTemplateRadioControllers) controller.destroy();
+  for (const controller of exportPresetRadioControllers) controller.destroy();
+  for (const controller of exportBackgroundRadioControllers) controller.destroy();
+  for (const controller of exportAppearanceRadioControllers) controller.destroy();
   for (const controller of editorSeriesSelectControllers) controller.destroy();
   confirmationDialogController?.destroy();
   responsiveWorkspaceMount.destroy();

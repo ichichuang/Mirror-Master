@@ -4,7 +4,7 @@ export interface PreviewRenderModeDefinition {
   readonly id: PreviewRenderMode;
   readonly label: string;
   readonly description: string;
-  readonly exportTemplate: Exclude<PreviewRenderMode, 'ring'> | null;
+  readonly exportTemplate: PreviewRenderMode;
 }
 
 export interface PreviewModeSelection {
@@ -42,7 +42,7 @@ export const PREVIEW_RENDER_MODES: readonly PreviewRenderModeDefinition[] = Obje
     id: 'ring',
     label: '圆环豆粒',
     description: '模拟带中心孔的实体拼豆外观',
-    exportTemplate: null,
+    exportTemplate: 'ring',
   }),
 ]);
 

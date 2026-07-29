@@ -18,6 +18,16 @@ test('preview modes expose the five customer-facing render choices in stable ord
     ],
   );
   assert.equal(DEFAULT_PREVIEW_RENDER_MODE, 'ring');
+  assert.deepEqual(
+    PREVIEW_RENDER_MODES.map(({ id, exportTemplate }) => [id, exportTemplate]),
+    [
+      ['pure', 'pure'],
+      ['annotated', 'annotated'],
+      ['numbered', 'numbered'],
+      ['rounded', 'rounded'],
+      ['ring', 'ring'],
+    ],
+  );
 });
 
 test('preview mode parser falls back to the ring preview without accepting arbitrary values', () => {

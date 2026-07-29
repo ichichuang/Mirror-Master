@@ -129,6 +129,17 @@ vaadin-radio-group::part(group-field) {
   flex: none;
 }
 
+.compare-switch::before {
+  content: none;
+  display: none;
+}
+
+.compare-switch::part(label),
+.compare-switch::part(helper-text),
+.compare-switch::part(error-message) {
+  display: none;
+}
+
 .compare-switch::part(group-field) {
   display: grid;
   inline-size: auto;
@@ -192,16 +203,22 @@ vaadin-radio-group::part(group-field) {
 .preset-cards-two::part(group-field),
 .mode-preference::part(group-field),
 .sampling-options::part(group-field),
-.export-template-options::part(group-field) {
+.export-template-options::part(group-field),
+.export-compact-options::part(group-field) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-2);
+}
+
+.export-preset-options vaadin-radio-button:last-child {
+  grid-column: 1 / -1;
 }
 
 vaadin-radio-button[theme~='card'],
 .mode-preference vaadin-radio-button,
 .sampling-options vaadin-radio-button,
 .export-template-options vaadin-radio-button,
+.export-compact-options vaadin-radio-button,
 .palette-scope vaadin-radio-button {
   inline-size: 100%;
   min-inline-size: 0;
@@ -217,7 +234,8 @@ vaadin-radio-button[theme~='card']::part(radio) {
 vaadin-radio-button[theme~='card']::part(label),
 .mode-preference vaadin-radio-button::part(label),
 .sampling-options vaadin-radio-button::part(label),
-.export-template-options vaadin-radio-button::part(label) {
+.export-template-options vaadin-radio-button::part(label),
+.export-compact-options vaadin-radio-button::part(label) {
   display: block;
   inline-size: 100%;
   min-inline-size: 0;
@@ -226,7 +244,8 @@ vaadin-radio-button[theme~='card']::part(label),
 
 .mode-preference vaadin-radio-button::part(radio),
 .sampling-options vaadin-radio-button::part(radio),
-.export-template-options vaadin-radio-button::part(radio) {
+.export-template-options vaadin-radio-button::part(radio),
+.export-compact-options vaadin-radio-button::part(radio) {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -269,13 +288,38 @@ vaadin-radio-button[theme~='card']::part(label),
 
 .mode-preference [slot='label'],
 .sampling-options [slot='label'],
-.export-template-options [slot='label'] {
+.export-template-options [slot='label'],
+.export-compact-options [slot='label'] {
   display: grid;
   inline-size: 100%;
   min-inline-size: 0;
   block-size: 100%;
   align-items: center;
   cursor: pointer;
+}
+
+.export-template-options [slot='label'],
+.export-compact-options [slot='label'] {
+  place-items: center;
+  margin: 0;
+  text-align: center;
+}
+
+.export-template-options [slot='label'] > span {
+  display: grid;
+  min-inline-size: 0;
+  align-content: center;
+  justify-items: center;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.export-template-options [slot='label'] small {
+  display: block;
+}
+
+.export-compact-options [slot='label'] {
+  white-space: nowrap;
 }
 
 .preset-card-content > span {
@@ -348,7 +392,8 @@ vaadin-radio-button[theme~='card']::part(label),
 
 .mode-preference vaadin-radio-button,
 .sampling-options vaadin-radio-button,
-.export-template-options vaadin-radio-button {
+.export-template-options vaadin-radio-button,
+.export-compact-options vaadin-radio-button {
   position: relative;
   display: grid;
   min-height: 3.5rem;
@@ -368,7 +413,8 @@ vaadin-radio-button[theme~='card']::part(label),
 
 .mode-preference vaadin-radio-button[checked],
 .sampling-options vaadin-radio-button[checked],
-.export-template-options vaadin-radio-button[checked] {
+.export-template-options vaadin-radio-button[checked],
+.export-compact-options vaadin-radio-button[checked] {
   border-color: var(--color-action-primary);
   color: var(--color-action-primary);
   background: var(--color-action-primary-soft);
@@ -376,7 +422,8 @@ vaadin-radio-button[theme~='card']::part(label),
 
 .mode-preference vaadin-radio-button[focus-ring],
 .sampling-options vaadin-radio-button[focus-ring],
-.export-template-options vaadin-radio-button[focus-ring] {
+.export-template-options vaadin-radio-button[focus-ring],
+.export-compact-options vaadin-radio-button[focus-ring] {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
@@ -409,6 +456,7 @@ vaadin-radio-button[theme~='card']::part(label),
 .mode-preference vaadin-radio-button::before,
 .sampling-options vaadin-radio-button::before,
 .export-template-options vaadin-radio-button::before,
+.export-compact-options vaadin-radio-button::before,
 .palette-scope vaadin-radio-button::before {
   content: none;
   display: none;
@@ -419,6 +467,7 @@ vaadin-radio-button[theme~='card'] > input[slot='input'],
 .mode-preference vaadin-radio-button > input[slot='input'],
 .sampling-options vaadin-radio-button > input[slot='input'],
 .export-template-options vaadin-radio-button > input[slot='input'],
+.export-compact-options vaadin-radio-button > input[slot='input'],
 .palette-scope vaadin-radio-button > input[slot='input'] {
   position: absolute;
   inset: 0;
@@ -482,6 +531,45 @@ vaadin-radio-button[theme~='card'] > input[slot='input'],
 .available-color-choice[checked] {
   --vaadin-checkbox-background: var(--color-action-primary);
   --vaadin-checkbox-border-color: var(--color-action-primary);
+}
+
+.export-content-options vaadin-checkbox {
+  display: flex;
+  inline-size: 100%;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-1);
+  color: var(--color-text-primary);
+  font-size: 0.78rem;
+  font-weight: 650;
+  --vaadin-checkbox-gap: var(--space-2);
+  --vaadin-checkbox-size: 1.15rem;
+}
+
+.export-content-options vaadin-checkbox:hover:not([disabled]) {
+  background: var(--color-background-subtle);
+}
+
+.export-content-options vaadin-checkbox::part(label) {
+  min-inline-size: 0;
+  padding: 0;
+  color: inherit;
+  line-height: 1.35;
+}
+
+.export-content-options vaadin-checkbox > [slot='label'] {
+  display: flex;
+  min-block-size: 2.75rem;
+  align-items: center;
+  cursor: pointer;
+}
+
+@media (max-width: 767px) {
+  .export-template-options vaadin-radio-button,
+  .export-compact-options vaadin-radio-button {
+    min-height: 3rem;
+    padding: var(--space-1) var(--space-2);
+  }
 }
 
 vaadin-dialog[theme~='color-picker']::part(overlay) {

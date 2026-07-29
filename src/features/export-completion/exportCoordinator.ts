@@ -58,6 +58,7 @@ export interface StartExportInput {
   readonly project: BeadProject;
   readonly task: ExportTaskId;
   readonly pngTemplate: ExportPngTemplate;
+  readonly pngBlob?: Blob;
 }
 
 export type ExportCoordinatorResult =
@@ -134,6 +135,7 @@ export function createExportCoordinator({
           project,
           task,
           input.pngTemplate,
+          input.pngBlob,
           controller.signal,
           requestPatternExport,
           isOnline,
@@ -250,10 +252,17 @@ async function createExportBlob(
   project: BeadProject,
   task: ExportTaskId,
   pngTemplate: ExportPngTemplate,
+  pngBlob: Blob | undefined,
   signal: AbortSignal,
   requestPatternExport: ExportCoordinatorDependencies['requestPatternExport'],
   isOnline: ExportCoordinatorDependencies['isOnline'],
 ): Promise<Blob> {
+  if (task === 'shareImage' && pngBlob) {
+    if (pngBlob.type !== 'image/png') {
+      throw new Error('图片预览格式无效。');
+    }
+    return pngBlob;
+  }
   if (task === 'saveProject') {
     return new Blob([exportProjectJson(project)], { type: 'application/json;charset=utf-8' });
   }

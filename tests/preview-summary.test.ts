@@ -86,19 +86,19 @@ test('preview done status uses the fixed customer text', () => {
   assert.equal(formatPreviewDoneStatus(48, 63, 18), '已更新：48 × 63 颗，18 色');
 });
 
-test('preview canvas layout fits an integer cell grid into the container and centers it', () => {
-  assert.deepEqual(computePreviewCanvasLayout(200, 100, 48, 24), {
-    cellSize: 4,
-    originX: 4,
-    originY: 2,
-    gridWidth: 192,
-    gridHeight: 96,
-    canvasWidth: 200,
-    canvasHeight: 100,
-  });
+test('preview canvas layout fills the same frame as the aligned original at fractional scales', () => {
+  const layout = computePreviewCanvasLayout(562, 320, 72, 41);
+  assert.equal(layout.originX, 0);
+  assert.equal(layout.originY, 0);
+  assert.equal(layout.gridWidth, 562);
+  assert.equal(layout.gridHeight, 320);
+  assert.equal(layout.cellWidth, 562 / 72);
+  assert.equal(layout.cellHeight, 320 / 41);
+  assert.equal(layout.cellSize, 320 / 41);
+
   const tight = computePreviewCanvasLayout(10, 10, 300, 300);
-  assert.equal(tight.cellSize, 1);
-  assert.equal(tight.gridWidth, 300);
+  assert.equal(tight.gridWidth, 10);
+  assert.equal(tight.gridHeight, 10);
   assert.throws(() => computePreviewCanvasLayout(0, 100, 48, 24), /容器尺寸/u);
   assert.throws(() => computePreviewCanvasLayout(100, 100, 0, 24), /行列/u);
 });
@@ -119,11 +119,11 @@ test('preview frame preserves the project aspect ratio inside portrait and lands
   assert.throws(() => computePreviewFrameSize(0, 100, 48, 31), /容器尺寸/u);
 });
 
-test('numbered preview only exposes a concise color code when the cell can hold it', () => {
+test('numbered preview keeps concise color codes at the dense 72-column preview size', () => {
   assert.equal(resolvePreviewCellLabel('MARD A14', 18, 'numbered'), 'A14');
   assert.equal(resolvePreviewCellLabel('MARD A14', 13, 'numbered'), 'A14');
   assert.equal(resolvePreviewCellLabel('mard:A14', 18, 'numbered'), 'A14');
-  assert.equal(resolvePreviewCellLabel('MARD A14', 7, 'numbered'), null);
+  assert.equal(resolvePreviewCellLabel('MARD A14', 7, 'numbered'), 'A14');
   assert.equal(resolvePreviewCellLabel('MARD A14', 18, 'pure'), null);
 });
 

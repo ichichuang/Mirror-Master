@@ -3,6 +3,8 @@ import { DEFAULT_PREVIEW_RENDER_MODE, type PreviewRenderMode } from './previewMo
 
 export interface PreviewCanvasLayout {
   readonly cellSize: number;
+  readonly cellWidth: number;
+  readonly cellHeight: number;
   readonly originX: number;
   readonly originY: number;
   readonly gridWidth: number;
@@ -20,7 +22,7 @@ const CHECKER_LIGHT = '#e8ebe9';
 const CHECKER_DARK = '#cfd6d2';
 const FALLBACK_COLOR = '#b9c2bd';
 const PREVIEW_SURFACE = '#f5f7f6';
-const MINIMUM_LABEL_CELL_SIZE = 10;
+const MINIMUM_LABEL_CELL_SIZE = 4;
 
 export function computePreviewFrameSize(
   containerWidth: number,
@@ -43,20 +45,20 @@ export function computePreviewCanvasLayout(
   rows: number,
 ): PreviewCanvasLayout {
   assertPreviewDimensions(containerWidth, containerHeight, columns, rows);
-  const cellSize = Math.max(
-    1,
-    Math.floor(Math.min(containerWidth / columns, containerHeight / rows)),
-  );
-  const gridWidth = cellSize * columns;
-  const gridHeight = cellSize * rows;
+  const canvasWidth = Math.max(1, Math.floor(containerWidth));
+  const canvasHeight = Math.max(1, Math.floor(containerHeight));
+  const cellWidth = canvasWidth / columns;
+  const cellHeight = canvasHeight / rows;
   return Object.freeze({
-    cellSize,
-    originX: Math.floor((containerWidth - gridWidth) / 2),
-    originY: Math.floor((containerHeight - gridHeight) / 2),
-    gridWidth,
-    gridHeight,
-    canvasWidth: Math.floor(containerWidth),
-    canvasHeight: Math.floor(containerHeight),
+    cellSize: Math.min(cellWidth, cellHeight),
+    cellWidth,
+    cellHeight,
+    originX: 0,
+    originY: 0,
+    gridWidth: canvasWidth,
+    gridHeight: canvasHeight,
+    canvasWidth,
+    canvasHeight,
   });
 }
 
@@ -108,7 +110,7 @@ export function drawPatternPreview(
   context.save();
   context.scale(pixelRatio, pixelRatio);
   context.clearRect(0, 0, layout.canvasWidth, layout.canvasHeight);
-  const { cellSize, originX, originY } = layout;
+  const { cellSize, cellWidth, cellHeight, originX, originY } = layout;
   const checkerSize = Math.max(2, Math.floor(cellSize / 2));
   if (mode === 'rounded' || mode === 'ring') {
     context.fillStyle = PREVIEW_SURFACE;
@@ -119,21 +121,21 @@ export function drawPatternPreview(
     if (!line) continue;
     for (let column = 0; column < columns; column += 1) {
       const cell = line[column];
-      const left = originX + column * cellSize;
-      const top = originY + row * cellSize;
+      const left = originX + column * cellWidth;
+      const top = originY + row * cellHeight;
       if (!cell || cell.kind === 'empty') {
-        drawEmptyCell(context, left, top, cellSize, checkerSize, row, column);
+        drawEmptyCell(context, left, top, cellWidth, cellHeight, checkerSize, row, column);
         continue;
       }
       const colorHex = colorHexById.get(cell.colorId) ?? FALLBACK_COLOR;
-      drawBeadCell(context, left, top, cellSize, colorHex, mode);
+      drawBeadCell(context, left, top, cellWidth, cellHeight, colorHex, mode);
       const label = resolvePreviewCellLabel(
         colorCodeById.get(cell.colorId) ?? cell.colorId,
         cellSize,
         mode,
       );
       if (label) {
-        drawCellLabel(context, left, top, cellSize, colorHex, label);
+        drawCellLabel(context, left, top, cellWidth, cellHeight, colorHex, label);
       }
     }
   }
@@ -182,21 +184,24 @@ function drawBeadCell(
   context: CanvasRenderingContext2D,
   left: number,
   top: number,
-  cellSize: number,
+  cellWidth: number,
+  cellHeight: number,
   colorHex: string,
   mode: PreviewRenderMode,
 ): void {
+  const cellSize = Math.min(cellWidth, cellHeight);
   context.fillStyle = colorHex;
   if (mode === 'rounded') {
     const inset = Math.max(0.75, cellSize * 0.08);
-    const size = Math.max(0, cellSize - inset * 2);
-    roundedRect(context, left + inset, top + inset, size, size, Math.max(1, cellSize * 0.18));
+    const width = Math.max(0, cellWidth - inset * 2);
+    const height = Math.max(0, cellHeight - inset * 2);
+    roundedRect(context, left + inset, top + inset, width, height, Math.max(1, cellSize * 0.18));
     context.fill();
     return;
   }
   if (mode === 'ring') {
-    const centerX = left + cellSize / 2;
-    const centerY = top + cellSize / 2;
+    const centerX = left + cellWidth / 2;
+    const centerY = top + cellHeight / 2;
     const radius = Math.max(0.5, cellSize * 0.44);
     context.beginPath();
     context.arc(centerX, centerY, radius, 0, Math.PI * 2);
@@ -209,22 +214,25 @@ function drawBeadCell(
     }
     return;
   }
-  context.fillRect(left, top, cellSize, cellSize);
+  context.fillRect(left, top, cellWidth, cellHeight);
 }
 
 function drawCellLabel(
   context: CanvasRenderingContext2D,
   left: number,
   top: number,
-  cellSize: number,
+  cellWidth: number,
+  cellHeight: number,
   colorHex: string,
   label: string,
 ): void {
+  const cellSize = Math.min(cellWidth, cellHeight);
+  const fontSize = Math.max(3, Math.min(12, Math.floor(cellSize * 0.72)));
   context.fillStyle = readableTextColor(colorHex);
-  context.font = `700 ${String(Math.max(7, Math.floor(cellSize * 0.34)))}px ui-sans-serif, system-ui, sans-serif`;
+  context.font = `700 ${String(fontSize)}px ui-sans-serif, system-ui, sans-serif`;
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  context.fillText(label, left + cellSize / 2, top + cellSize / 2, cellSize - 2);
+  context.fillText(label, left + cellWidth / 2, top + cellHeight / 2, Math.max(1, cellWidth - 1));
 }
 
 function drawPreviewGuides(
@@ -242,13 +250,13 @@ function drawPreviewGuides(
     context.beginPath();
     for (let column = 0; column <= columns; column += 1) {
       if (previewGuideWeight(column, mode) !== weight) continue;
-      const x = layout.originX + column * layout.cellSize;
+      const x = layout.originX + column * layout.cellWidth;
       context.moveTo(x, layout.originY);
       context.lineTo(x, layout.originY + layout.gridHeight);
     }
     for (let row = 0; row <= rows; row += 1) {
       if (previewGuideWeight(row, mode) !== weight) continue;
-      const y = layout.originY + row * layout.cellSize;
+      const y = layout.originY + row * layout.cellHeight;
       context.moveTo(layout.originX, y);
       context.lineTo(layout.originX + layout.gridWidth, y);
     }
@@ -301,25 +309,27 @@ function drawEmptyCell(
   context: CanvasRenderingContext2D,
   left: number,
   top: number,
-  cellSize: number,
+  cellWidth: number,
+  cellHeight: number,
   checkerSize: number,
   row: number,
   column: number,
 ): void {
+  const cellSize = Math.min(cellWidth, cellHeight);
   if (cellSize < 6) {
     context.fillStyle = (row + column) % 2 === 0 ? CHECKER_LIGHT : CHECKER_DARK;
-    context.fillRect(left, top, cellSize, cellSize);
+    context.fillRect(left, top, cellWidth, cellHeight);
     return;
   }
-  for (let y = 0; y < cellSize; y += checkerSize) {
-    for (let x = 0; x < cellSize; x += checkerSize) {
+  for (let y = 0; y < cellHeight; y += checkerSize) {
+    for (let x = 0; x < cellWidth; x += checkerSize) {
       const alternate = (Math.floor(x / checkerSize) + Math.floor(y / checkerSize)) % 2 === 0;
       context.fillStyle = alternate ? CHECKER_LIGHT : CHECKER_DARK;
       context.fillRect(
         left + x,
         top + y,
-        Math.min(checkerSize, cellSize - x),
-        Math.min(checkerSize, cellSize - y),
+        Math.min(checkerSize, cellWidth - x),
+        Math.min(checkerSize, cellHeight - y),
       );
     }
   }

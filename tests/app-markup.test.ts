@@ -13,6 +13,10 @@ const previewViewSource = readFileSync(
   'utf8',
 );
 const pageCss = readFileSync(new URL('../src/styles/page.css', import.meta.url), 'utf8');
+const generatedIconCss = readFileSync(
+  new URL('../src/generated/phosphor-icons.css', import.meta.url),
+  'utf8',
+);
 const vaadinThemeCss = readFileSync(
   new URL('../src/styles/vaadin-theme.css', import.meta.url),
   'utf8',
@@ -172,7 +176,26 @@ test('preview is result-first with comparison controls and no generation button'
   assert.match(preview, /data-background-removal-label-short>去背</u);
   assert.match(preview, /data-background-removal-label-long>一键去背景</u);
   assert.doesNotMatch(preview, /自动保留主要人物或物体，处理后可恢复原图/u);
-  assert.match(preview, /data-background-removal-status[^>]*role="status"[^>]*aria-live="polite"/u);
+  assert.match(
+    preview,
+    /class="background-removal-status"[^>]*data-background-removal-status[^>]*hidden[^>]*role="status"[^>]*aria-live="polite"/u,
+  );
+  assert.match(
+    preview,
+    /class="ph ph-check-circle"[\s\S]*data-background-removal-status-icon="ready"/u,
+  );
+  assert.match(
+    preview,
+    /class="ph ph-circle-notch spin"[\s\S]*data-background-removal-status-icon="loading"/u,
+  );
+  assert.match(
+    preview,
+    /class="ph ph-warning-circle"[\s\S]*data-background-removal-status-icon="error"/u,
+  );
+  for (const iconName of ['check-circle', 'circle-notch', 'warning-circle']) {
+    assert.match(generatedIconCss, new RegExp(`\\.ph-${iconName}::before`, 'u'));
+  }
+  assert.match(preview, /data-background-removal-status-message/u);
   assert.match(preview, /data-preview-original-view[^>]*hidden/u);
   assert.match(
     preview,
@@ -283,12 +306,26 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.equal(countMatches(markup, /<vaadin-radio-button value="recent"/g), 2);
   assert.equal(countMatches(markup, /data-color-series-filter/g), 2);
   assert.equal(countMatches(markup, /role="search"/g), 3);
-  assert.equal(countMatches(markup, /data-export-template="pure"/g), 2);
-  assert.equal(countMatches(markup, /data-export-template="annotated"/g), 2);
-  assert.equal(countMatches(markup, /data-export-template="numbered"/g), 2);
-  assert.equal(countMatches(markup, /data-export-template="rounded"/g), 2);
+  assert.equal(countMatches(markup, /data-export-preset="pure"/g), 2);
+  assert.equal(countMatches(markup, /data-export-preset="annotated"/g), 2);
+  assert.equal(countMatches(markup, /data-export-preset="numbered"/g), 2);
+  assert.equal(countMatches(markup, /data-export-preset="rounded"/g), 2);
+  assert.equal(countMatches(markup, /data-export-preset="ring"/g), 2);
+  assert.equal(countMatches(markup, /data-export-background-options/g), 2);
+  assert.equal(countMatches(markup, /data-export-appearance-options/g), 2);
+  assert.equal(countMatches(markup, /data-export-content-option=/g), 12);
+  assert.equal(
+    countMatches(
+      markup,
+      /data-export-content-option="[^"]+"[^>]*>[\s\S]*?<label slot="label">[^<]+<\/label>/g,
+    ),
+    12,
+  );
+  assert.equal(countMatches(markup, /data-export-preview-canvas/g), 3);
+  assert.doesNotMatch(markup, /data-export-preview-button/u);
   assert.match(markup, /色号图纸[\s\S]*每格显示色号，并附材料数量清单/u);
   assert.match(markup, /圆角方格[\s\S]*圆角小方格清晰分隔，适合放大分享/u);
+  assert.match(markup, /圆环豆粒[\s\S]*模拟带中心孔的实体拼豆外观/u);
   assert.match(markup, /data-return-prepare/u);
   assert.match(markup, /data-edit-pattern/u);
   assert.match(markup, /data-return-editor/u);
@@ -304,6 +341,46 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.match(markup, /data-selection-action="move"[\s\S]*移动/u);
   assert.match(markup, /data-selection-action="copy"[\s\S]*复制/u);
   assert.doesNotMatch(markup, /data-selection-actions/u);
+});
+
+test('mobile export preview stays in document flow instead of covering configuration controls', () => {
+  assert.match(
+    pageCss,
+    /\.export-completion\s*\{[\s\S]*?grid-template-rows:\s*repeat\(7,\s*max-content\)/u,
+  );
+  assert.doesNotMatch(pageCss, /\.export-mobile-preview\s*\{\s*position:\s*sticky/u);
+  assert.match(
+    pageCss,
+    /@media \(max-width: 767px\)[\s\S]*?\.export-mobile-preview\s*\{[\s\S]*?position:\s*relative/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(max-width: 767px\)[\s\S]*?\.export-run\s*\{[\s\S]*?position:\s*relative/u,
+  );
+});
+
+test('PNG export option cards center their copy without centering checkbox rows', () => {
+  assert.match(
+    vaadinThemeCss,
+    /\.export-template-options \[slot='label'\],\s*\.export-compact-options \[slot='label'\]\s*\{[^}]*place-items:\s*center;[^}]*text-align:\s*center;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.export-template-options \[slot='label'\] > span\s*\{[^}]*display:\s*grid;[^}]*justify-items:\s*center;[^}]*text-align:\s*center;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.export-compact-options \[slot='label'\]\s*\{[^}]*white-space:\s*nowrap;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.workspace-inspector \.export-option-groups\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/u,
+  );
+  const checkboxLabelRule =
+    vaadinThemeCss.match(
+      /\.export-content-options vaadin-checkbox > \[slot='label'\]\s*\{([^}]*)\}/u,
+    )?.[1] ?? '';
+  assert.doesNotMatch(checkboxLabelRule, /justify-content:\s*center|text-align:\s*center/u);
 });
 
 test('palette scope controls expose one native label across every visual radio card', async () => {
@@ -345,7 +422,7 @@ test('RadioGroups use one checked child default without a static group value', (
   const groups = [
     ...markup.matchAll(/<vaadin-radio-group\b([^>]*)>([\s\S]*?)<\/vaadin-radio-group>/gu),
   ];
-  assert.equal(groups.length, 11);
+  assert.equal(groups.length, 15);
   for (const [, attributes = '', children = ''] of groups) {
     assert.doesNotMatch(attributes, /\bvalue=/u);
     assert.equal(countMatches(children, /<vaadin-radio-button\b[^>]*\bchecked\b/gu), 1);
@@ -392,6 +469,25 @@ test('export completion reuses inspector and sheet surfaces without a modal', ()
   assert.match(markup, /打印制作/u);
   assert.match(markup, /材料清单/u);
   assert.match(markup, /保存项目/u);
+});
+
+test('PNG export is configured against one live preview result with no confirmation step', () => {
+  assert.equal(countMatches(markup, /data-export-preview-workspace-status/g), 1);
+  assert.match(mainSource, /configurationForPreviewMode\(previewRenderMode\)/u);
+  assert.match(
+    mainSource,
+    /pngExportPreviewCoordinator\.schedule\(\{[\s\S]*configuration:\s*exportCompletionState\.pngConfiguration/u,
+  );
+  assert.match(mainSource, /currentReadyPngExportPreview\(\)[\s\S]*pngBlob:\s*readyPreview\.blob/u);
+  assert.doesNotMatch(markup, /导出预览/u);
+  assert.match(
+    pageCss,
+    /@media \(max-width:\s*1023px\)\s*\{[\s\S]*\.export-live-stage\s*\{[^}]*display:\s*none/u,
+  );
+  assert.match(
+    pageCss,
+    /@media \(min-width:\s*1024px\)\s*\{[\s\S]*\.export-mobile-preview\s*\{[^}]*display:\s*none/u,
+  );
 });
 
 test('mobile sheet states use the shared height variable and disable drag transitions', () => {
@@ -498,6 +594,14 @@ test('preview comparison and preset cards adapt without global radio width pollu
   );
   assert.match(
     vaadinThemeCss,
+    /\.compare-switch::part\(label\),[\s\S]*\.compare-switch::part\(error-message\)\s*\{[^}]*display:\s*none;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
+    /\.compare-switch::before\s*\{[^}]*content:\s*none;[^}]*display:\s*none;/u,
+  );
+  assert.match(
+    vaadinThemeCss,
     /\.compare-switch vaadin-radio-button\s*\{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);[^}]*align-items:\s*stretch;/u,
   );
   assert.match(
@@ -519,6 +623,10 @@ test('preview comparison and preset cards adapt without global radio width pollu
   assert.match(
     vaadinThemeCss,
     /@container \(min-width:\s*35rem\)[\s\S]*\.preview-workspace\[data-preview-layout='desktop'\] \.preset-cards-four::part\(group-field\)[\s\S]*grid-template-columns:\s*repeat\(4,/u,
+  );
+  assert.match(
+    pageCss,
+    /\.secondary-button\.hold-original-button\s*\{[^}]*min-height:\s*3\.25rem;[^}]*border-radius:\s*var\(--radius-md\);/u,
   );
 });
 
@@ -542,7 +650,7 @@ test('preview exposes five local render modes without removing original comparis
   assert.equal(countMatches(preview, /value="original"/g), 1);
 });
 
-test('preview mode selection reveals the pattern before drawing and preserves action label nodes', () => {
+test('preview mode selection updates the renderer before revealing the pattern', () => {
   assert.match(
     mainSource,
     /setPreviewRenderMode\(createPreviewModeSelection\(button\.dataset\.previewMode\)\)/u,
@@ -556,9 +664,9 @@ test('preview mode selection reveals the pattern before drawing and preserves ac
     'previewView.applyCompareView(selection.compareView)',
   );
   const drawIndex = selectionHandler.indexOf('previewView.setRenderMode(selection.mode)');
-  assert.ok(compareIndex >= 0);
+  assert.ok(drawIndex >= 0);
+  assert.ok(compareIndex > drawIndex);
   assert.ok(applyIndex > compareIndex);
-  assert.ok(drawIndex > applyIndex);
   assert.match(mainSource, /\[data-background-removal-label-short\][\s\S]*compactLabel/u);
   assert.match(mainSource, /\[data-background-removal-label-long\][\s\S]*actionState\.label/u);
   assert.doesNotMatch(mainSource, /action\.textContent\s*=/u);
@@ -569,7 +677,15 @@ test('preview image actions stay touch-safe while responsive labels and status s
     pageCss,
     /\.preview-image-action\s*\{[^}]*min-width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/u,
   );
-  assert.match(pageCss, /\[data-background-removal-status\]:empty\s*\{[^}]*display:\s*none;/u);
+  assert.match(
+    pageCss,
+    /\.background-removal-status\s*\{[^}]*display:\s*flex;[^}]*max-inline-size:\s*min\(100%,\s*34rem\);[^}]*justify-self:\s*end;[^}]*overflow-wrap:\s*anywhere;/u,
+  );
+  assert.doesNotMatch(pageCss, /\[data-background-removal-status\]\s*\{[^}]*flex-basis:\s*100%/u);
+  assert.match(
+    mainSource,
+    /data-background-removal-status-message[\s\S]*messageNode\.textContent = backgroundRemovalStatusMessage[\s\S]*status\.hidden = backgroundRemovalStatusMessage\.length === 0/u,
+  );
   assert.match(
     pageCss,
     /@media \(max-width:\s*767px\)[\s\S]*\[data-action-label-long\],[\s\S]*\[data-background-removal-label-long\]\s*\{[^}]*display:\s*none;/u,

@@ -1,6 +1,7 @@
 import { ACCEPTED_IMAGE_ACCEPT } from './features/local-image-input/types';
 import { brandConfig } from './brand/brand.config';
 import { EXPORT_TASKS, type ExportTaskDefinition } from './features/export-completion/exportState';
+import { PNG_EXPORT_PRESETS } from './features/export-completion/pngExportConfiguration';
 import { FIRST_USE_HINT_MESSAGE } from './features/pattern-editor/firstUseHint';
 import { renderPreviewWorkspace } from './features/preview-workspace/previewWorkspace';
 import { renderStartWorkspace } from './features/start-workspace/startWorkspace';
@@ -207,6 +208,31 @@ function renderPatternWorkspace(): string {
             aria-label="拼豆矩阵编辑画布。使用方向键移动，空格键应用当前工具；也可使用画布上方的行列输入跳转。"
           ></canvas>
         </div>
+        <section
+          class="export-live-stage"
+          data-export-preview-stage
+          aria-labelledby="export-live-stage-title"
+          hidden
+        >
+          <div class="export-live-heading">
+            <div>
+              <span class="eyebrow">最终导出效果</span>
+              <h2 id="export-live-stage-title">图片实时预览</h2>
+            </div>
+            <span
+              class="export-live-badge"
+              data-export-preview-workspace-status
+              role="status"
+              aria-live="polite"
+            >正在生成预览…</span>
+          </div>
+          <div class="export-preview-frame" data-export-preview-frame>
+            <canvas
+              data-export-preview-canvas="workspace"
+              aria-label="最终导出的 PNG 图片实时预览"
+            ></canvas>
+          </div>
+        </section>
       </div>
 
       <aside class="workspace-inspector" data-workspace-inspector>
@@ -422,35 +448,103 @@ function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
           aria-live="polite"
         ></p>
       </div>
+      <section class="export-mobile-preview" aria-label="最终导出图片实时预览">
+        <div class="export-preview-caption">
+          <strong>最终导出效果</strong>
+          <span data-export-preview-status role="status" aria-live="polite">正在生成预览…</span>
+        </div>
+        <div class="export-preview-frame" data-export-preview-frame>
+          <canvas
+            data-export-preview-canvas="${surface}"
+            aria-label="最终导出的 PNG 图片实时预览"
+          ></canvas>
+        </div>
+      </section>
       <div class="export-task-grid" role="group" aria-label="导出任务">
         ${EXPORT_TASKS.map((task) => renderExportTask(task)).join('')}
       </div>
-      <vaadin-radio-group
-        class="export-template-options"
-        data-export-template-options
-        label="分享图片样式"
-      >
-        <vaadin-radio-button value="pure" data-export-template="pure">
-          <label slot="label">
-          <span>纯图案<small>透明背景，只保留拼豆图案</small></span>
-          </label>
-        </vaadin-radio-button>
-        <vaadin-radio-button value="annotated" data-export-template="annotated" checked>
-          <label slot="label">
-          <span>带标注<small>包含网格、坐标和材料图例</small></span>
-          </label>
-        </vaadin-radio-button>
-        <vaadin-radio-button value="numbered" data-export-template="numbered">
-          <label slot="label">
-          <span>色号图纸<small>每格显示色号，并附材料数量清单</small></span>
-          </label>
-        </vaadin-radio-button>
-        <vaadin-radio-button value="rounded" data-export-template="rounded">
-          <label slot="label">
-          <span>圆角方格<small>圆角小方格清晰分隔，适合放大分享</small></span>
-          </label>
-        </vaadin-radio-button>
-      </vaadin-radio-group>
+      <div class="export-png-controls" data-export-png-controls>
+        <div class="export-config-heading">
+          <div>
+            <strong>图片样式</strong>
+            <span data-export-preset-match>带标注</span>
+          </div>
+          <small>修改任一选项，预览会立即更新</small>
+        </div>
+        <vaadin-radio-group
+          class="export-template-options export-preset-options"
+          data-export-preset-options
+          label="常用样式"
+        >
+          ${PNG_EXPORT_PRESETS.map(
+            (preset) => `
+              <vaadin-radio-button
+                value="${preset.id}"
+                data-export-preset="${preset.id}"
+                ${preset.id === 'annotated' ? 'checked' : ''}
+              >
+                <label slot="label">
+                  <span>${preset.label}<small>${preset.description}</small></span>
+                </label>
+              </vaadin-radio-button>
+            `,
+          ).join('')}
+        </vaadin-radio-group>
+        <div class="export-option-groups">
+          <vaadin-radio-group
+            class="export-compact-options"
+            data-export-background-options
+            label="背景"
+          >
+            <vaadin-radio-button value="transparent">
+              <label slot="label">透明</label>
+            </vaadin-radio-button>
+            <vaadin-radio-button value="white" checked>
+              <label slot="label">白色</label>
+            </vaadin-radio-button>
+          </vaadin-radio-group>
+          <vaadin-radio-group
+            class="export-compact-options"
+            data-export-appearance-options
+            label="豆粒外观"
+          >
+            <vaadin-radio-button value="bead" checked>
+              <label slot="label">圆形豆粒</label>
+            </vaadin-radio-button>
+            <vaadin-radio-button value="solidSquare">
+              <label slot="label">实心方格</label>
+            </vaadin-radio-button>
+            <vaadin-radio-button value="roundedSquare">
+              <label slot="label">圆角方格</label>
+            </vaadin-radio-button>
+            <vaadin-radio-button value="ring">
+              <label slot="label">圆环豆粒</label>
+            </vaadin-radio-button>
+          </vaadin-radio-group>
+        </div>
+        <fieldset class="export-content-options">
+          <legend>导出内容</legend>
+          <vaadin-checkbox data-export-content-option="includeGrid" checked>
+            <label slot="label">网格线</label>
+          </vaadin-checkbox>
+          <vaadin-checkbox data-export-content-option="includeCoordinates" checked>
+            <label slot="label">行列坐标</label>
+          </vaadin-checkbox>
+          <vaadin-checkbox data-export-content-option="includeCellCodes">
+            <label slot="label">格内色号</label>
+          </vaadin-checkbox>
+          <vaadin-checkbox data-export-content-option="includeStatistics" checked>
+            <label slot="label">图纸统计</label>
+          </vaadin-checkbox>
+          <vaadin-checkbox data-export-content-option="includeMaterialCounts" checked>
+            <label slot="label">材料数量</label>
+          </vaadin-checkbox>
+          <vaadin-checkbox data-export-content-option="includeColorLegend" checked>
+            <label slot="label">色块图例</label>
+          </vaadin-checkbox>
+        </fieldset>
+        <p class="export-configuration-summary" data-export-configuration-summary></p>
+      </div>
       <button class="primary-button export-run" type="button" data-export-run>
         下载分享图片
       </button>

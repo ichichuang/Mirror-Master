@@ -66,6 +66,7 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
   const patternView = required(root, '[data-preview-pattern-view]') as HTMLElement;
   let lastProject: BeadProject | null = null;
   let renderMode: PreviewRenderMode = DEFAULT_PREVIEW_RENDER_MODE;
+  let activeView: 'adjust' | 'original' | 'pattern' = 'pattern';
 
   return Object.freeze({
     setStatusText(
@@ -88,7 +89,6 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
     },
     drawPreview,
     syncResult(input: PreviewResultViewInput): void {
-      drawPreview(input.project);
       if (input.project && input.statistics) {
         const trustCopy = formatPatternTrustSummary(createPatternTrustSummary(input.project));
         summary.hidden = false;
@@ -120,19 +120,30 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
       }
       editButton.disabled = input.project === null;
       returnEditorButton.hidden = !input.canReturnToEditor;
+      drawPreview(input.project);
     },
     updateEstimate,
     setRenderMode(mode: PreviewRenderMode): void {
+      if (renderMode === mode) {
+        return;
+      }
       renderMode = mode;
-      drawPreview(lastProject);
+      if (activeView === 'pattern') {
+        drawPreview(lastProject);
+      }
     },
     drawAlignedOriginal(image: HTMLImageElement, rotation: ImageRotation, crop: CropPercent): void {
       drawAlignedOriginalPreview(originalCanvas, image, rotation, crop);
     },
     applyCompareView(view: 'adjust' | 'original' | 'pattern'): void {
+      const viewChanged = activeView !== view;
+      activeView = view;
       originalView.hidden = view !== 'original';
       patternView.hidden = view !== 'pattern';
       adjustView.hidden = view !== 'adjust';
+      if (!viewChanged) {
+        return;
+      }
       if (view === 'original') {
         options.onShowOriginal();
       } else if (view === 'pattern') {

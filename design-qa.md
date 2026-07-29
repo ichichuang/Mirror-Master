@@ -186,6 +186,61 @@ passed
 
 final result: passed
 
+## Mobile configurable PNG export layout QA — 2026-07-28
+
+### Evidence
+
+- Source visual truth: `/var/folders/x6/9_ly65113g1gppf6t0n4ncjr0000gn/T/codex-clipboard-edc6f483-115c-46c7-afc9-1662fc82a822.png`, 876 × 1370. This is the reported broken state rather than a replacement visual design.
+- Browser-rendered implementation, top state: `artifacts/qa/export-mobile-style-fixed-top.png`, 390 × 844.
+- Browser-rendered implementation, configuration state: `artifacts/qa/export-mobile-style-fixed-lower.png`, 390 × 844.
+- Side-by-side comparison: `artifacts/qa/export-mobile-style-comparison.png`, 930 × 844.
+- Browser viewport: 390 × 844 CSS px at device pixel ratio 1.
+- Density normalization: the 876 × 1370 source was proportionally scaled to 540 × 844 and placed beside the 390 × 844 implementation configuration state.
+- State: full mobile editor sheet, sharing-image task selected, annotated preset, white background, round-bead appearance, and five of six optional content rows selected.
+
+### Comparison history
+
+#### Pass 1
+
+- P1 layout overlap: the source shows the live preview and its divider covering preset controls because the mobile preview was sticky and the containing `auto` grid track could shrink below its children.
+- P1 missing labels: all six content choices rendered only their checkmark boxes because their customer-facing text was not assigned to Vaadin's public label slot.
+- P2 obstructed controls: the sticky download action covered configuration cards while scrolling.
+- Fixes: returned the preview to normal document flow, changed all seven export panel rows to non-shrinking `max-content` tracks, added explicit native label slots to every checkbox, made the mobile download action part of the normal flow, and reduced mobile-only preview/card spacing.
+
+#### Pass 2
+
+- The first browser pass after removing sticky positioning still exposed a zero-height preview host. DOM geometry showed the preview at 0 px while its 265.8 px children overflowed over the following 136 px task grid.
+- Fix: the export panel now uses `repeat(7, max-content)`, producing sequential geometry: preview 240.6–506.4 px, task grid 518.4–654.4 px, and PNG controls starting at 666.4 px.
+- The sticky mobile action was also confirmed to cover preset cards and was changed to relative positioning.
+
+#### Pass 3
+
+- The final side-by-side and focused configuration captures contain no remaining P0, P1, or P2 issue. Preview, tasks, presets, custom options, content labels, summary, and action follow one continuous scroll order without overlap.
+
+### Required fidelity surfaces
+
+- Fonts and typography: the existing Chinese system stack and hierarchy remain unchanged. Checkbox labels now render at the established 0.78 rem control weight and remain readable without truncation.
+- Spacing and layout rhythm: the final mobile surface uses the existing spacing and radius tokens, compact three-rem radio cards, a bounded 11–16 rem preview, and 44 px checkbox touch rows. No fixed or sticky layer obscures a configuration control.
+- Colors and visual tokens: teal selected states, neutral borders, checkerboard transparency, muted descriptions, and the summary callout continue to use the product's existing tokens.
+- Image quality: the renderer and exported PNG data path were not modified. The deterministic canvas in the browser layout fixture was used only to verify responsive containment; native export rendering remains covered by the PNG renderer tests.
+- Copy and content: all existing export copy is preserved. The six previously invisible labels—`网格线`, `行列坐标`, `格内色号`, `图纸统计`, `材料数量`, and `色块图例`—are now both visible and exposed as checkbox names.
+
+### Functional and responsive validation
+
+- In-app Browser DOM exposed all five preset radios, both background radios, all four appearance radios, and all six named checkboxes.
+- Browser geometry confirmed zero overlap between preview, task grid, custom controls, summary, and action at 390 × 844.
+- Browser console contained no application warning or error; the only warning was Lit's Vite development-mode notice.
+- Full frontend suite: 290 passed.
+- ESLint passed for the modified TypeScript application file.
+- Prettier check passed for all modified production and regression-test files.
+- TypeScript validation and the Vite production build passed.
+
+### Residual checks
+
+- The in-app browser file chooser did not return an automatable file handle, so the visual QA used the real export markup, Vaadin components, responsive CSS, and a deterministic canvas fixture. The user's final manual pass should confirm the same layout with their imported motorcycle project.
+
+final result: passed
+
 ## Rounded-square share export QA — 2026-07-28
 
 ### Evidence

@@ -11,8 +11,10 @@ import {
   openExportCompletion,
   parseExportPngTemplate,
   selectExportTask,
+  setExportPngConfiguration,
   setExportPngTemplate,
 } from '../src/features/export-completion/exportState';
+import { configurationForPngExportPreset } from '../src/features/export-completion/pngExportConfiguration';
 
 test('completion exposes exactly four customer tasks with four PNG templates only for sharing', () => {
   assert.deepEqual(
@@ -61,6 +63,16 @@ test('open and close retain the prior panel, sheet height, focus target, and scr
   assert.equal(closed.phase, 'closed');
   assert.deepEqual(closed.returnContext, returnContext);
   assert.deepEqual(closed.status, { phase: 'idle' });
+});
+
+test('completion state owns one immutable composable PNG configuration', () => {
+  const initial = createExportCompletionState();
+  assert.deepEqual(initial.pngConfiguration, configurationForPngExportPreset('annotated'));
+
+  const ring = setExportPngConfiguration(initial, configurationForPngExportPreset('ring'));
+  assert.deepEqual(ring.pngConfiguration, configurationForPngExportPreset('ring'));
+  assert.equal(ring.status.phase, 'idle');
+  assert.notEqual(ring, initial);
 });
 
 test('task and PNG template changes are explicit and a non-PNG task cannot retain template UI state', () => {
