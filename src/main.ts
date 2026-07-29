@@ -52,6 +52,7 @@ import {
 } from './features/grid-api/client';
 import { createChartMirrorCoordinator } from './features/grid-editor/chartMirrorCoordinator';
 import { resolveGridConfirmation } from './features/grid-editor/confirmationState';
+import { syncChartDetectionBusyUi } from './features/grid-editor/detectionBusyUi';
 import { mountGridEditor, type GridEditorController } from './features/grid-editor/gridEditor';
 import { decodeImageResourceFromObjectUrl } from './features/local-image-input/imageDecoder';
 import {
@@ -383,7 +384,7 @@ let prepareColorSeries = '';
 let recentColorIds: readonly string[] = Object.freeze([]);
 let exportCompletionState: ExportCompletionState = createExportCompletionState();
 let exportReturnFocus: HTMLElement | null = null;
-let chartWarningAcknowledged = false;
+let chartAcknowledgedCandidateId: string | null = null;
 let chartDetectionRunning = false;
 let chartResultUrl: string | null = null;
 let chartAxis: 'horizontal' | 'vertical' = 'horizontal';
@@ -650,11 +651,13 @@ function syncBackgroundRemovalAction(): void {
     activeVariant: session?.activeVariant() ?? 'original',
     busy,
   });
-  control.hidden = actionState.hidden;
   action.disabled = actionState.disabled;
   action.setAttribute('aria-label', actionState.label);
   compactLabel.textContent = actionState.compactLabel;
   longLabel.textContent = actionState.label;
+  if (actionState.unavailableMessage !== null) {
+    setBackgroundRemovalStatus(actionState.unavailableMessage, 'error');
+  }
   syncBackgroundRemovalStatus();
   const originalView = required(previewWorkspace, '[data-preview-original-view]', HTMLElement);
   originalView.dataset.sourceImageVariant = session?.activeVariant() ?? 'original';
@@ -1009,14 +1012,10 @@ function applyCapabilitiesToInterface(): void {
       !appCapabilities.exports.includes(format as 'png' | 'pdf' | 'csv' | 'projectJson');
   }
   syncExportCompletionUi();
-  for (const button of chartWorkspace.querySelectorAll<HTMLButtonElement>('[data-chart-axis]')) {
-    button.disabled = !appCapabilities.gridMirrorAxes.includes(
-      button.dataset.chartAxis as 'horizontal' | 'vertical',
-    );
-  }
   if (prepareState) {
     applyPrepareModeState();
   }
+  syncChartConfirmationUi();
 }
 
 function setupStart(): void {
@@ -3785,7 +3784,7 @@ function setupChartWorkspace(): GridEditorController {
     onContractChange(contract) {
       chartMirrorCoordinator.cancel();
       gridContract = contract;
-      chartWarningAcknowledged = false;
+      chartAcknowledgedCandidateId = null;
       if (contract) {
         columnsInput.value = String(contract.columns);
         rowsInput.value = String(contract.rows);
@@ -3800,6 +3799,15 @@ function setupChartWorkspace(): GridEditorController {
       chartDetectionRunning = detecting;
       syncChartConfirmationUi();
     },
+    onCandidatesChange(index, total) {
+      const controls = required(chartWorkspace, '[data-chart-candidates]', HTMLElement);
+      const status = required(chartWorkspace, '[data-chart-candidate-status]', HTMLElement);
+      controls.hidden = total < 2;
+      status.textContent = total > 0 ? `候选 ${String(index)} / ${String(total)}` : '';
+      for (const button of controls.querySelectorAll<HTMLButtonElement>('[data-chart-candidate]')) {
+        button.disabled = total < 2 || chartDetectionRunning;
+      }
+    },
   });
   required(chartWorkspace, '[data-chart-redetect]', HTMLButtonElement).addEventListener(
     'click',
@@ -3809,9 +3817,17 @@ function setupChartWorkspace(): GridEditorController {
     'click',
     controller.resetSelection,
   );
+  for (const candidateButton of chartWorkspace.querySelectorAll<HTMLButtonElement>(
+    '[data-chart-candidate]',
+  )) {
+    candidateButton.addEventListener('click', () => {
+      const offset = candidateButton.dataset.chartCandidate === 'previous' ? -1 : 1;
+      controller.cycleCandidate(offset);
+    });
+  }
   dimensionForm.addEventListener('submit', (event) => {
     event.preventDefault();
-    chartWarningAcknowledged = false;
+    chartAcknowledgedCandidateId = null;
     controller.adjustDimensions(columnsInput.valueAsNumber, rowsInput.valueAsNumber);
     syncChartConfirmationUi();
   });
@@ -3833,9 +3849,9 @@ function setupChartWorkspace(): GridEditorController {
     });
   }
   generateButton.addEventListener('click', () => {
-    const confirmation = resolveGridConfirmation(gridContract, chartWarningAcknowledged);
+    const confirmation = resolveGridConfirmation(gridContract, chartAcknowledgedCandidateId);
     if (confirmation.requiresWarningAcknowledgement) {
-      chartWarningAcknowledged = true;
+      chartAcknowledgedCandidateId = gridContract?.candidateId ?? null;
       syncChartConfirmationUi();
       gridController.setMessage(
         `${confirmation.warning ?? '请复核当前网格。'} 请再次点击“仍要镜像”。`,
@@ -3857,7 +3873,8 @@ function setupChartWorkspace(): GridEditorController {
 }
 
 function syncChartConfirmationUi(): void {
-  const confirmation = resolveGridConfirmation(gridContract, chartWarningAcknowledged);
+  syncChartDetectionBusyUi(app, chartDetectionRunning);
+  const confirmation = resolveGridConfirmation(gridContract, chartAcknowledgedCandidateId);
   const dimensions = required(chartWorkspace, '[data-chart-dimensions]', HTMLElement);
   const confidence = required(chartWorkspace, '[data-chart-confidence]', HTMLElement);
   const warning = required(chartWorkspace, '[data-chart-warning]', HTMLElement);
@@ -3870,17 +3887,32 @@ function syncChartConfirmationUi(): void {
   );
   const generate = required(chartWorkspace, '[data-chart-generate]', HTMLButtonElement);
   const hasContract = gridContract !== null;
+  const hasSourceImage = activeSourceImage() !== null;
   const mirrorRunning = chartMirrorCoordinator.isRunning();
+  const candidateControls = required(chartWorkspace, '[data-chart-candidates]', HTMLElement);
 
   dimensions.textContent = confirmation.dimensions;
   confidence.textContent = confirmation.confidenceLabel;
   confidence.dataset.state = confirmation.level;
   warning.textContent = confirmation.warning ?? '';
   warning.hidden = confirmation.warning === null;
-  columns.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
-  rows.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
-  applyDimensions.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
+  columns.disabled = !hasSourceImage || chartDetectionRunning || mirrorRunning;
+  rows.disabled = !hasSourceImage || chartDetectionRunning || mirrorRunning;
+  applyDimensions.disabled = !hasSourceImage || chartDetectionRunning || mirrorRunning;
   generate.disabled = !hasContract || chartDetectionRunning || mirrorRunning;
+  for (const button of candidateControls.querySelectorAll<HTMLButtonElement>(
+    '[data-chart-candidate]',
+  )) {
+    button.disabled = Boolean(candidateControls.hidden || chartDetectionRunning || mirrorRunning);
+  }
+  for (const button of chartWorkspace.querySelectorAll<HTMLButtonElement>('[data-chart-axis]')) {
+    button.disabled =
+      chartDetectionRunning ||
+      mirrorRunning ||
+      !appCapabilities.gridMirrorAxes.includes(
+        button.dataset.chartAxis as 'horizontal' | 'vertical',
+      );
+  }
   generate.textContent = mirrorRunning
     ? '正在镜像图纸…'
     : confirmation.requiresWarningAcknowledgement
@@ -3896,7 +3928,7 @@ function openChartWorkspace(): void {
     return;
   }
   chartMirrorCoordinator.cancel();
-  chartWarningAcknowledged = false;
+  chartAcknowledgedCandidateId = null;
   chartDetectionRunning = false;
   showStage('chart');
   gridContract = null;
@@ -3916,7 +3948,7 @@ async function generateChartMirror(): Promise<void> {
   if (!image || !contract) {
     return;
   }
-  const confirmation = resolveGridConfirmation(contract, chartWarningAcknowledged);
+  const confirmation = resolveGridConfirmation(contract, chartAcknowledgedCandidateId);
   if (!confirmation.canSubmit || chartMirrorCoordinator.isRunning()) {
     return;
   }
@@ -4059,7 +4091,7 @@ function resetToStart(): void {
   selectionTransferMode = null;
   recentColorIds = Object.freeze([]);
   gridContract = null;
-  chartWarningAcknowledged = false;
+  chartAcknowledgedCandidateId = null;
   chartDetectionRunning = false;
   applyUploadPrepareFlow(resetFlowForReplacement(currentUploadPrepareFlow()));
   mode = 'photo';

@@ -3,9 +3,10 @@
     "id": { "$type": "string", "$value": "mint-studio" },
     "color": {
       "action": {
-        "primary": { "$type": "color", "$value": "{color.teal.700}" },
-        "primaryHover": { "$type": "color", "$value": "{color.teal.800}" },
-        "primarySoft": { "$type": "color", "$value": "{color.teal.100}" }
+        "primary": { "$type": "color", "$value": "{color.orange.500}" },
+        "primaryHover": { "$type": "color", "$value": "{color.orange.600}" },
+        "primarySoft": { "$type": "color", "$value": "{color.orange.100}" },
+        "primaryText": { "$type": "color", "$value": "{color.orange.700}" }
       },
       "background": {
         "page": { "$type": "color", "$value": "{color.neutral.50}" },
@@ -16,7 +17,7 @@
       "text": {
         "primary": { "$type": "color", "$value": "{color.neutral.800}" },
         "secondary": { "$type": "color", "$value": "{color.neutral.600}" },
-        "onPrimary": { "$type": "color", "$value": "{color.neutral.0}" }
+        "onPrimary": { "$type": "color", "$value": "{color.neutral.900}" }
       },
       "border": {
         "default": { "$type": "color", "$value": "{color.neutral.200}" },
@@ -27,7 +28,7 @@
         "warning": { "$type": "color", "$value": "{color.amber.700}" }
       },
       "focus": {
-        "ring": { "$type": "color", "$value": "{color.teal.500}" }
+        "ring": { "$type": "color", "$value": "{color.orange.700}" }
       }
     }
   }

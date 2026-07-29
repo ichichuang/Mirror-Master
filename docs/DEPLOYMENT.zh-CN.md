@@ -39,6 +39,7 @@ FastAPI 在 `dist` 存在时通过根路径提供前端静态文件。运维必�
 - `GET /api/palettes`
 - `POST /api/pattern/generate`
 - `POST /api/pattern/export`
+- `POST /api/image/remove-background`
 - `POST /api/grid/detect`
 - `POST /api/grid/mirror`
 
@@ -87,7 +88,7 @@ http://127.0.0.1:8000
 
 ## 5. 容器移交材料
 
-`Dockerfile` 构建前端 `dist`，安装 FastAPI 生产依赖，并以 Uvicorn 提供统一服务。`compose.yaml` 只提供单服务容器验收入口，没有数据库、持久卷或生产基础设施决策。
+`Dockerfile` 构建前端 `dist`，安装 FastAPI 生产依赖，并以独立构建阶段从 manifest 固定来源下载去背景 ONNX 权重。模型只有在大小与 SHA-256 校验通过后才会进入最终运行镜像；下载或校验失败必须使镜像构建失败。`compose.yaml` 只提供单服务容器验收入口，没有数据库、持久卷或生产基础设施决策。
 
 本地容器验收命令：
 
@@ -95,8 +96,11 @@ http://127.0.0.1:8000
 docker compose build
 docker compose up -d
 curl --fail --silent --show-error http://127.0.0.1:8000/api/health
+curl --fail --silent --show-error http://127.0.0.1:8000/api/capabilities
 docker compose stop
 ```
+
+容器验收时，`/api/capabilities` 必须报告 `backgroundRemoval.available: true`。模型权重不进入 Git 或 Docker build context；首次镜像构建需要访问 manifest 固定的下载来源，后续是否命中构建缓存由运维构建环境决定。
 
 需要移除本地验收容器时可执行：
 
@@ -191,6 +195,7 @@ docker compose down
 - `pnpm run build`
 - `backend/.venv/bin/python -m pytest -q backend/tests`
 - 本地统一服务的 `/api/health`、`/api/capabilities` 和 `/api/palettes`
+- 容器统一服务的 `/api/capabilities` 报告 `backgroundRemoval.available: true`
 - 真实照片、像素图和已有图纸的浏览器核心流程
 - PNG、PDF、CSV、项目 JSON 的内容一致性
 

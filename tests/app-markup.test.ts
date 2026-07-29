@@ -173,6 +173,10 @@ test('preview is result-first with comparison controls and no generation button'
   assert.match(preview, /data-action-label-short>换图</u);
   assert.match(preview, /data-action-label-long>更换图片</u);
   assert.match(preview, /data-background-removal-action[^>]*disabled/u);
+  assert.doesNotMatch(
+    preview,
+    /class="background-removal-control"[^>]*data-background-removal-control[^>]*hidden/u,
+  );
   assert.match(preview, /data-background-removal-label-short>去背</u);
   assert.match(preview, /data-background-removal-label-long>一键去背景</u);
   assert.doesNotMatch(preview, /自动保留主要人物或物体，处理后可恢复原图/u);
@@ -274,10 +278,65 @@ test('existing-chart confirmation exposes dimensions, confidence, editable row a
   assert.match(chart, /data-chart-dimensions/u);
   assert.match(chart, /data-chart-confidence/u);
   assert.match(chart, /data-chart-warning[^>]*role="status"/u);
+  assert.match(chart, /data-chart-candidate="previous"/u);
+  assert.match(chart, /data-chart-candidate-status[^>]*aria-live="polite"/u);
+  assert.match(chart, /data-chart-candidate="next"/u);
   assert.match(chart, /data-chart-columns[^>]*min="2"[^>]*max="300"/u);
   assert.match(chart, /data-chart-rows[^>]*min="2"[^>]*max="300"/u);
   assert.match(chart, /data-chart-apply-dimensions[\s\S]*修改行列数/u);
   assert.match(chart, /data-chart-generate[^>]*disabled[\s\S]*确认并镜像/u);
+});
+
+test('existing-chart detection exposes a loading layer and keeps preview zoom unlocked', () => {
+  const chart = markup.slice(markup.indexOf('data-chart-workspace'));
+  assert.match(
+    chart,
+    /data-chart-detection-loading[^>]*hidden[^>]*aria-hidden="true"[\s\S]*正在识别拼豆网格/u,
+  );
+
+  for (const hook of [
+    'data-chart-redetect',
+    'data-chart-reset',
+    'data-chart-candidate="previous"',
+    'data-chart-candidate="next"',
+    'data-chart-columns',
+    'data-chart-rows',
+    'data-chart-apply-dimensions',
+    'data-chart-axis="horizontal"',
+    'data-chart-axis="vertical"',
+    'data-chart-generate',
+  ]) {
+    assert.match(
+      chart,
+      new RegExp(
+        `${hook.replaceAll(/[.*+?^${}()|[\]\\]/gu, '\\$&')}[^>]*data-chart-detection-lock`,
+        'u',
+      ),
+    );
+  }
+
+  const zoomToolbar = chart.match(/<div class="zoom-controls"[\s\S]*?<\/div>/u)?.[0];
+  assert.ok(zoomToolbar);
+  assert.equal(countMatches(zoomToolbar, /<button\b/g), 4);
+  assert.doesNotMatch(zoomToolbar, /data-chart-detection-lock/u);
+});
+
+test('chart axis availability is recomputed through the detection busy synchronizer', () => {
+  const capabilitySync = mainSource.slice(
+    mainSource.indexOf('function applyCapabilitiesToInterface'),
+    mainSource.indexOf('function setupStart'),
+  );
+  const chartSync = mainSource.slice(
+    mainSource.indexOf('function syncChartConfirmationUi'),
+    mainSource.indexOf('function openChartWorkspace'),
+  );
+
+  assert.match(capabilitySync, /syncChartConfirmationUi\(\);/u);
+  assert.doesNotMatch(capabilitySync, /button\.disabled\s*=\s*!appCapabilities\.gridMirrorAxes/u);
+  assert.match(
+    chartSync,
+    /button\.disabled\s*=\s*chartDetectionRunning\s*\|\|\s*mirrorRunning\s*\|\|\s*!appCapabilities\.gridMirrorAxes\.includes/u,
+  );
 });
 
 test('desktop and mobile inspector tabs are roving-ready and control tabpanels', () => {
@@ -669,6 +728,11 @@ test('preview mode selection updates the renderer before revealing the pattern',
   assert.ok(applyIndex > compareIndex);
   assert.match(mainSource, /\[data-background-removal-label-short\][\s\S]*compactLabel/u);
   assert.match(mainSource, /\[data-background-removal-label-long\][\s\S]*actionState\.label/u);
+  assert.doesNotMatch(mainSource, /control\.hidden\s*=\s*actionState\.hidden/u);
+  assert.match(
+    mainSource,
+    /actionState\.unavailableMessage[\s\S]*setBackgroundRemovalStatus\([\s\S]*'error'/u,
+  );
   assert.doesNotMatch(mainSource, /action\.textContent\s*=/u);
 });
 
@@ -697,6 +761,18 @@ test('preview image actions stay touch-safe while responsive labels and status s
 });
 
 test('mobile preview keeps the comparison, canvas, and settings choices visually compact', () => {
+  const compactPreviewCss = pageCss.slice(
+    pageCss.indexOf('@media (max-width: 767px)'),
+    pageCss.indexOf('@media (min-width: 768px)'),
+  );
+  const phonePreviewCss = pageCss.slice(
+    pageCss.indexOf('@media (max-width: 520px)'),
+    pageCss.indexOf('@media (max-width: 359px)'),
+  );
+  const narrowestPreviewCss = pageCss.slice(
+    pageCss.indexOf('@media (max-width: 359px)'),
+    pageCss.indexOf('@media (max-width: 390px)'),
+  );
   assert.match(
     previewViewSource,
     /canvasSlot\.style\.setProperty\(\s*'--preview-canvas-aspect-ratio',\s*`\$\{String\(project\.grid\.columns\)\} \/ \$\{String\(project\.grid\.rows\)\}`/u,
@@ -710,9 +786,29 @@ test('mobile preview keeps the comparison, canvas, and settings choices visually
     /@media \(max-width:\s*767px\)[\s\S]*\.preview-canvas-slot\s*\{[^}]*aspect-ratio:\s*var\(--preview-canvas-aspect-ratio,\s*4 \/ 3\);[^}]*max-height:\s*48svh;/u,
   );
   assert.match(
-    pageCss,
-    /@media \(max-width:\s*767px\)[\s\S]*\.preview-compare-bar\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\);/u,
+    compactPreviewCss,
+    /\.preview-compare-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*grid-template-rows:\s*auto auto;/u,
   );
+  assert.match(
+    compactPreviewCss,
+    /\.hold-original-button\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*1;/u,
+  );
+  assert.match(
+    compactPreviewCss,
+    /\.preview-image-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*2;/u,
+  );
+  assert.doesNotMatch(compactPreviewCss, /\.hold-original-button\s*\{[^}]*display:\s*none/u);
+  assert.doesNotMatch(phonePreviewCss, /\.hold-original-button\s*\{[^}]*display:\s*none/u);
+  assert.match(
+    narrowestPreviewCss,
+    /\.preview-compare-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*auto auto auto;/u,
+  );
+  const narrowestHoldRule =
+    narrowestPreviewCss.match(/\.hold-original-button\s*\{([^}]*)\}/u)?.[1] ?? '';
+  assert.match(narrowestHoldRule, /grid-column:\s*1;/u);
+  assert.match(narrowestHoldRule, /grid-row:\s*2;/u);
+  assert.match(narrowestHoldRule, /width:\s*100%;/u);
+  assert.match(narrowestPreviewCss, /\.preview-image-actions\s*\{[^}]*grid-row:\s*3;/u);
   assert.match(
     pageCss,
     /@media \(max-width:\s*767px\)[\s\S]*\.preview-controls-scroll > \.settings-section\s*\{[^}]*gap:\s*var\(--space-3\);/u,

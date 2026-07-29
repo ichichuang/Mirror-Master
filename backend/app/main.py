@@ -185,8 +185,22 @@ async def detect_grid(
     file: Annotated[UploadFile, File()],
     mode: Annotated[str, Form()],
     rectangle: Annotated[str | None, Form()] = None,
+    quad: Annotated[str | None, Form()] = None,
+    expected_columns: Annotated[
+        str | None, Form(alias="expectedColumns")
+    ] = None,
+    expected_rows: Annotated[
+        str | None, Form(alias="expectedRows")
+    ] = None,
 ) -> JSONResponse:
-    contract = await create_detection_contract(file, mode, rectangle)
+    contract = await create_detection_contract(
+        file,
+        mode,
+        rectangle,
+        quad,
+        expected_columns,
+        expected_rows,
+    )
     return JSONResponse(contract.model_dump(by_alias=True))
 
 

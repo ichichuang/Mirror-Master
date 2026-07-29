@@ -35,7 +35,7 @@ export function renderPreviewWorkspace(): string {
                   <span data-action-label-short>裁剪</span>
                   <span data-action-label-long>调整原图</span>
                 </button>
-                <div class="background-removal-control" data-background-removal-control hidden>
+                <div class="background-removal-control" data-background-removal-control>
                   <button
                     class="secondary-button preview-image-action background-removal-button"
                     type="button"

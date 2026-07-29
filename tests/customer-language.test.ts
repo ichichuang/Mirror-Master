@@ -20,7 +20,7 @@ test('customer CSV matches the shared UTF-8 BOM and CRLF golden without internal
   assert.equal(actual, expected);
   assert.equal(actual.codePointAt(0), 0xfeff);
   assert.equal(actual.replaceAll('\r\n', '').includes('\n'), false);
-  assert.match(actual, /项目摘要\r\n产品,豆图设计台/u);
+  assert.match(actual, /项目摘要\r\n产品,6个造物社/u);
   assert.match(actual, /行,列,类型,颜色标识,色板,系列,色号\r\n/u);
   assert.doesNotMatch(actual, /schema|revision|matrixVersion|项目版本|矩阵版本|颜色 ID|显示 HEX/iu);
 });

@@ -104,11 +104,11 @@ test('only the current request token can complete or fail the visible export sta
   assert.equal(completeExport(second, 7, '旧文件.png'), second);
   assert.equal(failExport(second, 7, '旧请求失败。'), second);
 
-  const completed = completeExport(second, 8, '豆图设计台-材料清单-20260726.csv');
+  const completed = completeExport(second, 8, '6个造物社-材料清单-20260726.csv');
   assert.deepEqual(completed.status, {
     phase: 'success',
     token: 8,
     task: 'materialsList',
-    fileName: '豆图设计台-材料清单-20260726.csv',
+    fileName: '6个造物社-材料清单-20260726.csv',
   });
 });

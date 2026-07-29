@@ -55,6 +55,44 @@ def test_owner_sample_contract_is_the_known_34_by_27_grid(
     )
 
 
+def test_owner_sample_v2_detection_selects_the_known_grid(
+    client: TestClient,
+    owner_sample_bytes: bytes,
+) -> None:
+    response = client.post(
+        "/api/grid/detect",
+        files={
+            "file": (
+                "owner-grid.jpg",
+                owner_sample_bytes,
+                "image/jpeg",
+            )
+        },
+        data={"mode": "auto"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["contractVersion"] == "2.0"
+    selected = next(
+        candidate
+        for candidate in payload["candidates"]
+        if candidate["candidateId"] == payload["selectedCandidateId"]
+    )
+    assert selected["detector"] == "line"
+    assert (selected["columns"], selected["rows"]) == (COLUMNS, ROWS)
+    assert (selected["pitchX"], selected["pitchY"]) == (
+        CELL_SIZE,
+        CELL_SIZE,
+    )
+    assert selected["sourceQuad"] == [
+        {"x": LEFT, "y": TOP},
+        {"x": RIGHT, "y": TOP},
+        {"x": RIGHT, "y": BOTTOM},
+        {"x": LEFT, "y": BOTTOM},
+    ]
+
+
 def test_owner_sample_has_zero_reference_and_outside_grid_differences_and_all_cells(
     client: TestClient,
     owner_sample_bytes: bytes,

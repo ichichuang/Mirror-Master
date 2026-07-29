@@ -10,6 +10,13 @@ COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
 RUN pnpm run build
 
+FROM python:3.12-slim-bookworm AS background-removal-model
+
+WORKDIR /workspace
+COPY scripts/fetch-background-removal-model.py ./scripts/fetch-background-removal-model.py
+COPY backend/models/background-removal-model.json ./backend/models/background-removal-model.json
+RUN python scripts/fetch-background-removal-model.py
+
 FROM python:3.12-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -27,8 +34,8 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN python -m pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend/app ./backend/app
-COPY backend/models/background-removal-model.json ./backend/models/background-removal-model.json
 COPY backend/pyproject.toml ./backend/pyproject.toml
+COPY --from=background-removal-model /workspace/backend/models ./backend/models
 COPY --from=frontend /workspace/dist ./dist
 
 EXPOSE 8000

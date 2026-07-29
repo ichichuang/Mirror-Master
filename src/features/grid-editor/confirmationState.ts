@@ -1,4 +1,4 @@
-import type { DetectionRectangle, GridDetectionContract } from '../grid-api/client';
+import type { GridDetectionConstraints, GridDetectionContract } from '../grid-api/client';
 
 export type GridConfidenceLevel = 'high' | 'review' | 'insufficient';
 
@@ -11,37 +11,51 @@ export interface GridConfirmationState {
   readonly requiresWarningAcknowledgement: boolean;
 }
 
+const WARNING_COPY: Readonly<Record<string, string>> = Object.freeze({
+  GRID_BOUNDARY_UNCERTAIN: '外边界由已占用豆位推断，请确认是否遗漏整行或整列空白格。',
+  GRID_HARMONIC_AMBIGUOUS: '行列数可能少算或多算，请核对当前结果。',
+  GRID_LOW_CONFIDENCE: '这张图的网格线较浅，请放大核对红框和行列数。',
+  GRID_PERIODIC_ONLY: '这张图的网格线较浅，请确认红框覆盖完整网格，并核对行列数。',
+  GRID_MANUAL_GEOMETRY_REVIEW_REQUIRED: '已按手动范围和行列数重建网格，请核对四角。',
+  GRID_PERSPECTIVE_REVIEW_REQUIRED: '图纸存在旋转或透视，结果会先校正再按完整格位镜像。',
+});
+
 export function resolveGridConfirmation(
   contract: GridDetectionContract | null,
-  warningAcknowledged: boolean,
+  acknowledgedCandidateId: string | null,
 ): GridConfirmationState {
   if (!contract) {
     return Object.freeze({
       level: 'insufficient',
-      dimensions: '尚未检测到有效网格',
-      confidenceLabel: '网格置信度：不足',
+      dimensions: '暂时没有识别出完整网格',
+      confidenceLabel: '识别状态：未完成',
       warning: null,
       canSubmit: false,
       requiresWarningAcknowledgement: false,
     });
   }
 
-  const requiresWarningAcknowledgement = contract.warning !== null && !warningAcknowledged;
+  const warning = describeWarnings(contract.warnings);
+  const requiresWarningAcknowledgement =
+    contract.review === 'review' && acknowledgedCandidateId !== contract.candidateId;
   return Object.freeze({
-    level: contract.warning === null ? 'high' : 'review',
+    level: contract.review === 'ready' ? 'high' : 'review',
     dimensions: `检测到 ${String(contract.columns)} 列 × ${String(contract.rows)} 行`,
-    confidenceLabel: contract.warning === null ? '网格置信度：高' : '网格置信度：需要确认',
-    warning: contract.warning,
+    confidenceLabel:
+      contract.review === 'ready'
+        ? `识别状态：可直接镜像（${formatPercent(contract.confidence)}）`
+        : `识别状态：请核对（${formatPercent(contract.confidence)}）`,
+    warning,
     canSubmit: !requiresWarningAcknowledgement,
     requiresWarningAcknowledgement,
   });
 }
 
-export function createGridDimensionRectangle(
+export function createGridDimensionConstraints(
   contract: GridDetectionContract,
   columns: number,
   rows: number,
-): DetectionRectangle | null {
+): GridDetectionConstraints | null {
   if (
     !Number.isInteger(columns) ||
     !Number.isInteger(rows) ||
@@ -52,44 +66,22 @@ export function createGridDimensionRectangle(
   ) {
     return null;
   }
-
-  const width = columns * contract.cellSize;
-  const height = rows * contract.cellSize;
-  if (width > contract.naturalWidth || height > contract.naturalHeight) {
-    return null;
-  }
-
-  const left = Math.min(contract.left, contract.naturalWidth - width);
-  const top = Math.min(contract.top, contract.naturalHeight - height);
   return Object.freeze({
-    left,
-    top,
-    right: left + width,
-    bottom: top + height,
+    quad: contract.sourceQuad,
+    expectedColumns: columns,
+    expectedRows: rows,
   });
 }
 
-export function createGridDimensionContract(
-  contract: GridDetectionContract,
-  columns: number,
-  rows: number,
-): GridDetectionContract | null {
-  const rectangle = createGridDimensionRectangle(contract, columns, rows);
-  if (!rectangle) {
+function describeWarnings(warnings: readonly string[]): string | null {
+  if (warnings.length === 0) {
     return null;
   }
+  return warnings
+    .map((warning) => WARNING_COPY[warning] ?? '还有一项识别结果需要复核，请检查网格范围和行列数。')
+    .join(' ');
+}
 
-  return Object.freeze({
-    ...contract,
-    ...rectangle,
-    columns,
-    rows,
-    xBoundaries: Object.freeze(
-      Array.from({ length: columns + 1 }, (_, index) => rectangle.left + index * contract.cellSize),
-    ),
-    yBoundaries: Object.freeze(
-      Array.from({ length: rows + 1 }, (_, index) => rectangle.top + index * contract.cellSize),
-    ),
-    warning: '已按手动设置的行列数更新，请确认红色网格范围。',
-  });
+function formatPercent(confidence: number): string {
+  return `${String(Math.round(confidence * 100))}%`;
 }

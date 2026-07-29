@@ -13,10 +13,10 @@
 
 The source establishes the editor hierarchy: compact header, dominant pattern canvas, front/reverse and history controls, one bottom sheet, concise material summary, material rows, and a persistent completion action. Owner direction intentionally overrides the source's dark blue treatment and mobile left rail:
 
-- Theme is warm off-white and charcoal with teal only for primary/active UI.
+- Theme is warm off-white and charcoal with orange only for primary/active UI.
 - MARD/default colors are limited to pattern cells, swatches, legends, selected-color feedback, and material rows.
 - Mobile tools live in the single three-state bottom sheet; the left rail appears only on desktop.
-- The provisional customer brand is 豆图设计台 and is configuration-driven.
+- The provisional customer brand is 6个造物社 and is configuration-driven.
 
 These are approved direction changes, not fidelity defects.
 
@@ -34,7 +34,7 @@ These are approved direction changes, not fidelity defects.
 - Layout: canvas remains the dominant surface; the sheet does not stack or obscure the fixed action; desktop resolves to 64 px tool rail, flexible canvas, and 328 px persistent inspector.
 - Spacing: summary, material rows, sheet tabs, and fixed action have clear grouping without card proliferation or oversized empty marketing space.
 - Typography: system Chinese sans stack, compact hierarchy, no clipped or awkwardly wrapped customer copy at tested widths.
-- Color: runtime tokens resolve to page `#F7F8F5`, primary `#0F766E`, charcoal text, subtle neutral borders; no decorative gradient, glass, glow, or bead-pattern background.
+- Color: runtime tokens resolve to page `#F7F8F5`, primary `#E77B35`, charcoal text, subtle neutral borders; no decorative gradient, glass, glow, or bead-pattern background.
 - Icons: all visible actions use the generated Phosphor font subset with consistent stroke weight and alignment.
 - Imagery: the canvas uses the generated project matrix; no fake preview, placeholder image service, CSS art, or third-party image result.
 - Interaction: upload, crop drag, generation, paint/erase, undo/redo, front/reverse, matrix mirror, smart chart mirror, material statistics, exports, replace image, reload reset, and invalid-upload recovery were exercised in the in-app browser.

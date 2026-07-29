@@ -1,8 +1,11 @@
 import {
-  detectGrid,
+  candidateContract,
   MirrorMasterApiError,
   type DetectionRectangle,
   type GridDetectionContract,
+  type GridDetectionConstraints,
+  type GridDetectionResult,
+  type GridPoint,
 } from '../grid-api/client';
 import {
   clamp,
@@ -11,7 +14,8 @@ import {
   translateNaturalRect,
 } from '../grid-selection/geometry';
 import type { NaturalImageRect, NaturalImageSize } from '../grid-selection/types';
-import { createGridDimensionContract } from './confirmationState';
+import { createGridDimensionConstraints } from './confirmationState';
+import { createGridDetectionCoordinator } from './gridDetectionCoordinator';
 
 type HandleType = 'move' | 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
 type ZoomMode = 'fit' | 'manual';
@@ -59,6 +63,7 @@ interface GridEditorElements {
 export interface GridEditorLifecycle {
   readonly onContractChange?: (contract: GridDetectionContract | null, file: File | null) => void;
   readonly onDetectionChange?: (isDetecting: boolean) => void;
+  readonly onCandidatesChange?: (index: number, total: number) => void;
 }
 
 export interface GridEditorController {
@@ -66,6 +71,7 @@ export interface GridEditorController {
   readonly redetect: () => void;
   readonly resetSelection: () => void;
   readonly adjustDimensions: (columns: number, rows: number) => boolean;
+  readonly cycleCandidate: (offset: -1 | 1) => boolean;
   readonly clearResult: () => void;
   readonly showResult: (objectUrl: string) => void;
   readonly showOriginal: () => void;
@@ -101,6 +107,9 @@ export function mountGridEditor(
   let contract: GridDetectionContract | null = null;
   let lastValidContract: GridDetectionContract | null = null;
   let initialContract: GridDetectionContract | null = null;
+  let detectionResult: GridDetectionResult | null = null;
+  let lastValidDetectionResult: GridDetectionResult | null = null;
+  let initialDetectionResult: GridDetectionResult | null = null;
   let searchRect: NaturalImageRect | null = null;
   let activePointer: ActivePointer | null = null;
   let resultObjectUrl: string | null = null;
@@ -110,6 +119,7 @@ export function mountGridEditor(
   let detectionVersion = 0;
   let detecting = false;
   let pendingResizeFrame: number | null = null;
+  const detectionCoordinator = createGridDetectionCoordinator();
 
   const resizeObserver =
     'ResizeObserver' in window
@@ -169,6 +179,9 @@ export function mountGridEditor(
     contract = null;
     lastValidContract = null;
     initialContract = null;
+    detectionResult = null;
+    lastValidDetectionResult = null;
+    initialDetectionResult = null;
     searchRect = createFullImageSearchRect(image.naturalImage);
     zoomMode = 'fit';
     view = 'original';
@@ -182,6 +195,7 @@ export function mountGridEditor(
     updateFitScale();
     renderStage();
     lifecycle.onContractChange?.(null, image.file);
+    lifecycle.onCandidatesChange?.(0, 0);
     void runDetection('auto');
 
     window.requestAnimationFrame(() => {
@@ -193,20 +207,29 @@ export function mountGridEditor(
   }
 
   function redetect(): void {
+    if (detecting) {
+      return;
+    }
     if (currentImage) {
       void runDetection('auto');
     }
   }
 
   function resetSelection(): void {
-    if (initialContract && currentImage) {
+    if (detecting) {
+      return;
+    }
+    if (initialContract && initialDetectionResult && currentImage) {
       cancelDetection();
       contract = initialContract;
       lastValidContract = initialContract;
+      detectionResult = initialDetectionResult;
+      lastValidDetectionResult = initialDetectionResult;
       searchRect = rectangleFromContract(initialContract, currentImage.naturalImage);
       clearResult();
       renderOverlay();
       lifecycle.onContractChange?.(contract, currentImage.file);
+      notifyCandidatePosition();
       setHint(formatContractStatus(initialContract));
       return;
     }
@@ -215,30 +238,59 @@ export function mountGridEditor(
   }
 
   function adjustDimensions(columns: number, rows: number): boolean {
-    if (!contract || !currentImage) {
-      setHint('请先完成网格识别，再修改行列数。');
+    if (detecting) {
+      return false;
+    }
+    if (!currentImage) {
+      setHint('请先选择一张图纸。');
       return false;
     }
 
-    const nextContract = createGridDimensionContract(contract, columns, rows);
-    if (!nextContract) {
-      setHint('当前图片无法容纳这个行列数，请缩小数值后重试。');
+    const constraints = contract
+      ? createGridDimensionConstraints(contract, columns, rows)
+      : validGridDimensions(columns, rows) && searchRect
+        ? {
+            rectangle: toDetectionRectangle(searchRect),
+            expectedColumns: columns,
+            expectedRows: rows,
+          }
+        : null;
+    if (!constraints) {
+      setHint('行列数必须是 2 到 300 的整数。');
       return false;
     }
+    void runDetection('manual', constraints);
+    return true;
+  }
 
-    cancelDetection();
-    contract = nextContract;
-    lastValidContract = nextContract;
-    searchRect = rectangleFromContract(nextContract, currentImage.naturalImage);
+  function cycleCandidate(offset: -1 | 1): boolean {
+    if (detecting || !detectionResult || !currentImage || detectionResult.candidates.length < 2) {
+      return false;
+    }
+    const currentIndex = detectionResult.candidates.findIndex(
+      (candidate) => candidate.candidateId === contract?.candidateId,
+    );
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex =
+      (baseIndex + offset + detectionResult.candidates.length) % detectionResult.candidates.length;
+    const nextCandidate = detectionResult.candidates[nextIndex];
+    if (!nextCandidate) {
+      return false;
+    }
+    contract = candidateContract(detectionResult, nextCandidate.candidateId);
+    lastValidContract = contract;
+    searchRect = rectangleFromContract(contract, currentImage.naturalImage);
     clearResult();
     renderOverlay();
-    lifecycle.onContractChange?.(nextContract, currentImage.file);
-    setHint(formatContractStatus(nextContract));
+    lifecycle.onContractChange?.(contract, currentImage.file);
+    notifyCandidatePosition();
+    setHint(formatContractStatus(contract));
     return true;
   }
 
   async function runDetection(
     mode: 'auto' | 'manual',
+    constraints?: GridDetectionConstraints,
     rectangle?: NaturalImageRect,
   ): Promise<void> {
     const image = currentImage;
@@ -247,32 +299,28 @@ export function mountGridEditor(
       return;
     }
 
+    cancelActivePointerInteraction();
+    cancelDetection();
     detectionVersion += 1;
     const taskVersion = detectionVersion;
     detecting = true;
-    contract = null;
     if (rectangle) {
       searchRect = rectangle;
     }
-    clearResult();
     renderOverlay();
-    lifecycle.onContractChange?.(null, image.file);
     lifecycle.onDetectionChange?.(true);
-    setHint(mode === 'auto' ? '正在自动识别网格…' : '正在按选区识别网格…');
+    setHint('正在识别拼豆网格，请稍候…');
 
     try {
-      const nextContract =
-        mode === 'manual' && rectangle
-          ? await detectGrid(image.file, 'manual', toDetectionRectangle(rectangle))
-          : await detectGrid(image.file, 'auto');
+      const nextResult = await detectionCoordinator.run(image.file, mode, constraints);
 
-      if (taskVersion !== detectionVersion || currentImage?.file !== image.file) {
+      if (!nextResult || taskVersion !== detectionVersion || currentImage?.file !== image.file) {
         return;
       }
 
       detecting = false;
       lifecycle.onDetectionChange?.(false);
-      applyContract(nextContract, image, mode);
+      applyDetectionResult(nextResult, image, mode);
     } catch (error) {
       if (taskVersion !== detectionVersion || currentImage?.file !== image.file) {
         return;
@@ -281,22 +329,27 @@ export function mountGridEditor(
       detecting = false;
       lifecycle.onDetectionChange?.(false);
       contract = lastValidContract;
+      detectionResult = lastValidDetectionResult;
       searchRect = contract
         ? rectangleFromContract(contract, currentImage.naturalImage)
         : (rectangle ?? searchRect);
       renderOverlay();
-      lifecycle.onContractChange?.(contract, image.file);
+      notifyCandidatePosition();
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       const message =
         error instanceof MirrorMasterApiError ? error.message : '网格识别失败，请重新调整选区。';
       setHint(contract ? `${message} 上次有效网格已保留。` : message);
     }
   }
 
-  function applyContract(
-    nextContract: GridDetectionContract,
+  function applyDetectionResult(
+    nextResult: GridDetectionResult,
     image: GridEditorImage,
     mode: 'auto' | 'manual',
   ): void {
+    const nextContract = candidateContract(nextResult);
     if (
       image.naturalImage.width !== nextContract.naturalWidth ||
       image.naturalImage.height !== nextContract.naturalHeight
@@ -314,8 +367,11 @@ export function mountGridEditor(
 
     contract = nextContract;
     lastValidContract = nextContract;
+    detectionResult = nextResult;
+    lastValidDetectionResult = nextResult;
     if (mode === 'auto') {
       initialContract = nextContract;
+      initialDetectionResult = nextResult;
     }
     searchRect = rectangleFromContract(nextContract, {
       width: nextContract.naturalWidth,
@@ -323,10 +379,12 @@ export function mountGridEditor(
     });
     renderStage();
     lifecycle.onContractChange?.(nextContract, image.file);
+    notifyCandidatePosition();
     setHint(formatContractStatus(nextContract));
   }
 
   function cancelDetection(): void {
+    detectionCoordinator.cancel();
     detectionVersion += 1;
 
     if (detecting) {
@@ -335,8 +393,27 @@ export function mountGridEditor(
     }
   }
 
+  function cancelActivePointerInteraction(): void {
+    const pointer = activePointer;
+    activePointer = null;
+    if (pointer && elements.overlay.hasPointerCapture(pointer.pointerId)) {
+      elements.overlay.releasePointerCapture(pointer.pointerId);
+    }
+  }
+
+  function notifyCandidatePosition(): void {
+    if (!detectionResult || !contract) {
+      lifecycle.onCandidatesChange?.(0, 0);
+      return;
+    }
+    const index = detectionResult.candidates.findIndex(
+      (candidate) => candidate.candidateId === contract?.candidateId,
+    );
+    lifecycle.onCandidatesChange?.(index >= 0 ? index + 1 : 1, detectionResult.candidates.length);
+  }
+
   function handlePointerDown(event: PointerEvent): void {
-    if (!currentImage || view !== 'original' || event.button !== 0) {
+    if (detecting || !currentImage || view !== 'original' || event.button !== 0) {
       return;
     }
 
@@ -410,8 +487,6 @@ export function mountGridEditor(
     if (!activePointer.moved) {
       cancelDetection();
       contract = null;
-      clearResult();
-      lifecycle.onContractChange?.(null, currentImage.file);
     }
 
     activePointer.moved = true;
@@ -435,14 +510,18 @@ export function mountGridEditor(
     }
 
     if (moved && searchRect) {
-      void runDetection('manual', searchRect);
+      void runDetection(
+        'manual',
+        manualRectangleConstraints(searchRect, lastValidContract),
+        searchRect,
+      );
     } else if (!contract) {
       setHint('拖动选区或边缘后重新识别。');
     }
   }
 
   function handleOverlayKeyDown(event: KeyboardEvent): void {
-    if (!currentImage || !event.key.startsWith('Arrow')) {
+    if (detecting || !currentImage || !event.key.startsWith('Arrow')) {
       return;
     }
 
@@ -464,10 +543,8 @@ export function mountGridEditor(
     cancelDetection();
     searchRect = nextRect;
     contract = null;
-    clearResult();
-    lifecycle.onContractChange?.(null, currentImage.file);
     renderOverlay();
-    void runDetection('manual', nextRect);
+    void runDetection('manual', manualRectangleConstraints(nextRect, lastValidContract), nextRect);
     event.preventDefault();
   }
 
@@ -578,6 +655,9 @@ export function mountGridEditor(
 
   function renderOverlay(): void {
     elements.overlay.replaceChildren();
+    elements.overlay.toggleAttribute('data-detection-locked', detecting);
+    elements.overlay.setAttribute('aria-disabled', String(detecting));
+    elements.overlay.tabIndex = currentImage && !detecting ? 0 : -1;
 
     if (!currentImage) {
       return;
@@ -606,37 +686,7 @@ export function mountGridEditor(
     );
 
     if (contract) {
-      for (let index = 0; index < contract.xBoundaries.length; index += 1) {
-        const x = contract.xBoundaries[index];
-
-        if (x !== undefined) {
-          elements.overlay.append(
-            createLine(
-              x,
-              contract.top,
-              x,
-              contract.bottom,
-              index === 0 || index === contract.xBoundaries.length - 1,
-            ),
-          );
-        }
-      }
-
-      for (let index = 0; index < contract.yBoundaries.length; index += 1) {
-        const y = contract.yBoundaries[index];
-
-        if (y !== undefined) {
-          elements.overlay.append(
-            createLine(
-              contract.left,
-              y,
-              contract.right,
-              y,
-              index === 0 || index === contract.yBoundaries.length - 1,
-            ),
-          );
-        }
-      }
+      elements.overlay.append(...createProjectedGridPaths(contract));
     } else {
       elements.overlay.append(
         createOutlineRect(rectangle.x, rectangle.y, rectangle.width, rectangle.height),
@@ -653,6 +703,11 @@ export function mountGridEditor(
       createCornerHandle(rectangle.right, rectangle.bottom, visualSize, targetSize, 'se'),
       createCornerHandle(rectangle.x, rectangle.bottom, visualSize, targetSize, 'sw'),
     );
+
+    for (const handle of elements.overlay.querySelectorAll<SVGElement>('[data-grid-handle]')) {
+      handle.setAttribute('tabindex', detecting ? '-1' : '0');
+      handle.setAttribute('aria-disabled', String(detecting));
+    }
   }
 
   function getVisibleRect(): NaturalImageRect | null {
@@ -710,6 +765,7 @@ export function mountGridEditor(
     redetect,
     resetSelection,
     adjustDimensions,
+    cycleCandidate,
     clearResult,
     showResult,
     showOriginal,
@@ -722,12 +778,14 @@ function rectangleFromContract(
   contract: GridDetectionContract,
   naturalImage: NaturalImageSize,
 ): NaturalImageRect {
+  const xCoordinates = contract.sourceQuad.map((point) => point.x);
+  const yCoordinates = contract.sourceQuad.map((point) => point.y);
   const rectangle = createNaturalRect(
     naturalImage,
-    contract.left,
-    contract.top,
-    contract.right,
-    contract.bottom,
+    Math.min(...xCoordinates),
+    Math.min(...yCoordinates),
+    Math.max(...xCoordinates),
+    Math.max(...yCoordinates),
   );
 
   if (!rectangle) {
@@ -735,6 +793,21 @@ function rectangleFromContract(
   }
 
   return rectangle;
+}
+
+function manualRectangleConstraints(
+  rectangle: NaturalImageRect,
+  baseContract: GridDetectionContract | null,
+): GridDetectionConstraints {
+  return {
+    rectangle: toDetectionRectangle(rectangle),
+    ...(baseContract
+      ? {
+          expectedColumns: baseContract.columns,
+          expectedRows: baseContract.rows,
+        }
+      : {}),
+  };
 }
 
 function toDetectionRectangle(rectangle: NaturalImageRect): DetectionRectangle {
@@ -826,21 +899,76 @@ function getMoveKeyDelta(key: string, amount: number): NaturalPoint {
   }
 }
 
-function createLine(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  outer: boolean,
-): SVGLineElement {
-  const line = document.createElementNS(SVG_NAMESPACE, 'line');
-  line.setAttribute('x1', String(x1));
-  line.setAttribute('y1', String(y1));
-  line.setAttribute('x2', String(x2));
-  line.setAttribute('y2', String(y2));
-  line.setAttribute('vector-effect', 'non-scaling-stroke');
-  line.setAttribute('class', outer ? 'grid-boundary grid-boundary-outer' : 'grid-boundary');
-  return line;
+function createProjectedGridPaths(contract: GridDetectionContract): SVGPathElement[] {
+  const innerCommands: string[] = [];
+  for (const boundary of contract.xBoundaries.slice(1, -1)) {
+    const top = projectCanonicalPoint(contract, boundary, 0);
+    const bottom = projectCanonicalPoint(contract, boundary, contract.rectifiedHeight);
+    innerCommands.push(
+      `M ${String(top.x)} ${String(top.y)} L ${String(bottom.x)} ${String(bottom.y)}`,
+    );
+  }
+  for (const boundary of contract.yBoundaries.slice(1, -1)) {
+    const left = projectCanonicalPoint(contract, 0, boundary);
+    const right = projectCanonicalPoint(contract, contract.rectifiedWidth, boundary);
+    innerCommands.push(
+      `M ${String(left.x)} ${String(left.y)} L ${String(right.x)} ${String(right.y)}`,
+    );
+  }
+
+  const inner = document.createElementNS(SVG_NAMESPACE, 'path');
+  inner.setAttribute('d', innerCommands.join(' '));
+  inner.setAttribute('class', 'grid-boundary');
+  inner.setAttribute('fill', 'none');
+  inner.setAttribute('vector-effect', 'non-scaling-stroke');
+  inner.setAttribute('pointer-events', 'none');
+
+  const [topLeft, topRight, bottomRight, bottomLeft] = contract.sourceQuad;
+  const outer = document.createElementNS(SVG_NAMESPACE, 'path');
+  outer.setAttribute(
+    'd',
+    `M ${String(topLeft.x)} ${String(topLeft.y)} L ${String(topRight.x)} ${String(
+      topRight.y,
+    )} L ${String(bottomRight.x)} ${String(bottomRight.y)} L ${String(
+      bottomLeft.x,
+    )} ${String(bottomLeft.y)} Z`,
+  );
+  outer.setAttribute('class', 'grid-boundary grid-boundary-outer');
+  outer.setAttribute('fill', 'none');
+  outer.setAttribute('vector-effect', 'non-scaling-stroke');
+  outer.setAttribute('pointer-events', 'none');
+  return [inner, outer];
+}
+
+function projectCanonicalPoint(contract: GridDetectionContract, x: number, y: number): GridPoint {
+  const u = x / contract.rectifiedWidth;
+  const v = y / contract.rectifiedHeight;
+  const [topLeft, topRight, bottomRight, bottomLeft] = contract.sourceQuad;
+  const dx1 = topRight.x - bottomRight.x;
+  const dx2 = bottomLeft.x - bottomRight.x;
+  const sx = topLeft.x - topRight.x + bottomRight.x - bottomLeft.x;
+  const dy1 = topRight.y - bottomRight.y;
+  const dy2 = bottomLeft.y - bottomRight.y;
+  const sy = topLeft.y - topRight.y + bottomRight.y - bottomLeft.y;
+  const denominator = dx1 * dy2 - dx2 * dy1;
+
+  let g = 0;
+  let h = 0;
+  if (Math.abs(denominator) > 1e-9) {
+    g = (sx * dy2 - dx2 * sy) / denominator;
+    h = (dx1 * sy - sx * dy1) / denominator;
+  }
+  const a = topRight.x - topLeft.x + g * topRight.x;
+  const b = bottomLeft.x - topLeft.x + h * bottomLeft.x;
+  const c = topLeft.x;
+  const d = topRight.y - topLeft.y + g * topRight.y;
+  const e = bottomLeft.y - topLeft.y + h * bottomLeft.y;
+  const f = topLeft.y;
+  const scale = g * u + h * v + 1;
+  return {
+    x: (a * u + b * v + c) / scale,
+    y: (d * u + e * v + f) / scale,
+  };
 }
 
 function createOutlineRect(x: number, y: number, width: number, height: number): SVGRectElement {
@@ -961,8 +1089,23 @@ function formatPercent(scale: number): string {
 function formatContractStatus(contract: GridDetectionContract): string {
   const grid = `识别到 ${String(contract.columns)} 列 × ${String(
     contract.rows,
-  )} 行，单元 ${String(contract.cellSize)} px`;
-  return contract.warning ? `${grid}。${contract.warning}` : grid;
+  )} 行，横向格距 ${formatPitch(contract.pitchX)} px，纵向格距 ${formatPitch(contract.pitchY)} px`;
+  return contract.review === 'review' ? `${grid}。此候选需要复核。` : grid;
+}
+
+function formatPitch(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function validGridDimensions(columns: number, rows: number): boolean {
+  return (
+    Number.isInteger(columns) &&
+    Number.isInteger(rows) &&
+    columns >= 2 &&
+    columns <= 300 &&
+    rows >= 2 &&
+    rows <= 300
+  );
 }
 
 function getElements(root: HTMLElement): GridEditorElements {

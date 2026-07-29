@@ -86,7 +86,7 @@ test('a newer export aborts and suppresses a late older response', async () => {
   assert.deepEqual(harness.downloads, [
     {
       objectUrl: 'blob:export-1',
-      fileName: '豆图设计台-打印制作-20260726.pdf',
+      fileName: '6个造物社-打印制作-20260726.pdf',
     },
   ]);
   assert.equal(
@@ -190,7 +190,7 @@ test('customer filenames use brand, task, and local date without source or inter
   assert.deepEqual(harness.downloads, [
     {
       objectUrl: 'blob:export-1',
-      fileName: '豆图设计台-项目-20260726.json',
+      fileName: '6个造物社-项目-20260726.json',
     },
   ]);
   assert.doesNotMatch(
@@ -249,5 +249,5 @@ test('share image downloads the exact ready local PNG without a remote request',
   assert.equal(result.outcome, 'downloaded');
   assert.equal(remoteCalls, 0);
   assert.equal(harness.blobs[0], readyPng);
-  assert.equal(harness.downloads[0]?.fileName, '豆图设计台-分享图-20260726.png');
+  assert.equal(harness.downloads[0]?.fileName, '6个造物社-分享图-20260726.png');
 });

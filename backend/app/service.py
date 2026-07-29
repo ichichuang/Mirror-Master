@@ -8,13 +8,24 @@ from typing import Any, Literal
 
 from fastapi import UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from app import limits
 from app.detection import detect_grid
 from app.errors import ApiError
-from app.mirror import mirror_cells, validate_grid_contract
-from app.models import DetectionRectangle, GridContract, GridDetectionResponse
+from app.mirror import (
+    mirror_cells,
+    validate_grid_contract,
+    validate_v2_candidate_authority,
+)
+from app.chart_detection.types import QuadTuple
+from app.models import (
+    DetectionRectangle,
+    GridContract,
+    GridContractV2,
+    GridDetectionResultV2,
+    GridPoint,
+)
 
 ALLOWED_IMAGE_FORMATS = {
     "image/jpeg": {"JPEG"},
@@ -27,7 +38,7 @@ def _reject_nonstandard_json_constant(value: str) -> None:
     raise ValueError(value)
 
 
-def parse_contract(contract_text: str) -> GridContract:
+def parse_contract(contract_text: str) -> GridContract | GridContractV2:
     try:
         encoded_size = len(contract_text.encode("utf-8"))
     except UnicodeEncodeError as error:
@@ -69,8 +80,13 @@ def parse_contract(contract_text: str) -> GridContract:
             "网格合同必须由用户明确确认。",
         )
 
+    contract_model = (
+        GridContractV2
+        if payload.get("contractVersion") == "2.0"
+        else GridContract
+    )
     try:
-        return GridContract.model_validate(payload)
+        return contract_model.model_validate(payload)
     except ValidationError as error:
         raise ApiError(
             422,
@@ -182,7 +198,10 @@ async def create_detection_contract(
     upload: UploadFile,
     mode_text: str,
     rectangle_text: str | None,
-) -> GridDetectionResponse:
+    quad_text: str | None = None,
+    expected_columns_text: str | None = None,
+    expected_rows_text: str | None = None,
+) -> GridDetectionResultV2:
     try:
         if mode_text not in {"auto", "manual"}:
             raise ApiError(
@@ -192,26 +211,111 @@ async def create_detection_contract(
             )
         mode: Literal["auto", "manual"] = mode_text
         rectangle = _parse_rectangle(rectangle_text)
-        if mode == "auto" and rectangle is not None:
+        quad = _parse_quad(quad_text)
+        expected_columns, expected_rows = _parse_expected_dimensions(
+            expected_columns_text,
+            expected_rows_text,
+        )
+        if mode == "auto" and (
+            rectangle is not None
+            or quad is not None
+            or expected_columns is not None
+        ):
             raise ApiError(
                 422,
-                "GRID_RECTANGLE_UNEXPECTED",
-                "自动模式不接受手动选区。",
+                "GRID_MANUAL_CONSTRAINTS_UNEXPECTED",
+                "自动模式不接受手动选区或行列约束。",
             )
-        if mode == "manual" and rectangle is None:
+        if mode == "manual" and rectangle is None and quad is None:
             raise ApiError(
                 422,
-                "GRID_RECTANGLE_REQUIRED",
-                "手动模式缺少完整的半开坐标选区。",
+                "GRID_MANUAL_REGION_REQUIRED",
+                "手动模式需要完整矩形或按顺序提供四个角点。",
+            )
+        if mode == "manual" and rectangle is not None and quad is not None:
+            raise ApiError(
+                422,
+                "GRID_MANUAL_REGION_AMBIGUOUS",
+                "手动模式只能提交矩形或四角选区中的一种。",
             )
         image_bytes = await read_upload(upload)
         image_sha256 = hashlib.sha256(image_bytes).hexdigest()
         source = decode_normalized_rgba(
             image_bytes, upload.content_type or ""
         )
-        return detect_grid(source, image_sha256, mode, rectangle)
+        return detect_grid(
+            source,
+            image_sha256,
+            mode,
+            rectangle,
+            quad=quad,
+            expected_columns=expected_columns,
+            expected_rows=expected_rows,
+        )
     finally:
         await upload.close()
+
+
+def _parse_quad(quad_text: str | None) -> QuadTuple | None:
+    if quad_text is None or quad_text == "":
+        return None
+    try:
+        payload: Any = json.loads(
+            quad_text,
+            parse_constant=_reject_nonstandard_json_constant,
+        )
+        points = TypeAdapter(list[GridPoint]).validate_python(
+            payload,
+            strict=True,
+        )
+    except (json.JSONDecodeError, ValueError, ValidationError) as error:
+        raise ApiError(
+            422,
+            "GRID_QUAD_INVALID",
+            "四角选区必须是按左上、右上、右下、左下排列的四个坐标点。",
+        ) from error
+    if len(points) != 4:
+        raise ApiError(
+            422,
+            "GRID_QUAD_INVALID",
+            "四角选区必须恰好包含四个坐标点。",
+        )
+    return tuple((point.x, point.y) for point in points)  # type: ignore[return-value]
+
+
+def _parse_expected_dimensions(
+    columns_text: str | None,
+    rows_text: str | None,
+) -> tuple[int | None, int | None]:
+    if (columns_text in {None, ""}) != (rows_text in {None, ""}):
+        raise ApiError(
+            422,
+            "GRID_EXPECTED_DIMENSIONS_INCOMPLETE",
+            "实际列数和行数必须同时提供。",
+        )
+    if columns_text in {None, ""}:
+        return None, None
+    try:
+        columns = int(columns_text)
+        rows = int(rows_text or "")
+    except ValueError as error:
+        raise ApiError(
+            422,
+            "GRID_EXPECTED_DIMENSIONS_INVALID",
+            "实际列数和行数必须是 2 到 300 的整数。",
+        ) from error
+    if (
+        str(columns) != columns_text
+        or str(rows) != rows_text
+        or not (2 <= columns <= 300)
+        or not (2 <= rows <= 300)
+    ):
+        raise ApiError(
+            422,
+            "GRID_EXPECTED_DIMENSIONS_INVALID",
+            "实际列数和行数必须是 2 到 300 的整数。",
+        )
+    return columns, rows
 
 
 async def create_mirror_png(
@@ -232,6 +336,8 @@ async def create_mirror_png(
             image_bytes, upload.content_type or ""
         )
         validate_grid_contract(contract, source.size)
+        if isinstance(contract, GridContractV2):
+            validate_v2_candidate_authority(source, contract)
         return encode_png(mirror_cells(source, contract))
     finally:
         await upload.close()

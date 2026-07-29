@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
@@ -104,6 +105,230 @@ class DetectionRectangle(BaseModel):
     top: StrictInt
     right: StrictInt
     bottom: StrictInt
+
+
+class GridPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    x: Annotated[float, Field(ge=0)]
+    y: Annotated[float, Field(ge=0)]
+
+
+class GridEvidenceMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    line_coverage: Confidence = Field(alias="lineCoverage")
+    lattice_inlier_ratio: Confidence = Field(alias="latticeInlierRatio")
+    normalized_residual: Confidence = Field(alias="normalizedResidual")
+    periodicity_score: Confidence = Field(alias="periodicityScore")
+    harmonic_margin: Confidence = Field(alias="harmonicMargin")
+    boundary_support: Confidence = Field(alias="boundarySupport")
+    cell_consistency: Confidence = Field(alias="cellConsistency")
+    hypothesis_agreement: Confidence = Field(alias="hypothesisAgreement")
+
+
+class GridCellSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    total_cell_count: PositiveStrictInt = Field(alias="totalCellCount")
+    occupied_cell_count: Annotated[StrictInt, Field(ge=0)] = Field(
+        alias="occupiedCellCount"
+    )
+    color_cluster_count: Annotated[StrictInt, Field(ge=0)] = Field(
+        alias="colorClusterCount"
+    )
+    uncertain_cell_count: Annotated[StrictInt, Field(ge=0)] = Field(
+        alias="uncertainCellCount"
+    )
+    matrix_digest: Sha256Hex = Field(alias="matrixDigest")
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> "GridCellSummary":
+        if (
+            self.occupied_cell_count > self.total_cell_count
+            or self.uncertain_cell_count > self.total_cell_count
+            or self.color_cluster_count > self.occupied_cell_count
+        ):
+            raise ValueError("cell summary counts are inconsistent")
+        return self
+
+
+class GridCandidateV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    candidate_id: Annotated[
+        str, Field(alias="candidateId", pattern=r"^[a-z][a-z0-9-]{7,79}$")
+    ]
+    detector: Literal[
+        "line", "component", "periodic", "rectified", "manual"
+    ]
+    style: Literal[
+        "line-grid", "ring-grid", "filled-cell-grid", "mixed"
+    ]
+    mirror_frame: Literal[
+        "explicit-grid", "occupied-bounds", "manual-region"
+    ] = Field(alias="mirrorFrame")
+    source_quad: Annotated[
+        list[GridPoint], Field(alias="sourceQuad", min_length=4, max_length=4)
+    ]
+    rectified_width: PositiveStrictInt = Field(alias="rectifiedWidth")
+    rectified_height: PositiveStrictInt = Field(alias="rectifiedHeight")
+    pitch_x: Annotated[float, Field(alias="pitchX", gt=0)]
+    pitch_y: Annotated[float, Field(alias="pitchY", gt=0)]
+    columns: Annotated[StrictInt, Field(ge=2, le=300)]
+    rows: Annotated[StrictInt, Field(ge=2, le=300)]
+    x_boundaries: Annotated[
+        list[StrictInt], Field(alias="xBoundaries", min_length=3, max_length=301)
+    ]
+    y_boundaries: Annotated[
+        list[StrictInt], Field(alias="yBoundaries", min_length=3, max_length=301)
+    ]
+    confidence: Confidence
+    review: Literal["ready", "review"]
+    metrics: GridEvidenceMetrics
+    cell_summary: GridCellSummary = Field(alias="cellSummary")
+    warnings: Annotated[
+        list[Annotated[str, Field(pattern=r"^GRID_[A-Z0-9_]+$", max_length=80)]],
+        Field(max_length=8),
+    ]
+
+    @model_validator(mode="after")
+    def validate_geometry(self) -> "GridCandidateV2":
+        _validate_v2_quad(self.source_quad)
+        _validate_v2_axis(
+            self.x_boundaries,
+            cells=self.columns,
+            extent=self.rectified_width,
+            pitch=self.pitch_x,
+        )
+        _validate_v2_axis(
+            self.y_boundaries,
+            cells=self.rows,
+            extent=self.rectified_height,
+            pitch=self.pitch_y,
+        )
+        if self.cell_summary.total_cell_count != self.rows * self.columns:
+            raise ValueError("cell summary does not match grid dimensions")
+        if self.review == "ready" and self.warnings:
+            raise ValueError("ready candidates cannot carry warnings")
+        return self
+
+
+class GridDetectionResultV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    contract_version: Literal["2.0"] = Field(
+        default="2.0", alias="contractVersion"
+    )
+    image_sha256: Sha256Hex = Field(alias="imageSha256")
+    natural_width: PositiveStrictInt = Field(alias="naturalWidth")
+    natural_height: PositiveStrictInt = Field(alias="naturalHeight")
+    selected_candidate_id: str = Field(alias="selectedCandidateId")
+    candidates: Annotated[
+        list[GridCandidateV2], Field(min_length=1, max_length=3)
+    ]
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "GridDetectionResultV2":
+        candidate_ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(set(candidate_ids)) != len(candidate_ids):
+            raise ValueError("candidate ids must be unique")
+        if self.selected_candidate_id not in candidate_ids:
+            raise ValueError("selected candidate is missing")
+        return self
+
+
+class GridContractV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    contract_version: Literal["2.0"] = Field(alias="contractVersion")
+    image_sha256: Sha256Hex = Field(alias="imageSha256")
+    natural_width: PositiveStrictInt = Field(alias="naturalWidth")
+    natural_height: PositiveStrictInt = Field(alias="naturalHeight")
+    candidate_id: Annotated[
+        str, Field(alias="candidateId", pattern=r"^[a-z][a-z0-9-]{7,79}$")
+    ]
+    source_quad: Annotated[
+        list[GridPoint], Field(alias="sourceQuad", min_length=4, max_length=4)
+    ]
+    rectified_width: PositiveStrictInt = Field(alias="rectifiedWidth")
+    rectified_height: PositiveStrictInt = Field(alias="rectifiedHeight")
+    pitch_x: Annotated[float, Field(alias="pitchX", gt=0)]
+    pitch_y: Annotated[float, Field(alias="pitchY", gt=0)]
+    columns: Annotated[StrictInt, Field(ge=2, le=300)]
+    rows: Annotated[StrictInt, Field(ge=2, le=300)]
+    x_boundaries: Annotated[
+        list[StrictInt], Field(alias="xBoundaries", min_length=3, max_length=301)
+    ]
+    y_boundaries: Annotated[
+        list[StrictInt], Field(alias="yBoundaries", min_length=3, max_length=301)
+    ]
+    matrix_digest: Sha256Hex = Field(alias="matrixDigest")
+    confirmed: Literal[True]
+    axis: Literal["horizontal", "vertical"] = "horizontal"
+
+    @model_validator(mode="after")
+    def validate_geometry(self) -> "GridContractV2":
+        _validate_v2_quad(self.source_quad)
+        _validate_v2_axis(
+            self.x_boundaries,
+            cells=self.columns,
+            extent=self.rectified_width,
+            pitch=self.pitch_x,
+        )
+        _validate_v2_axis(
+            self.y_boundaries,
+            cells=self.rows,
+            extent=self.rectified_height,
+            pitch=self.pitch_y,
+        )
+        return self
+
+
+def _validate_v2_axis(
+    boundaries: list[int],
+    *,
+    cells: int,
+    extent: int,
+    pitch: float,
+) -> None:
+    if len(boundaries) != cells + 1:
+        raise ValueError("boundary count does not match grid dimensions")
+    if boundaries[0] != 0 or boundaries[-1] != extent:
+        raise ValueError("canonical boundaries must span the rectified image")
+    steps = [
+        right - left for left, right in zip(boundaries, boundaries[1:])
+    ]
+    if any(step <= 0 for step in steps):
+        raise ValueError("canonical boundaries must be strictly increasing")
+    expected_pitch = extent / cells
+    tolerance = max(0.51, expected_pitch * 0.02)
+    if abs(pitch - expected_pitch) > tolerance:
+        raise ValueError("pitch does not match the canonical extent")
+    if max(steps) - min(steps) > 1:
+        raise ValueError("canonical rounding may differ by at most one pixel")
+
+
+def _validate_v2_quad(points: list[GridPoint]) -> None:
+    if len(points) != 4:
+        raise ValueError("source quad must contain four points")
+    coordinates = [(point.x, point.y) for point in points]
+    if any(not math.isfinite(value) for point in coordinates for value in point):
+        raise ValueError("source quad coordinates must be finite")
+
+    crosses: list[float] = []
+    for index in range(4):
+        previous = coordinates[index - 1]
+        current = coordinates[index]
+        following = coordinates[(index + 1) % 4]
+        crosses.append(
+            (current[0] - previous[0]) * (following[1] - current[1])
+            - (current[1] - previous[1]) * (following[0] - current[0])
+        )
+    if any(abs(cross) < 1e-6 for cross in crosses):
+        raise ValueError("source quad has a zero-area corner")
+    if not (all(cross > 0 for cross in crosses) or all(cross < 0 for cross in crosses)):
+        raise ValueError("source quad must be convex and ordered")
 
 
 class CropRectangle(BaseModel):

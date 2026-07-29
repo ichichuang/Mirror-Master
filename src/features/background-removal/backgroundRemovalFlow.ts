@@ -50,26 +50,28 @@ export interface BackgroundRemovalActionStateInput {
 }
 
 export interface BackgroundRemovalActionState {
-  readonly hidden: boolean;
   readonly disabled: boolean;
-  readonly label: '一键去背景' | '正在去背景…' | '恢复原图' | '使用去背景图';
-  readonly compactLabel: '去背' | '处理中' | '恢复' | '使用去背图';
+  readonly label: '一键去背景' | '去背景暂不可用' | '正在去背景…' | '恢复原图' | '使用去背景图';
+  readonly compactLabel: '去背' | '不可用' | '处理中' | '恢复' | '使用去背图';
+  readonly unavailableMessage: string | null;
 }
 
 export function resolveBackgroundRemovalActionState(
   input: BackgroundRemovalActionStateInput,
 ): BackgroundRemovalActionState {
-  const { label, compactLabel } = input.busy
-    ? ({ label: '正在去背景…', compactLabel: '处理中' } as const)
-    : input.hasForeground
-      ? input.activeVariant === 'foreground'
-        ? ({ label: '恢复原图', compactLabel: '恢复' } as const)
-        : ({ label: '使用去背景图', compactLabel: '使用去背图' } as const)
-      : ({ label: '一键去背景', compactLabel: '去背' } as const);
+  const { label, compactLabel } = !input.capabilityAvailable
+    ? ({ label: '去背景暂不可用', compactLabel: '不可用' } as const)
+    : input.busy
+      ? ({ label: '正在去背景…', compactLabel: '处理中' } as const)
+      : input.hasForeground
+        ? input.activeVariant === 'foreground'
+          ? ({ label: '恢复原图', compactLabel: '恢复' } as const)
+          : ({ label: '使用去背景图', compactLabel: '使用去背图' } as const)
+        : ({ label: '一键去背景', compactLabel: '去背' } as const);
   return Object.freeze({
-    hidden: !input.capabilityAvailable,
     disabled: !input.capabilityAvailable || !input.hasSource || input.busy,
     label,
     compactLabel,
+    unavailableMessage: input.capabilityAvailable ? null : '去背景服务暂不可用，请稍后重试。',
   });
 }

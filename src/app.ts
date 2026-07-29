@@ -20,7 +20,14 @@ export function renderApp(): string {
         </div>
         <div class="header-actions">
           <span class="session-status" data-session-status>仅保存在本次会话</span>
-          <button class="icon-button" type="button" data-replace-image hidden aria-label="更换图片">
+          <button
+            class="icon-button"
+            type="button"
+            data-replace-image
+            data-chart-detection-lock
+            hidden
+            aria-label="更换图片"
+          >
             <i class="ph ph-arrow-counter-clockwise" aria-hidden="true"></i>
           </button>
         </div>
@@ -33,6 +40,7 @@ export function renderApp(): string {
           type="file"
           accept="${ACCEPTED_IMAGE_ACCEPT}"
           data-file-input
+          data-chart-detection-lock
         />
         <input
           class="visually-hidden"
@@ -40,6 +48,7 @@ export function renderApp(): string {
           type="file"
           accept="application/json,.json"
           data-project-file-input
+          data-chart-detection-lock
         />
 
         ${renderStartWorkspace()}
@@ -577,7 +586,13 @@ function exportTaskIcon(task: ExportTaskDefinition['id']): string {
 
 function renderChartWorkspace(): string {
   return `
-    <section class="chart-workspace stage-panel" data-chart-workspace hidden aria-label="已有图纸智能镜像">
+    <section
+      class="chart-workspace stage-panel"
+      data-chart-workspace
+      hidden
+      aria-label="已有图纸智能镜像"
+      aria-busy="false"
+    >
       <div class="chart-toolbar">
         <div>
           <span class="eyebrow">已有图纸</span>
@@ -585,14 +600,49 @@ function renderChartWorkspace(): string {
           <p>只调整红色网格范围；网格外的坐标、标题和图例不会改变。</p>
         </div>
         <div class="chart-actions">
-          <button class="secondary-button" type="button" data-chart-redetect>重新识别</button>
-          <button class="secondary-button" type="button" data-chart-reset>重置选区</button>
+          <button
+            class="secondary-button"
+            type="button"
+            data-chart-redetect
+            data-chart-detection-lock
+          >
+            重新识别
+          </button>
+          <button
+            class="secondary-button"
+            type="button"
+            data-chart-reset
+            data-chart-detection-lock
+          >
+            重置选区
+          </button>
         </div>
       </div>
       <div class="chart-confirmation-summary" data-chart-confirmation>
         <div class="chart-confirmation-status">
           <strong data-chart-dimensions>尚未检测到有效网格</strong>
           <span data-chart-confidence data-state="insufficient">网格置信度：不足</span>
+        </div>
+        <div class="chart-candidate-controls" data-chart-candidates hidden>
+          <button
+            class="secondary-button"
+            type="button"
+            data-chart-candidate="previous"
+            data-chart-detection-lock
+            aria-label="查看上一个网格候选"
+          >
+            上一个
+          </button>
+          <span data-chart-candidate-status aria-live="polite"></span>
+          <button
+            class="secondary-button"
+            type="button"
+            data-chart-candidate="next"
+            data-chart-detection-lock
+            aria-label="查看下一个网格候选"
+          >
+            下一个
+          </button>
         </div>
         <p data-chart-warning role="status" aria-live="polite" hidden></p>
         <form class="chart-dimension-form" data-chart-dimension-form>
@@ -601,6 +651,7 @@ function renderChartWorkspace(): string {
             <input
               type="number"
               data-chart-columns
+              data-chart-detection-lock
               inputmode="numeric"
               min="2"
               max="300"
@@ -613,6 +664,7 @@ function renderChartWorkspace(): string {
             <input
               type="number"
               data-chart-rows
+              data-chart-detection-lock
               inputmode="numeric"
               min="2"
               max="300"
@@ -624,6 +676,7 @@ function renderChartWorkspace(): string {
             class="secondary-button"
             type="submit"
             data-chart-apply-dimensions
+            data-chart-detection-lock
             disabled
           >
             修改行列数
@@ -689,20 +742,56 @@ function renderChartWorkspace(): string {
           <svg class="grid-overlay" data-editor-overlay aria-label="网格选区编辑区"></svg>
         </div>
       </div>
+      <div
+        class="chart-detection-loading"
+        data-chart-detection-loading
+        hidden
+        aria-hidden="true"
+      >
+        <div class="chart-detection-loading-card">
+          <i class="ph ph-circle-notch spin" aria-hidden="true"></i>
+          <strong>正在识别拼豆网格</strong>
+          <span>请稍候，完成后即可继续调整。</span>
+        </div>
+      </div>
       <div class="chart-primary-bar">
         <div class="chart-axis" role="group" aria-label="镜像方向">
-          <button type="button" class="is-active" aria-pressed="true" data-chart-axis="horizontal">
+          <button
+            type="button"
+            class="is-active"
+            aria-pressed="true"
+            data-chart-axis="horizontal"
+            data-chart-detection-lock
+          >
             水平镜像
           </button>
-          <button type="button" aria-pressed="false" data-chart-axis="vertical">
+          <button
+            type="button"
+            aria-pressed="false"
+            data-chart-axis="vertical"
+            data-chart-detection-lock
+          >
             垂直镜像
           </button>
         </div>
         <button class="secondary-button" type="button" data-return-adjust hidden>返回调整</button>
-        <button class="primary-button" type="button" data-chart-generate disabled>
+        <button
+          class="primary-button"
+          type="button"
+          data-chart-generate
+          data-chart-detection-lock
+          disabled
+        >
           确认并镜像
         </button>
-        <button class="secondary-button" type="button" data-chart-download hidden disabled>
+        <button
+          class="secondary-button"
+          type="button"
+          data-chart-download
+          data-chart-detection-lock
+          hidden
+          disabled
+        >
           下载镜像图纸
         </button>
       </div>

@@ -65,14 +65,14 @@ vaadin-text-field[focus-ring]::part(input-field) {
 
 vaadin-button[theme~='primary'] {
   --vaadin-button-background: var(--color-action-primary);
-  --vaadin-button-border-color: var(--color-action-primary);
+  --vaadin-button-border-color: var(--color-action-primary-text);
   --vaadin-button-border-width: 1px;
   --vaadin-button-text-color: var(--color-text-on-primary);
 }
 
 vaadin-button[theme~='primary']:hover:not([disabled]) {
   --vaadin-button-background: var(--color-action-primary-hover);
-  --vaadin-button-border-color: var(--color-action-primary-hover);
+  --vaadin-button-border-color: var(--color-action-primary-text);
 }
 
 vaadin-button[theme~='secondary'] {
@@ -84,7 +84,7 @@ vaadin-button[theme~='secondary'] {
 
 vaadin-button[theme~='tertiary'] {
   --vaadin-button-background: transparent;
-  --vaadin-button-text-color: var(--color-action-primary);
+  --vaadin-button-text-color: var(--color-action-primary-text);
 }
 
 vaadin-radio-group {
@@ -171,7 +171,7 @@ vaadin-radio-group::part(group-field) {
 }
 
 .compare-switch vaadin-radio-button[checked] {
-  color: var(--color-action-primary-hover);
+  color: var(--color-action-primary-text);
   background: var(--color-action-primary-soft);
   box-shadow: inset 0 0 0 1px var(--color-action-primary);
 }
@@ -350,12 +350,12 @@ vaadin-radio-button[theme~='card']::part(label),
 }
 
 .preset-card[checked] {
-  border-color: var(--color-action-primary);
+  border-color: var(--color-action-primary-text);
   background: var(--color-action-primary-soft);
 }
 
 .preset-card[checked] .preset-card-content > i {
-  color: var(--color-action-primary);
+  color: var(--color-action-primary-text);
 }
 
 .preset-card:hover:not([disabled]) {
@@ -415,8 +415,8 @@ vaadin-radio-button[theme~='card']::part(label),
 .sampling-options vaadin-radio-button[checked],
 .export-template-options vaadin-radio-button[checked],
 .export-compact-options vaadin-radio-button[checked] {
-  border-color: var(--color-action-primary);
-  color: var(--color-action-primary);
+  border-color: var(--color-action-primary-text);
+  color: var(--color-action-primary-text);
   background: var(--color-action-primary-soft);
 }
 
@@ -495,8 +495,8 @@ vaadin-radio-button[theme~='card'] > input[slot='input'],
 }
 
 .palette-scope vaadin-radio-button[checked] {
-  border-color: var(--color-action-primary);
-  color: var(--color-action-primary);
+  border-color: var(--color-action-primary-text);
+  color: var(--color-action-primary-text);
   background: var(--color-action-primary-soft);
 }
 
@@ -530,7 +530,7 @@ vaadin-radio-button[theme~='card'] > input[slot='input'],
 
 .available-color-choice[checked] {
   --vaadin-checkbox-background: var(--color-action-primary);
-  --vaadin-checkbox-border-color: var(--color-action-primary);
+  --vaadin-checkbox-border-color: var(--color-action-primary-text);
 }
 
 .export-content-options vaadin-checkbox {

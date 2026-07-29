@@ -9,7 +9,12 @@ import numpy as np
 from PIL import Image
 
 from app.errors import ApiError
-from app.models import DetectionRectangle, GridDetectionResponse
+from app.chart_detection.types import QuadTuple
+from app.models import (
+    DetectionRectangle,
+    GridDetectionResponse,
+    GridDetectionResultV2,
+)
 
 DetectionMode = Literal["auto", "manual"]
 
@@ -113,7 +118,7 @@ class BandDescriptor:
         )
 
 
-def detect_grid(
+def detect_legacy_grid(
     source: Image.Image,
     image_sha256: str,
     mode: DetectionMode,
@@ -121,10 +126,14 @@ def detect_grid(
 ) -> GridDetectionResponse:
     rgb = np.asarray(source.convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    x_evidence, y_evidence = _extract_line_evidence(gray, include_hough=False)
+    include_hough = mode == "auto"
+    x_evidence, y_evidence = _extract_line_evidence(
+        gray,
+        include_hough=include_hough,
+    )
     candidates = _shared_spacing_candidates(x_evidence, y_evidence)
 
-    if not candidates:
+    if not candidates and not include_hough:
         x_evidence, y_evidence = _extract_line_evidence(
             gray, include_hough=True
         )
@@ -173,6 +182,29 @@ def detect_grid(
         yBoundaries=list(fit.y_boundaries),
         confidence=float(round(confidence, 4)),
         warning=warning,
+    )
+
+
+def detect_grid(
+    source: Image.Image,
+    image_sha256: str,
+    mode: DetectionMode,
+    rectangle: DetectionRectangle | None,
+    *,
+    quad: QuadTuple | None = None,
+    expected_columns: int | None = None,
+    expected_rows: int | None = None,
+) -> GridDetectionResultV2:
+    from app.chart_detection.pipeline import analyze_chart
+
+    return analyze_chart(
+        source,
+        image_sha256,
+        mode=mode,
+        rectangle=rectangle,
+        quad=quad,
+        expected_columns=expected_columns,
+        expected_rows=expected_rows,
     )
 
 
@@ -664,6 +696,16 @@ def _strip_axis_labels(
     if len(boundaries) < MIN_BOUNDARY_COUNT + 2:
         return boundaries
 
+    paired_inner = _inner_boundaries_between_label_bands(
+        gray,
+        saturation,
+        boundaries,
+        cross_boundaries,
+        axis=axis,
+    )
+    if paired_inner is not None:
+        return paired_inner
+
     first = _band_descriptor(
         gray,
         saturation,
@@ -720,6 +762,54 @@ def _strip_axis_labels(
     ):
         boundaries = boundaries[:-1]
     return boundaries
+
+
+def _inner_boundaries_between_label_bands(
+    gray: np.ndarray,
+    saturation: np.ndarray,
+    boundaries: tuple[int, ...],
+    cross_boundaries: tuple[int, ...],
+    *,
+    axis: Literal["x", "y"],
+) -> tuple[int, ...] | None:
+    descriptors = [
+        _band_descriptor(
+            gray,
+            saturation,
+            start,
+            end,
+            cross_boundaries,
+            axis=axis,
+        )
+        for start, end in zip(boundaries, boundaries[1:])
+    ]
+    edge_count = min(3, max(1, len(descriptors) // 4))
+    leading = [
+        index
+        for index in range(edge_count)
+        if descriptors[index].label_like
+    ]
+    trailing = [
+        index
+        for index in range(
+            max(0, len(descriptors) - edge_count),
+            len(descriptors),
+        )
+        if descriptors[index].label_like
+    ]
+    pairs = [
+        (first, last)
+        for first in leading
+        for last in trailing
+        if first < last
+        and _bands_similar(descriptors[first], descriptors[last])
+    ]
+    if not pairs:
+        return None
+
+    first, last = max(pairs, key=lambda item: item[1] - item[0])
+    inner = boundaries[first + 1 : last + 1]
+    return inner if len(inner) >= MIN_BOUNDARY_COUNT else None
 
 
 def _band_descriptor(

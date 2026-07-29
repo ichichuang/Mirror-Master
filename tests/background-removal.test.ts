@@ -251,7 +251,7 @@ test('edited projects use the existing confirmation path before source changes',
   assert.deepEqual(calls, ['一键去背景会替换当前编辑', 'apply']);
 });
 
-test('capability gating hides unavailable background removal and disables incomplete states', () => {
+test('capability gating keeps background removal visible and explains unavailable states', () => {
   assert.deepEqual(
     resolveBackgroundRemovalActionState({
       capabilityAvailable: false,
@@ -260,7 +260,12 @@ test('capability gating hides unavailable background removal and disables incomp
       activeVariant: 'original',
       busy: false,
     }),
-    { hidden: true, disabled: true, label: '一键去背景', compactLabel: '去背' },
+    {
+      disabled: true,
+      label: '去背景暂不可用',
+      compactLabel: '不可用',
+      unavailableMessage: '去背景服务暂不可用，请稍后重试。',
+    },
   );
   assert.deepEqual(
     resolveBackgroundRemovalActionState({
@@ -270,7 +275,12 @@ test('capability gating hides unavailable background removal and disables incomp
       activeVariant: 'original',
       busy: false,
     }),
-    { hidden: false, disabled: true, label: '一键去背景', compactLabel: '去背' },
+    {
+      disabled: true,
+      label: '一键去背景',
+      compactLabel: '去背',
+      unavailableMessage: null,
+    },
   );
   assert.deepEqual(
     resolveBackgroundRemovalActionState({
@@ -280,7 +290,12 @@ test('capability gating hides unavailable background removal and disables incomp
       activeVariant: 'original',
       busy: true,
     }),
-    { hidden: false, disabled: true, label: '正在去背景…', compactLabel: '处理中' },
+    {
+      disabled: true,
+      label: '正在去背景…',
+      compactLabel: '处理中',
+      unavailableMessage: null,
+    },
   );
   assert.deepEqual(
     resolveBackgroundRemovalActionState({
@@ -290,7 +305,12 @@ test('capability gating hides unavailable background removal and disables incomp
       activeVariant: 'foreground',
       busy: false,
     }),
-    { hidden: false, disabled: false, label: '恢复原图', compactLabel: '恢复' },
+    {
+      disabled: false,
+      label: '恢复原图',
+      compactLabel: '恢复',
+      unavailableMessage: null,
+    },
   );
   assert.deepEqual(
     resolveBackgroundRemovalActionState({
@@ -301,10 +321,10 @@ test('capability gating hides unavailable background removal and disables incomp
       busy: false,
     }),
     {
-      hidden: false,
       disabled: false,
       label: '使用去背景图',
       compactLabel: '使用去背图',
+      unavailableMessage: null,
     },
   );
 });
