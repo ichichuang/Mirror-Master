@@ -125,11 +125,12 @@ def test_supported_formats_return_same_size_rgba_png_with_transparency(
     assert fake_runtime.calls == 1
 
 
-def test_declared_mime_must_match_decoded_format(
+def test_mismatched_declared_mime_is_accepted_when_content_supported(
     client: TestClient,
     fake_runtime: FakeBackgroundRemovalRuntime,
     png_bytes: Callable[[Image.Image], bytes],
 ) -> None:
+    # 声明类型与实际内容不符时，以实际解码格式为准。
     response = client.post(
         "/api/image/remove-background",
         files={
@@ -141,12 +142,9 @@ def test_declared_mime_must_match_decoded_format(
         },
     )
 
-    assert_structured_chinese_error(
-        response,
-        "IMAGE_MIME_MISMATCH",
-        expected_status=415,
-    )
-    assert fake_runtime.calls == 0
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert fake_runtime.calls == 1
 
 
 def test_empty_and_oversized_uploads_reuse_stable_upload_errors(

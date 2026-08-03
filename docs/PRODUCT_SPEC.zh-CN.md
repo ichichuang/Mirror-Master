@@ -595,6 +595,28 @@ type BeadCell = { kind: 'empty' } | { kind: 'bead'; colorId: string };
 - 透明度棋盘格只可出现在原图/foreground、裁剪和图案 Canvas 等图片工作表面，不得成为页面、设置区或普通控件背景。
 - 用户已逐格编辑矩阵并返回 Preview 时，执行首次去背景或切换 source variant 之前必须复用第 3.3 节现有 `vaadin-confirm-dialog`，明确后续重新生成会替换编辑；取消不得发起推理、切换源图或重新生成。
 
+### 7.7 Stage 4A.2 交互式去背景蒙版编辑
+
+“一键去背景”升级为“先识别、再确认”的两步流程：模型先给出主体蒙版并高亮待去除区域，顾客确认或用笔刷修正后再生成去背景图，避免识别不佳时主体被误删且无法挽回。
+
+后端合同：
+
+- 新增 `POST /api/image/remove-background/mask`：上传合同与第 7.6 节一致，返回与方向归一化输入同尺寸的灰度 PNG 蒙版（255 = 保留的主体，0 = 将去除的背景），不写临时文件。
+- 新增 `POST /api/image/remove-background/refine`：接收 `file`（原图）、`mask`（当前蒙版 PNG，尺寸必须与原图一致，否则 `422 BACKGROUND_REMOVAL_MASK_INVALID`）和 `strokes`（JSON：1–64 条笔刷，每条含 `mode: keep | remove`、整数 `radius`（1–512 px）和坐标点列；总点数上限 8192，越界坐标被裁剪；非法负载返回 `422 BACKGROUND_REMOVAL_STROKES_INVALID`）。
+- 精修算法为 OpenCV GrabCut：当前蒙版映射为“可能前景/可能背景”，笔刷映射为“确定前景/确定背景”，只在笔刷包围盒外扩边距的窗口内运行（窗口最长边超过 1024 px 时先降采样再回放大），把选区边界吸附到真实颜色边缘；输出同尺寸二值灰度 PNG。失败返回 `500 BACKGROUND_REMOVAL_REFINE_FAILED`，不破坏前端当前蒙版。
+- 新增 `POST /api/image/remove-background/apply`：接收 `file` 与 `mask`，把蒙版作为 alpha 合成最终 RGBA PNG，输出合同（同尺寸、`Cache-Control: no-store`、`nosniff`）与第 7.6 节一致。
+- 三个接口复用第 7.1 节 20 MiB 上传上限、MIME 校验、EXIF 归一化、12,000,000 像素上限、内存处理与隐私响应头；蒙版生成复用同一 inference session 与并发信号量，GrabCut 精修与合成不占用推理并发预算。
+- capabilities 的 `backgroundRemoval` 增加 `interactive` 子对象，固定为 `{ contractVersion: '1.0', available: boolean, refinement: 'grabcut', maximumStrokesPerRequest: 64, maximumStrokePointsPerRequest: 8192, minimumBrushRadiusPx: 1, maximumBrushRadiusPx: 512 }`；`available` 与模型可用性一致。该对象缺失或合同版本不兼容时，前端回退到第 7.6 节的一键直出流程。
+- 原第 7.6 节 `POST /api/image/remove-background` 保留不变，作为兼容与降级路径。
+
+前端交互合同：
+
+- 点击“一键去背景”后先请求蒙版并进入“去背景选区”状态：在图片工作表面上以高亮覆盖层显示“将去除的背景”，保留主体清晰可见；高亮使用产品语义交互色，不使用色板颜色。
+- 提供“涂抹去除”“涂抹恢复”两种笔刷和笔刷大小调节；笔刷涂抹立即在本地蒙版生效并更新高亮，抬笔后自动请求一次边缘吸附精修并以返回蒙版更新高亮；精修期间允许继续涂抹，未确认的笔刷在响应返回后按顺序补发，迟到响应不得覆盖更新的本地涂抹。
+- 提供涂抹撤销（回到上一步蒙版）、“完成去背景”和“取消”。“完成去背景”调用 apply 合成 foreground PNG，之后沿用第 7.6 节 source-image session 缓存、切换与自动重新生成合同；“取消”丢弃蒙版会话并返回原图对比，不改变源图、矩阵与设置。
+- 更换图片、打开项目、重置或销毁工作区时取消未完成的蒙版/精修/合成请求并丢弃迟到响应；相关 Object URL 与蒙版位图准确释放。存在生成后编辑时，进入“去背景选区”前复用第 3.3 节既有 `vaadin-confirm-dialog`。
+- 涂抹交互优先 Pointer Events 与 `setPointerCapture`，单指涂抹；处理 `pointercancel`、失焦与组件销毁，避免卡住的涂抹状态；状态变化经稳定 `role="status"` 区域宣告。
+
 ## 8. 生成算法
 
 ### 8.1 坐标映射
@@ -904,6 +926,12 @@ schema 或图片哈希。
 - multipart 单文件字段 `file`；不接受模型选择、手工蒙版、SAM 点选、羽化、腐蚀或其他控制字段。
 - 返回同尺寸 RGBA PNG；不返回 URL、任务 ID、项目字段或占位结果。
 - 支持第 7.6 节的能力门控、资源预算、session 复用、无临时文件、取消与稳定错误合同。
+
+交互式蒙版编辑（第 7.7 节）：
+
+- `POST /api/image/remove-background/mask`：multipart 单文件字段 `file`，返回同尺寸灰度 PNG 蒙版。
+- `POST /api/image/remove-background/refine`：multipart 字段 `file`、`mask` 与 JSON 文本 `strokes`，返回 GrabCut 边缘吸附后的同尺寸灰度 PNG 蒙版。
+- `POST /api/image/remove-background/apply`：multipart 字段 `file` 与 `mask`，返回同尺寸 RGBA PNG。
 
 ### 13.5 导出
 

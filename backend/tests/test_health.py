@@ -50,6 +50,15 @@ def test_capabilities_reports_versioned_background_removal_as_unavailable_withou
         "maximumDecodedPixels": 12_000_000,
         "maximumConcurrentInferences": 1,
         "unavailableReason": "MODEL_MISSING",
+        "interactive": {
+            "contractVersion": "1.0",
+            "available": False,
+            "refinement": "grabcut",
+            "maximumStrokesPerRequest": 64,
+            "maximumStrokePointsPerRequest": 8192,
+            "minimumBrushRadiusPx": 1,
+            "maximumBrushRadiusPx": 512,
+        },
     }
 
 
@@ -65,6 +74,9 @@ def test_no_unrequested_api_routes_exist(client: TestClient) -> None:
         "/api/pattern/generate",
         "/api/pattern/export",
         "/api/image/remove-background",
+        "/api/image/remove-background/mask",
+        "/api/image/remove-background/refine",
+        "/api/image/remove-background/apply",
         "/api/grid/detect",
         "/api/grid/mirror",
     }

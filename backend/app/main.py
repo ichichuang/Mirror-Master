@@ -13,6 +13,11 @@ from app.background_removal import (
     create_background_removed_png,
     get_background_removal_capability,
 )
+from app.background_mask import (
+    apply_background_mask_png,
+    create_background_mask_png,
+    refine_background_mask_png,
+)
 from .generated_brand import PRODUCT_NAME
 from app.errors import ApiError
 from app.generated_palettes import (
@@ -146,6 +151,39 @@ async def remove_image_background(
 ) -> Response:
     return Response(
         await create_background_removed_png(file),
+        media_type="image/png",
+    )
+
+
+@app.post("/api/image/remove-background/mask")
+async def background_removal_mask(
+    file: Annotated[UploadFile, File()],
+) -> Response:
+    return Response(
+        await create_background_mask_png(file),
+        media_type="image/png",
+    )
+
+
+@app.post("/api/image/remove-background/refine")
+async def refine_background_removal_mask(
+    file: Annotated[UploadFile, File()],
+    mask: Annotated[UploadFile, File()],
+    strokes: Annotated[str, Form()],
+) -> Response:
+    return Response(
+        await refine_background_mask_png(file, mask, strokes),
+        media_type="image/png",
+    )
+
+
+@app.post("/api/image/remove-background/apply")
+async def apply_background_removal_mask(
+    file: Annotated[UploadFile, File()],
+    mask: Annotated[UploadFile, File()],
+) -> Response:
+    return Response(
+        await apply_background_mask_png(file, mask),
         media_type="image/png",
     )
 

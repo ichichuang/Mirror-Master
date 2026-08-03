@@ -481,7 +481,7 @@ test('RadioGroups use one checked child default without a static group value', (
   const groups = [
     ...markup.matchAll(/<vaadin-radio-group\b([^>]*)>([\s\S]*?)<\/vaadin-radio-group>/gu),
   ];
-  assert.equal(groups.length, 15);
+  assert.equal(groups.length, 16);
   for (const [, attributes = '', children = ''] of groups) {
     assert.doesNotMatch(attributes, /\bvalue=/u);
     assert.equal(countMatches(children, /<vaadin-radio-button\b[^>]*\bchecked\b/gu), 1);
@@ -743,7 +743,18 @@ test('preview image actions stay touch-safe while responsive labels and status s
   );
   assert.match(
     pageCss,
-    /\.background-removal-status\s*\{[^}]*display:\s*flex;[^}]*max-inline-size:\s*min\(100%,\s*34rem\);[^}]*justify-self:\s*end;[^}]*overflow-wrap:\s*anywhere;/u,
+    /\.background-removal-status\s*\{[^}]*position:\s*absolute;[^}]*display:\s*flex;[^}]*max-inline-size:\s*min\(100%,\s*34rem\);[^}]*overflow-wrap:\s*anywhere;/u,
+    '去背景状态提示必须绝对定位覆盖在画布上，不能占据文档流影响排版',
+  );
+  assert.match(
+    pageCss,
+    /\.preview-toolbar\s*\{[^}]*position:\s*relative;/u,
+    '预览工具栏必须为状态提示覆盖层提供定位上下文',
+  );
+  assert.match(
+    pageCss,
+    /\.mask-edit-status\s*\{[^}]*position:\s*absolute;[^}]*pointer-events:\s*none;/u,
+    '涂抹处理提示必须为覆盖层徽标，出现/消失不得改变布局',
   );
   assert.doesNotMatch(pageCss, /\[data-background-removal-status\]\s*\{[^}]*flex-basis:\s*100%/u);
   assert.match(

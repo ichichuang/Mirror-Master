@@ -1,4 +1,5 @@
 import { DEFAULT_PREVIEW_RENDER_MODE, PREVIEW_RENDER_MODES } from './previewMode';
+import { HIGHLIGHT_PRESETS } from '../mask-editor/maskEditCanvas';
 
 export function renderPreviewWorkspace(): string {
   return `
@@ -48,6 +49,17 @@ export function renderPreviewWorkspace(): string {
                     <span data-background-removal-label-long>一键去背景</span>
                   </button>
                 </div>
+                <button
+                  class="secondary-button preview-image-action mask-reedit-button"
+                  type="button"
+                  aria-label="调整去背景选区"
+                  data-mask-reedit
+                  hidden
+                >
+                  <i class="ph ph-selection" aria-hidden="true"></i>
+                  <span data-action-label-short>选区</span>
+                  <span data-action-label-long>调整选区</span>
+                </button>
                 <button
                   class="secondary-button preview-image-action replace-source-button"
                   type="button"
@@ -156,6 +168,82 @@ export function renderPreviewWorkspace(): string {
                   </button>
                 </div>
               </div>
+              <div class="preview-mask-edit-view" data-preview-mask-edit-view hidden>
+                <div class="mask-edit-frame" data-mask-edit-frame>
+                  <canvas
+                    class="mask-edit-canvas"
+                    data-mask-edit-canvas
+                    role="img"
+                    aria-label="去背景选区：橙色区域将被去除，可涂抹调整"
+                  ></canvas>
+                  <p
+                    class="mask-edit-status"
+                    data-mask-edit-status
+                    role="status"
+                    aria-live="polite"
+                  ></p>
+                </div>
+                <div class="mask-edit-controls">
+                  <vaadin-radio-group
+                    class="mask-brush-mode"
+                    aria-label="选择涂抹方式"
+                    data-mask-brush-mode
+                  >
+                    <vaadin-radio-button value="remove" checked>
+                      <label slot="label">涂抹去除</label>
+                    </vaadin-radio-button>
+                    <vaadin-radio-button value="keep">
+                      <label slot="label">涂抹恢复</label>
+                    </vaadin-radio-button>
+                  </vaadin-radio-group>
+                  <label class="mask-brush-size-field">
+                    <span>笔刷大小</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max="100"
+                      step="1"
+                      value="20"
+                      aria-label="笔刷大小"
+                      data-mask-brush-size
+                    />
+                  </label>
+                  <div
+                    class="mask-highlight-control"
+                    role="group"
+                    aria-label="高亮颜色"
+                    data-mask-highlight-control
+                  >
+                    <span class="mask-highlight-label">高亮</span>
+                    ${renderHighlightSwatches()}
+                    <label class="mask-highlight-custom" aria-label="自定义高亮颜色">
+                      <input
+                        type="color"
+                        value="#E77B35"
+                        aria-label="自定义高亮颜色"
+                        data-mask-highlight-custom
+                      />
+                    </label>
+                  </div>
+                  <button
+                    class="icon-button"
+                    type="button"
+                    data-mask-edit-undo
+                    disabled
+                    aria-label="撤销涂抹"
+                  >
+                    <i class="ph ph-arrow-u-up-left" aria-hidden="true"></i>
+                  </button>
+                  <span class="mask-edit-actions">
+                    <button class="secondary-button" type="button" data-mask-edit-cancel>
+                      取消
+                    </button>
+                    <button class="primary-button" type="button" data-mask-edit-apply>
+                      完成去背景
+                    </button>
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -220,6 +308,23 @@ function renderPreviewModeButtons(): string {
         aria-pressed="${String(id === DEFAULT_PREVIEW_RENDER_MODE)}"
       >
         ${label}
+      </button>
+    `,
+  ).join('');
+}
+
+function renderHighlightSwatches(): string {
+  return HIGHLIGHT_PRESETS.map(
+    ({ id, label, hex }, index) => `
+      <button
+        class="mask-highlight-swatch"
+        type="button"
+        data-mask-highlight="${id}"
+        data-mask-highlight-hex="${hex}"
+        aria-pressed="${String(index === 0)}"
+        aria-label="高亮颜色：${label}"
+      >
+        <span style="--swatch: ${hex}" aria-hidden="true"></span>
       </button>
     `,
   ).join('');

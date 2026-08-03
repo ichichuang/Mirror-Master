@@ -35,9 +35,34 @@ import {
   resolveBackgroundRemovalActionState,
 } from './features/background-removal/backgroundRemovalFlow';
 import {
+  applyBackgroundMask,
+  fetchBackgroundMask,
   ImageTransformApiError,
+  refineBackgroundMask,
   removeImageBackground,
+  type MaskRefineStroke,
 } from './features/background-removal/client';
+import {
+  createMaskEditSession,
+  MASK_EDIT_MAX_UNDO,
+  type MaskBrushMode,
+  type MaskEditSession,
+  type MaskStroke,
+} from './features/mask-editor/maskEditSession';
+import {
+  brushSizeToImageRadius,
+  clientPointToImagePoint,
+  fitMaskFrame,
+  imageRadiusToScreen,
+} from './features/mask-editor/maskEditGeometry';
+import {
+  buildHighlightOverlay,
+  highlightColorFromHex,
+  highlightColorToCssRgba,
+  highlightColorToHex,
+  MASK_HIGHLIGHT_COLOR,
+  type HighlightColor,
+} from './features/mask-editor/maskEditCanvas';
 import {
   createSourceImageSession,
   type SelectedImage,
@@ -188,6 +213,7 @@ import {
 import {
   exportPattern,
   generatePattern,
+  PatternApiError,
   type PatternGenerationSettings,
 } from './features/pattern-api/client';
 import {
@@ -409,6 +435,7 @@ let previewCompareRadioController: VaadinRadioGroupController;
 let paletteScopeRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let exportPresetRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let exportBackgroundRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
+let maskBrushModeController: VaadinRadioGroupController;
 let exportAppearanceRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let responsiveWorkspaceMount: ResponsiveWorkspaceMount;
 let gridController: GridEditorController;
@@ -472,6 +499,8 @@ function activeSourceImage(): SelectedImage | null {
 
 function disposeSourceImageSession(): void {
   backgroundRemovalCoordinator.cancel();
+  destroyMaskEdit();
+  lastAppliedMask = null;
   sourceImageSession?.dispose();
   sourceImageSession = null;
   backgroundRemovalStatusState = 'ready';
@@ -584,6 +613,10 @@ function requestBackgroundRemovalAction(): void {
         activateSourceVariant(variant);
         return;
       }
+      if (interactiveBackgroundRemovalAvailable()) {
+        void startInteractiveBackgroundRemoval(currentSession);
+        return;
+      }
       backgroundRemovalCoordinator.request({
         sourceSessionId: currentSession.id,
         image: currentSession.original,
@@ -643,7 +676,10 @@ function syncBackgroundRemovalAction(): void {
   const longLabel = required(action, '[data-background-removal-label-long]', HTMLElement);
   const available = appCapabilities.backgroundRemoval.available;
   const session = sourceImageSession;
-  const busy = backgroundRemovalCoordinator.activeRequestId() !== null;
+  const busy =
+    backgroundRemovalCoordinator.activeRequestId() !== null ||
+    maskEdit !== null ||
+    maskFetchController !== null;
   const actionState = resolveBackgroundRemovalActionState({
     capabilityAvailable: available,
     hasSource: session !== null,
@@ -663,6 +699,714 @@ function syncBackgroundRemovalAction(): void {
   originalView.dataset.sourceImageVariant = session?.activeVariant() ?? 'original';
   required(previewWorkspace, '[data-preview-adjust-view]', HTMLElement).dataset.sourceImageVariant =
     session?.activeVariant() ?? 'original';
+  const reeditButton = required(previewWorkspace, '[data-mask-reedit]', HTMLButtonElement);
+  reeditButton.hidden = !(session?.hasForeground() ?? false) || maskEdit !== null;
+  reeditButton.disabled =
+    backgroundRemovalCoordinator.activeRequestId() !== null || maskFetchController !== null;
+}
+
+// ---------------------------------------------------------------------------
+// 交互式去背景（蒙版识别 → 高亮选区 → 涂抹增删 + 边缘吸附 → 合成）
+// ---------------------------------------------------------------------------
+
+interface MaskEditRuntime {
+  readonly id: number;
+  readonly sourceSessionId: number;
+  readonly file: File;
+  readonly sourceImage: HTMLImageElement;
+  readonly imageWidth: number;
+  readonly imageHeight: number;
+  readonly session: MaskEditSession<HTMLCanvasElement>;
+  readonly maskCanvas: HTMLCanvasElement;
+  readonly overlayCanvas: HTMLCanvasElement;
+  highlightColor: HighlightColor;
+  /** 图片在显示画布内的实际绘制区域（CSS 像素，保持宽高比居中）。 */
+  drawRect: { dx: number; dy: number; width: number; height: number };
+  refineController: AbortController | null;
+  applyController: AbortController | null;
+  paintingPointerId: number | null;
+  cursorClientPoint: { readonly x: number; readonly y: number } | null;
+  destroyed: boolean;
+}
+
+let maskEdit: MaskEditRuntime | null = null;
+let maskEditSequence = 0;
+let maskFetchController: AbortController | null = null;
+let maskEditRedrawScheduled = false;
+let maskHighlightColor: HighlightColor = { ...MASK_HIGHLIGHT_COLOR };
+let lastAppliedMask: {
+  readonly sourceSessionId: number;
+  readonly canvas: HTMLCanvasElement;
+} | null = null;
+
+function interactiveBackgroundRemovalAvailable(): boolean {
+  return (
+    appCapabilities.backgroundRemoval.available &&
+    appCapabilities.backgroundRemoval.interactive.available
+  );
+}
+
+async function startInteractiveBackgroundRemoval(session: SourceImageSession): Promise<void> {
+  destroyMaskEdit();
+  maskFetchController?.abort();
+  const controller = new AbortController();
+  maskFetchController = controller;
+  // 识别期间保持拼豆预览可见，用画布内徽标提示，不改变页面布局。
+  previewView.setStatusText('正在识别图片主体…', {
+    hasResult: previewProject !== null,
+    showBadge: true,
+  });
+  syncBackgroundRemovalAction();
+  try {
+    const blob = await fetchBackgroundMask(session.original.file, controller.signal);
+    controller.signal.throwIfAborted();
+    const maskUrl = objectUrls.create(new File([blob], 'subject-mask.png', { type: 'image/png' }));
+    let maskResource;
+    try {
+      maskResource = await decodeImageResourceFromObjectUrl(maskUrl);
+    } finally {
+      objectUrls.revoke(maskUrl);
+    }
+    controller.signal.throwIfAborted();
+    if (
+      maskResource.width !== session.original.width ||
+      maskResource.height !== session.original.height
+    ) {
+      throw new ImageTransformApiError(
+        502,
+        'BACKGROUND_REMOVAL_DIMENSIONS_INVALID',
+        '主体识别结果尺寸不一致。原图和当前图纸已保留，请稍后重试。',
+      );
+    }
+    if (sourceImageSession?.id !== session.id) {
+      return;
+    }
+    previewView.setStatusText('', { hasResult: previewProject !== null, showBadge: false });
+    enterMaskEdit(session, maskResource.image);
+    setMaskEditStatus('橙色区域将被去除；可涂抹调整，松开自动对齐边缘。');
+    announce('已识别主体。橙色区域将被去除，可涂抹调整，确认后点“完成去背景”。');
+  } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) {
+      return;
+    }
+    const message =
+      error instanceof ImageTransformApiError
+        ? error.message
+        : '无法识别图片主体。原图和当前图纸已保留，请稍后重试。';
+    // 失败提示用画布内徽标短文案呈现，完整说明经无障碍状态区播报，
+    // 都不改变页面布局。
+    previewView.setStatusText('无法识别图片主体，请重试。', {
+      hasResult: previewProject !== null,
+      showBadge: true,
+    });
+    announce(message);
+  } finally {
+    if (maskFetchController === controller) {
+      maskFetchController = null;
+    }
+    syncBackgroundRemovalAction();
+  }
+}
+
+function enterMaskEdit(session: SourceImageSession, maskSource: CanvasImageSource): void {
+  destroyMaskEdit();
+  const { width, height } = session.original;
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskContext = maskCanvas.getContext('2d');
+  if (!maskContext) return;
+  maskContext.drawImage(maskSource, 0, 0, width, height);
+  const overlayCanvas = document.createElement('canvas');
+  overlayCanvas.width = width;
+  overlayCanvas.height = height;
+  maskEdit = {
+    id: ++maskEditSequence,
+    sourceSessionId: session.id,
+    file: session.original.file,
+    sourceImage: session.original.image,
+    imageWidth: width,
+    imageHeight: height,
+    session: createMaskEditSession({ maxUndo: MASK_EDIT_MAX_UNDO }),
+    maskCanvas,
+    overlayCanvas,
+    highlightColor: { ...maskHighlightColor },
+    drawRect: { dx: 0, dy: 0, width: 1, height: 1 },
+    refineController: null,
+    applyController: null,
+    paintingPointerId: null,
+    cursorClientPoint: null,
+    destroyed: false,
+  };
+  rebuildMaskOverlay(maskCanvas, overlayCanvas, maskEdit.highlightColor);
+  previewWorkspace.dataset.maskEditing = 'true';
+  previewView.setMaskEditActive(true);
+  drawMaskEditCanvas();
+  syncMaskEditControls();
+  syncMaskHighlightControl();
+}
+
+function destroyMaskEdit(): void {
+  const edit = maskEdit;
+  maskFetchController?.abort();
+  maskFetchController = null;
+  if (!edit) {
+    return;
+  }
+  edit.destroyed = true;
+  edit.refineController?.abort();
+  edit.applyController?.abort();
+  edit.session.clear();
+  maskEdit = null;
+  delete previewWorkspace.dataset.maskEditing;
+  previewView.setMaskEditActive(false);
+  setMaskEditStatus('');
+  syncMaskEditControls();
+  syncBackgroundRemovalAction();
+}
+
+function cancelMaskEdit(): void {
+  destroyMaskEdit();
+  syncPreviewResult();
+  announce('已取消去背景，保持原图。');
+}
+
+function requestMaskReedit(): void {
+  const session = sourceImageSession;
+  if (!session || !appCapabilities.backgroundRemoval.available) {
+    return;
+  }
+  const hasEditedCells =
+    currentProject !== null &&
+    sourceGenerationRevision !== null &&
+    currentProject.revision !== sourceGenerationRevision;
+  guardBackgroundRemovalChange({
+    hasEditedCells,
+    openConfirmation(request) {
+      openConfirmation({
+        ...request,
+        onContinue() {
+          previewClobberAcknowledged = true;
+          request.onContinue();
+        },
+      });
+    },
+    apply() {
+      const currentSession = sourceImageSession;
+      if (!currentSession || currentSession.id !== session.id || !currentSession.hasForeground()) {
+        return;
+      }
+      if (lastAppliedMask && lastAppliedMask.sourceSessionId === currentSession.id) {
+        enterMaskEdit(currentSession, lastAppliedMask.canvas);
+        setMaskEditStatus('继续调整选区：橙色区域将被去除，确认后点“完成去背景”。');
+        announce('已恢复上次去背景选区，可继续涂抹调整。');
+        return;
+      }
+      if (interactiveBackgroundRemovalAvailable()) {
+        void startInteractiveBackgroundRemoval(currentSession);
+      }
+    },
+  });
+}
+
+function setMaskHighlightColor(color: HighlightColor): void {
+  maskHighlightColor = { ...color };
+  const edit = maskEdit;
+  if (edit && !edit.destroyed) {
+    edit.highlightColor = { ...color };
+    rebuildMaskOverlay(edit.maskCanvas, edit.overlayCanvas, edit.highlightColor);
+    scheduleMaskEditRedraw();
+  }
+  syncMaskHighlightControl();
+}
+
+function syncMaskHighlightControl(): void {
+  const control = previewWorkspace.querySelector<HTMLElement>('[data-mask-highlight-control]');
+  if (!control) return;
+  const activeHex = highlightColorToHex(maskHighlightColor).toLowerCase();
+  let presetMatched = false;
+  for (const swatch of control.querySelectorAll<HTMLButtonElement>('[data-mask-highlight]')) {
+    const matched = (swatch.dataset.maskHighlightHex ?? '').toLowerCase() === activeHex;
+    presetMatched = presetMatched || matched;
+    swatch.setAttribute('aria-pressed', String(matched));
+  }
+  const custom = control.querySelector<HTMLInputElement>('[data-mask-highlight-custom]');
+  if (custom) {
+    custom.value = activeHex;
+    custom.closest('.mask-highlight-custom')?.toggleAttribute('data-active', !presetMatched);
+  }
+}
+
+function rebuildMaskOverlay(
+  maskCanvas: HTMLCanvasElement,
+  overlayCanvas: HTMLCanvasElement,
+  color: HighlightColor,
+): void {
+  const maskContext = maskCanvas.getContext('2d', { willReadFrequently: true });
+  const overlayContext = overlayCanvas.getContext('2d');
+  if (!maskContext || !overlayContext) return;
+  const maskBitmap = maskContext.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+  overlayContext.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  overlayContext.putImageData(buildHighlightOverlay(maskBitmap, color), 0, 0);
+}
+
+function snapshotMaskCanvas(maskCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  const snapshot = document.createElement('canvas');
+  snapshot.width = maskCanvas.width;
+  snapshot.height = maskCanvas.height;
+  snapshot.getContext('2d')?.drawImage(maskCanvas, 0, 0);
+  return snapshot;
+}
+
+function currentBrushRadiusPx(edit: MaskEditRuntime): number {
+  return brushSizeToImageRadius(
+    edit.session.brushSize(),
+    edit.imageWidth,
+    edit.imageHeight,
+    appCapabilities.backgroundRemoval.interactive.maximumBrushRadiusPx,
+  );
+}
+
+function maskEditImagePoint(edit: MaskEditRuntime, event: PointerEvent): { x: number; y: number } {
+  const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
+  const rect = canvas.getBoundingClientRect();
+  const draw = edit.drawRect;
+  return clientPointToImagePoint(
+    event.clientX,
+    event.clientY,
+    {
+      left: rect.left + draw.dx,
+      top: rect.top + draw.dy,
+      width: draw.width,
+      height: draw.height,
+    },
+    edit.imageWidth,
+    edit.imageHeight,
+  );
+}
+
+let maskEditLastPoint: { x: number; y: number } | null = null;
+
+function handleMaskEditPointerDown(event: PointerEvent): void {
+  const edit = maskEdit;
+  if (!edit || edit.destroyed || edit.paintingPointerId !== null) return;
+  const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
+  event.preventDefault();
+  canvas.setPointerCapture(event.pointerId);
+  const point = maskEditImagePoint(edit, event);
+  const radius = currentBrushRadiusPx(edit);
+  edit.session.pushUndo(snapshotMaskCanvas(edit.maskCanvas));
+  edit.session.beginStroke(point.x, point.y, radius);
+  paintMaskSegment(edit, point, point, edit.session.brushMode(), radius);
+  edit.paintingPointerId = event.pointerId;
+  edit.cursorClientPoint = { x: event.clientX, y: event.clientY };
+  maskEditLastPoint = point;
+  scheduleMaskEditRedraw();
+}
+
+function handleMaskEditPointerMove(event: PointerEvent): void {
+  const edit = maskEdit;
+  if (!edit || edit.destroyed) return;
+  edit.cursorClientPoint = { x: event.clientX, y: event.clientY };
+  if (edit.paintingPointerId !== event.pointerId) {
+    scheduleMaskEditRedraw();
+    return;
+  }
+  const point = maskEditImagePoint(edit, event);
+  const lastPoint = maskEditLastPoint;
+  edit.session.extendStroke(point.x, point.y);
+  if (lastPoint && (lastPoint.x !== point.x || lastPoint.y !== point.y)) {
+    paintMaskSegment(edit, lastPoint, point, edit.session.brushMode(), currentBrushRadiusPx(edit));
+  }
+  maskEditLastPoint = point;
+  scheduleMaskEditRedraw();
+}
+
+function handleMaskEditPointerEnd(event: PointerEvent): void {
+  const edit = maskEdit;
+  if (!edit || edit.paintingPointerId !== event.pointerId) return;
+  edit.paintingPointerId = null;
+  maskEditLastPoint = null;
+  const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
+  if (canvas.hasPointerCapture(event.pointerId)) {
+    canvas.releasePointerCapture(event.pointerId);
+  }
+  const completed = edit.session.endStroke();
+  syncMaskEditControls();
+  scheduleMaskEditRedraw();
+  if (completed) {
+    scheduleMaskRefine();
+  }
+}
+
+function paintMaskSegment(
+  edit: MaskEditRuntime,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  mode: MaskBrushMode,
+  radiusPx: number,
+): void {
+  const maskContext = edit.maskCanvas.getContext('2d');
+  const overlayContext = edit.overlayCanvas.getContext('2d');
+  if (!maskContext || !overlayContext) return;
+  paintStrokeOnContext(maskContext, from, to, radiusPx, mode === 'keep' ? '#ffffff' : '#000000');
+  if (mode === 'remove') {
+    paintStrokeOnContext(
+      overlayContext,
+      from,
+      to,
+      radiusPx,
+      highlightColorToCssRgba(edit.highlightColor),
+    );
+  } else {
+    overlayContext.save();
+    overlayContext.globalCompositeOperation = 'destination-out';
+    paintStrokeOnContext(overlayContext, from, to, radiusPx, '#000000');
+    overlayContext.restore();
+  }
+}
+
+function paintStrokeOnContext(
+  context: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  radiusPx: number,
+  style: string,
+): void {
+  context.save();
+  context.strokeStyle = style;
+  context.fillStyle = style;
+  context.lineWidth = radiusPx * 2;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.beginPath();
+  context.moveTo(from.x, from.y);
+  context.lineTo(to.x + 0.01, to.y + 0.01);
+  context.stroke();
+  context.restore();
+}
+
+function scheduleMaskEditRedraw(): void {
+  if (maskEditRedrawScheduled) return;
+  maskEditRedrawScheduled = true;
+  requestAnimationFrame(() => {
+    maskEditRedrawScheduled = false;
+    drawMaskEditCanvas();
+  });
+}
+
+function drawMaskEditCanvas(): void {
+  const edit = maskEdit;
+  if (!edit || edit.destroyed) return;
+  const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  const cssWidth = Math.max(1, Math.floor(canvas.clientWidth));
+  const cssHeight = Math.max(1, Math.floor(canvas.clientHeight));
+  const pixelRatio = Math.max(1, globalThis.devicePixelRatio || 1);
+  const backingWidth = Math.max(1, Math.round(cssWidth * pixelRatio));
+  const backingHeight = Math.max(1, Math.round(cssHeight * pixelRatio));
+  if (canvas.width !== backingWidth) canvas.width = backingWidth;
+  if (canvas.height !== backingHeight) canvas.height = backingHeight;
+
+  // 保持原图宽高比，在画布内居中留白绘制，绝不变形。
+  const fit = fitMaskFrame(cssWidth, cssHeight, edit.imageWidth, edit.imageHeight);
+  const dx = Math.floor((cssWidth - fit.width) / 2);
+  const dy = Math.floor((cssHeight - fit.height) / 2);
+  edit.drawRect = { dx, dy, width: fit.width, height: fit.height };
+
+  context.save();
+  context.scale(pixelRatio, pixelRatio);
+  context.clearRect(0, 0, cssWidth, cssHeight);
+  context.drawImage(edit.sourceImage, dx, dy, fit.width, fit.height);
+  context.drawImage(edit.overlayCanvas, dx, dy, fit.width, fit.height);
+  if (edit.cursorClientPoint) {
+    const rect = canvas.getBoundingClientRect();
+    const radius = imageRadiusToScreen(
+      currentBrushRadiusPx(edit),
+      {
+        left: 0,
+        top: 0,
+        width: fit.width,
+        height: fit.height,
+      },
+      edit.imageWidth,
+    );
+    const x = edit.cursorClientPoint.x - rect.left;
+    const y = edit.cursorClientPoint.y - rect.top;
+    context.beginPath();
+    context.arc(x, y, Math.max(2, radius), 0, Math.PI * 2);
+    context.strokeStyle = 'rgba(31, 41, 51, 0.85)';
+    context.lineWidth = 2;
+    context.stroke();
+    context.beginPath();
+    context.arc(x, y, Math.max(2, radius), 0, Math.PI * 2);
+    context.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    context.lineWidth = 1;
+    context.stroke();
+  }
+  context.restore();
+}
+
+function scheduleMaskRefine(): void {
+  const edit = maskEdit;
+  if (!edit || edit.destroyed || edit.refineController !== null) return;
+  const strokes = edit.session.takePendingForRefine();
+  if (strokes.length === 0) return;
+  const controller = new AbortController();
+  edit.refineController = controller;
+  setMaskEditStatus('正在对齐边缘…');
+  edit.maskCanvas.toBlob((maskBlob) => {
+    void settleMaskRefine(edit, controller, strokes, maskBlob);
+  }, 'image/png');
+}
+
+async function settleMaskRefine(
+  edit: MaskEditRuntime,
+  controller: AbortController,
+  strokes: readonly MaskStroke[],
+  maskBlob: Blob | null,
+): Promise<void> {
+  try {
+    if (!maskBlob) {
+      throw new ImageTransformApiError(
+        500,
+        'BACKGROUND_REMOVAL_MASK_ENCODE_FAILED',
+        '无法读取当前选区。请重新开始去背景。',
+      );
+    }
+    const payload: MaskRefineStroke[] = strokes.map((stroke) => ({
+      mode: stroke.mode,
+      radius: stroke.radius,
+      points: stroke.points.map((point) => [point.x, point.y] as const),
+    }));
+    const resultBlob = await refineBackgroundMask(edit.file, maskBlob, payload, controller.signal);
+    controller.signal.throwIfAborted();
+    const resultUrl = objectUrls.create(
+      new File([resultBlob], 'subject-mask-refined.png', { type: 'image/png' }),
+    );
+    let resource;
+    try {
+      resource = await decodeImageResourceFromObjectUrl(resultUrl);
+    } finally {
+      objectUrls.revoke(resultUrl);
+    }
+    if (edit.destroyed || maskEdit !== edit) {
+      return;
+    }
+    const maskContext = edit.maskCanvas.getContext('2d');
+    if (maskContext) {
+      maskContext.clearRect(0, 0, edit.imageWidth, edit.imageHeight);
+      maskContext.drawImage(resource.image, 0, 0, edit.imageWidth, edit.imageHeight);
+    }
+    rebuildMaskOverlay(edit.maskCanvas, edit.overlayCanvas, edit.highlightColor);
+    edit.session.acknowledgeRefine();
+    for (const pending of edit.session.pendingStrokes()) {
+      replayMaskStroke(edit, pending);
+    }
+    scheduleMaskEditRedraw();
+    if (edit.session.pendingStrokes().length > 0) {
+      edit.refineController = null;
+      scheduleMaskRefine();
+      return;
+    }
+    setMaskEditStatus('');
+  } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) {
+      return;
+    }
+    if (!edit.destroyed && maskEdit === edit) {
+      edit.session.requeueInFlight();
+      setMaskEditStatus('无法完成边缘对齐，已保留当前涂抹。');
+    }
+  } finally {
+    if (edit.refineController === controller) {
+      edit.refineController = null;
+    }
+  }
+}
+
+function replayMaskStroke(edit: MaskEditRuntime, stroke: MaskStroke): void {
+  for (let index = 0; index < stroke.points.length; index += 1) {
+    const from = stroke.points[Math.max(0, index - 1)];
+    const to = stroke.points[index];
+    if (!from || !to) continue;
+    paintMaskSegment(edit, from, to, stroke.mode, stroke.radius);
+  }
+}
+
+function undoMaskEditStroke(): void {
+  const edit = maskEdit;
+  if (!edit || edit.destroyed) return;
+  const snapshot = edit.session.popUndo();
+  if (!snapshot) return;
+  edit.session.dropLastPending();
+  const maskContext = edit.maskCanvas.getContext('2d');
+  if (maskContext) {
+    maskContext.clearRect(0, 0, edit.imageWidth, edit.imageHeight);
+    maskContext.drawImage(snapshot, 0, 0);
+  }
+  rebuildMaskOverlay(edit.maskCanvas, edit.overlayCanvas, edit.highlightColor);
+  scheduleMaskEditRedraw();
+  syncMaskEditControls();
+  setMaskEditStatus('已撤销上一次涂抹。');
+}
+
+async function applyMaskEdit(): Promise<void> {
+  const edit = maskEdit;
+  if (!edit || edit.destroyed || edit.applyController !== null) return;
+  const sourceSession = sourceImageSession;
+  if (!sourceSession || sourceSession.id !== edit.sourceSessionId) return;
+  const controller = new AbortController();
+  edit.applyController = controller;
+  syncMaskEditControls();
+  setMaskEditStatus('正在生成去背景图…');
+  try {
+    const maskBlob = await new Promise<Blob | null>((resolve) => {
+      edit.maskCanvas.toBlob(resolve, 'image/png');
+    });
+    if (!maskBlob) {
+      throw new ImageTransformApiError(
+        500,
+        'BACKGROUND_REMOVAL_MASK_ENCODE_FAILED',
+        '无法读取当前选区。请重新开始去背景。',
+      );
+    }
+    const output = await applyBackgroundMask(edit.file, maskBlob, controller.signal);
+    controller.signal.throwIfAborted();
+    const file = new File([output], foregroundFileName(edit.file.name), {
+      type: 'image/png',
+      lastModified: edit.file.lastModified,
+    });
+    const objectUrl = objectUrls.create(file);
+    let selected: SelectedImage;
+    try {
+      const resource = await decodeImageResourceFromObjectUrl(objectUrl);
+      controller.signal.throwIfAborted();
+      if (resource.width !== edit.imageWidth || resource.height !== edit.imageHeight) {
+        throw new ImageTransformApiError(
+          502,
+          'BACKGROUND_REMOVAL_DIMENSIONS_INVALID',
+          '去背景图片尺寸不一致。原图和当前图纸已保留，请稍后重试。',
+        );
+      }
+      selected = Object.freeze({
+        file,
+        objectUrl,
+        width: resource.width,
+        height: resource.height,
+        image: resource.image,
+        mimeType: 'image/png',
+      });
+    } catch (error) {
+      objectUrls.revoke(objectUrl);
+      throw error;
+    }
+    const currentSession = sourceImageSession;
+    if (!currentSession || currentSession.id !== edit.sourceSessionId || maskEdit !== edit) {
+      objectUrls.revoke(objectUrl);
+      return;
+    }
+    lastAppliedMask = {
+      sourceSessionId: edit.sourceSessionId,
+      canvas: snapshotMaskCanvas(edit.maskCanvas),
+    };
+    currentSession.cacheForeground(selected);
+    destroyMaskEdit();
+    setBackgroundRemovalStatus('已保留主体；可随时恢复原图。', 'ready');
+    activateSourceVariant('foreground');
+    announce('去背景完成，已更新拼豆预览。');
+  } catch (error) {
+    if (isAbortError(error) || controller.signal.aborted) {
+      return;
+    }
+    if (maskEdit === edit) {
+      setMaskEditStatus(
+        error instanceof ImageTransformApiError
+          ? error.message
+          : '无法完成一键去背景。当前选区已保留，请稍后重试。',
+      );
+    }
+  } finally {
+    if (edit.applyController === controller) {
+      edit.applyController = null;
+    }
+    syncMaskEditControls();
+  }
+}
+
+function setMaskEditStatus(message: string): void {
+  const status = previewWorkspace.querySelector<HTMLElement>('[data-mask-edit-status]');
+  if (status) {
+    status.textContent = message;
+  }
+}
+
+function setupMaskEditInteractions(): void {
+  const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
+  canvas.addEventListener('pointerdown', handleMaskEditPointerDown);
+  canvas.addEventListener('pointermove', handleMaskEditPointerMove);
+  canvas.addEventListener('pointerup', handleMaskEditPointerEnd);
+  canvas.addEventListener('pointercancel', handleMaskEditPointerEnd);
+  canvas.addEventListener('lostpointercapture', (event) => {
+    if (maskEdit && maskEdit.paintingPointerId === event.pointerId) {
+      handleMaskEditPointerEnd(event);
+    }
+  });
+  canvas.addEventListener('pointerleave', () => {
+    if (maskEdit && maskEdit.paintingPointerId === null) {
+      maskEdit.cursorClientPoint = null;
+      scheduleMaskEditRedraw();
+    }
+  });
+  const brushSize = required(previewWorkspace, '[data-mask-brush-size]', HTMLInputElement);
+  brushSize.addEventListener('input', () => {
+    maskEdit?.session.setBrushSize(Number(brushSize.value));
+    scheduleMaskEditRedraw();
+  });
+  for (const swatch of previewWorkspace.querySelectorAll<HTMLButtonElement>(
+    '[data-mask-highlight]',
+  )) {
+    swatch.addEventListener('click', () => {
+      setMaskHighlightColor(highlightColorFromHex(swatch.dataset.maskHighlightHex ?? ''));
+      announce(
+        `高亮颜色已切换为${swatch.getAttribute('aria-label')?.replace('高亮颜色：', '') ?? '预设色'}。`,
+      );
+    });
+  }
+  required(previewWorkspace, '[data-mask-highlight-custom]', HTMLInputElement).addEventListener(
+    'input',
+    (event) => {
+      if (event.target instanceof HTMLInputElement) {
+        setMaskHighlightColor(highlightColorFromHex(event.target.value));
+      }
+    },
+  );
+  required(previewWorkspace, '[data-mask-edit-undo]', HTMLButtonElement).addEventListener(
+    'click',
+    undoMaskEditStroke,
+  );
+  required(previewWorkspace, '[data-mask-edit-cancel]', HTMLButtonElement).addEventListener(
+    'click',
+    cancelMaskEdit,
+  );
+  required(previewWorkspace, '[data-mask-edit-apply]', HTMLButtonElement).addEventListener(
+    'click',
+    () => {
+      void applyMaskEdit();
+    },
+  );
+}
+
+function syncMaskEditControls(): void {
+  const undoButton = previewWorkspace.querySelector<HTMLButtonElement>('[data-mask-edit-undo]');
+  if (undoButton) {
+    undoButton.disabled = (maskEdit?.session.undoDepth() ?? 0) === 0;
+  }
+  const applyButton = previewWorkspace.querySelector<HTMLButtonElement>('[data-mask-edit-apply]');
+  if (applyButton) {
+    applyButton.disabled = maskEdit === null || maskEdit.applyController !== null;
+  }
 }
 
 const previewView: PreviewViewController = createPreviewView({
@@ -861,6 +1605,14 @@ async function initializeRadioGroupControllers(): Promise<void> {
   exportPresetRadioControllers = Object.freeze(nextExportPresetControllers);
   exportBackgroundRadioControllers = Object.freeze(nextExportBackgroundControllers);
   exportAppearanceRadioControllers = Object.freeze(nextExportAppearanceControllers);
+  maskBrushModeController = await createVaadinRadioGroupController({
+    element: requiredVaadinElement(
+      previewWorkspace,
+      '[data-mask-brush-mode]',
+      'vaadin-radio-group',
+    ),
+    initialValue: 'remove',
+  });
 }
 
 async function initializeCapabilities(): Promise<void> {
@@ -1411,6 +2163,14 @@ function setupPreview(): void {
 
   prepareReplace.addEventListener('click', handleReplaceImageClick);
   backgroundRemovalAction.addEventListener('click', requestBackgroundRemovalAction);
+  required(previewWorkspace, '[data-mask-reedit]', HTMLButtonElement).addEventListener(
+    'click',
+    requestMaskReedit,
+  );
+  setupMaskEditInteractions();
+  maskBrushModeController.subscribe((value) => {
+    maskEdit?.session.setBrushMode(value === 'keep' ? 'keep' : 'remove');
+  });
   for (const button of previewWorkspace.querySelectorAll<HTMLButtonElement>(
     '[data-preview-mode]',
   )) {
@@ -1419,6 +2179,9 @@ function setupPreview(): void {
     });
   }
   adjustSourceButton.addEventListener('click', () => {
+    if (maskEdit || maskFetchController) {
+      return;
+    }
     previewView.applyCompareView('adjust');
     drawCropPreview();
     renderCropSelection();
@@ -2247,8 +3010,12 @@ function handlePreviewCoordinatorEvent(event: PreviewCoordinatorEvent): void {
     return;
   }
   if (event.type === 'failed') {
-    setPreviewStatus('failure');
-    announce(PREVIEW_STATUS_TEXT.failure);
+    const message =
+      event.error instanceof PatternApiError && event.error.message !== ''
+        ? `${event.error.message} 可重试或调整图片。`
+        : PREVIEW_STATUS_TEXT.failure;
+    setPreviewStatusText(message);
+    announce(message);
     return;
   }
   const { result } = event;
@@ -2276,6 +3043,7 @@ function confirmPreviewAsEditorBaseline(): void {
   if (!project) {
     return;
   }
+  destroyMaskEdit();
   previewCoordinator.cancel();
   currentProject = project;
   sourceGenerationRevision = project.revision;
@@ -2388,6 +3156,9 @@ function setupPreviewCanvasResize(): void {
       drawAlignedOriginalCanvas();
       drawCropPreview();
       renderCropSelection();
+    }
+    if (maskEdit !== null) {
+      scheduleMaskEditRedraw();
     }
   });
   observer.observe(slot);
@@ -4661,6 +5432,7 @@ function cleanup(): void {
   clearPreviewRegenerationTimer();
   previewCoordinator.destroy();
   backgroundRemovalCoordinator.destroy();
+  destroyMaskEdit();
   exportCoordinator.destroy();
   pngExportPreviewCoordinator.destroy();
   chartMirrorCoordinator.cancel();
@@ -4676,6 +5448,7 @@ function cleanup(): void {
   uploadPrepareRadioControllers.modePreference.destroy();
   samplingRadioController.destroy();
   previewCompareRadioController.destroy();
+  maskBrushModeController.destroy();
   for (const controller of [
     preparePresetRadioGroupControllers.patternSize,
     preparePresetRadioGroupControllers.beadSize,

@@ -30,6 +30,16 @@ UnavailableReason = Literal[
 ]
 
 
+class BackgroundRemovalInteractiveCapability(TypedDict):
+    contractVersion: str
+    available: bool
+    refinement: str
+    maximumStrokesPerRequest: int
+    maximumStrokePointsPerRequest: int
+    minimumBrushRadiusPx: int
+    maximumBrushRadiusPx: int
+
+
 class BackgroundRemovalCapability(TypedDict):
     contractVersion: str
     available: bool
@@ -37,6 +47,7 @@ class BackgroundRemovalCapability(TypedDict):
     maximumDecodedPixels: int
     maximumConcurrentInferences: int
     unavailableReason: UnavailableReason | None
+    interactive: BackgroundRemovalInteractiveCapability
 
 
 class BackgroundRemovalUnavailableError(Exception):
@@ -45,6 +56,7 @@ class BackgroundRemovalUnavailableError(Exception):
 
 class BackgroundRemovalEngine(Protocol):
     def remove(self, source: PillowImage) -> PillowImage: ...
+    def mask(self, source: PillowImage) -> PillowImage: ...
 
 
 SessionFactory = Callable[[Path], object]
@@ -76,6 +88,19 @@ class RembgBackgroundRemovalEngine:
         finally:
             result.close()
 
+    def mask(self, source: PillowImage) -> PillowImage:
+        from rembg import remove
+
+        result = remove(source, session=self._session, only_mask=True)
+        if not isinstance(result, PillowImage):
+            raise TypeError("background removal did not return a mask")
+        if result.mode == "L":
+            return result
+        try:
+            return result.convert("L")
+        finally:
+            result.close()
+
 
 class BackgroundRemovalRuntime:
     def __init__(
@@ -99,6 +124,12 @@ class BackgroundRemovalRuntime:
         return _capability(reason)
 
     def remove(self, source: PillowImage) -> PillowImage:
+        return self._engine_or_raise().remove(source)
+
+    def mask(self, source: PillowImage) -> PillowImage:
+        return self._engine_or_raise().mask(source)
+
+    def _engine_or_raise(self) -> BackgroundRemovalEngine:
         engine = self._engine
         if engine is None:
             with self._lock:
@@ -121,7 +152,7 @@ class BackgroundRemovalRuntime:
                             "ENGINE_INITIALIZATION_FAILED"
                         ) from error
                     self._engine = engine
-        return engine.remove(source)
+        return engine
 
 
 def _create_project_local_rembg_session(model_path: Path) -> object:
@@ -188,6 +219,21 @@ def _capability(
             limits.MAX_BACKGROUND_REMOVAL_CONCURRENCY
         ),
         "unavailableReason": reason,
+        "interactive": {
+            "contractVersion": (
+                limits.BACKGROUND_REMOVAL_INTERACTIVE_CONTRACT_VERSION
+            ),
+            "available": reason is None,
+            "refinement": "grabcut",
+            "maximumStrokesPerRequest": (
+                limits.MAX_MASK_REFINE_STROKES
+            ),
+            "maximumStrokePointsPerRequest": (
+                limits.MAX_MASK_REFINE_POINTS
+            ),
+            "minimumBrushRadiusPx": limits.MIN_MASK_BRUSH_RADIUS_PX,
+            "maximumBrushRadiusPx": limits.MAX_MASK_BRUSH_RADIUS_PX,
+        },
     }
 
 

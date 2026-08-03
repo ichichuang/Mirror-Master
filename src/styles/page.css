@@ -408,6 +408,7 @@
 }
 
 .preview-toolbar {
+  position: relative;
   display: grid;
   min-width: 0;
   gap: var(--space-2);
@@ -517,11 +518,14 @@
 }
 
 .background-removal-status {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-1));
+  inset-inline-end: 0;
+  z-index: 6;
   display: flex;
   width: fit-content;
   max-inline-size: min(100%, 34rem);
   min-inline-size: 0;
-  justify-self: end;
   align-items: flex-start;
   border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
   border-radius: var(--radius-md);
@@ -530,6 +534,7 @@
   margin: 0;
   color: var(--color-primary-text);
   background: color-mix(in srgb, var(--color-primary-soft) 72%, var(--color-surface));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-text-primary) 10%, transparent);
   font-size: 0.76rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -574,7 +579,8 @@
 
 .preview-pattern-view,
 .preview-original-view,
-.preview-adjust-view {
+.preview-adjust-view,
+.preview-mask-edit-view {
   position: relative;
   display: grid;
   grid-area: 1 / 1;
@@ -589,12 +595,187 @@
 
 .preview-pattern-view[hidden],
 .preview-original-view[hidden],
-.preview-adjust-view[hidden] {
+.preview-adjust-view[hidden],
+.preview-mask-edit-view[hidden] {
   display: none;
 }
 
 .preview-adjust-view {
   grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.preview-mask-edit-view {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.mask-edit-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mask-edit-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* 处理提示以覆盖层徽标呈现，绝不参与文档流、不影响整体排版 */
+.mask-edit-status {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  z-index: 3;
+  max-width: min(90%, 26rem);
+  margin: 0;
+  padding: 0.28rem 0.7rem;
+  transform: translateX(-50%);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  color: var(--color-primary-text);
+  font-size: 0.76rem;
+  font-weight: 560;
+  line-height: 1.4;
+  overflow: hidden;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mask-edit-status:empty {
+  display: none;
+}
+
+.mask-edit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border-strong);
+}
+
+.mask-brush-mode {
+  flex: 0 0 auto;
+}
+
+.mask-brush-mode::part(group-field) {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-2);
+}
+
+.mask-brush-size-field {
+  display: flex;
+  flex: 1 1 9rem;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 7rem;
+  max-width: 16rem;
+  color: var(--color-ink-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.mask-brush-size-field input[type='range'] {
+  flex: 1 1 auto;
+  min-height: 2.75rem;
+}
+
+.mask-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.mask-highlight-control {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.mask-highlight-label {
+  margin-inline-end: 0.15rem;
+  color: var(--color-ink-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.mask-highlight-swatch {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  place-items: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mask-highlight-swatch > span {
+  display: block;
+  width: 1.3rem;
+  height: 1.3rem;
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+}
+
+.mask-highlight-swatch[aria-pressed='true'] > span {
+  box-shadow:
+    0 0 0 2px var(--color-surface),
+    0 0 0 4px var(--color-primary);
+}
+
+.mask-highlight-swatch:focus-visible {
+  outline: 2px solid var(--color-focus-ring, var(--color-primary-text));
+  outline-offset: 2px;
+}
+
+.mask-highlight-custom {
+  position: relative;
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  cursor: pointer;
+}
+
+.mask-highlight-custom input[type='color'] {
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  border: 2px solid var(--color-surface);
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+  cursor: pointer;
+}
+
+.mask-highlight-custom[data-active] input[type='color'] {
+  box-shadow:
+    0 0 0 2px var(--color-surface),
+    0 0 0 4px var(--color-primary);
+}
+
+/* 去背景选区编辑期间，隐藏与当前任务无关的对比与样式控件 */
+.preview-workspace[data-mask-editing='true'] .compare-switch,
+.preview-workspace[data-mask-editing='true'] [data-hold-original],
+.preview-workspace[data-mask-editing='true'] [data-adjust-source],
+.preview-workspace[data-mask-editing='true'] [data-background-removal-control],
+.preview-workspace[data-mask-editing='true'] .preview-mode-control {
+  display: none;
 }
 
 .preview-adjust-view .crop-frame {
@@ -3148,9 +3329,9 @@ select {
   }
 
   .background-removal-status {
-    width: 100%;
+    inset-inline: 0;
+    width: auto;
     max-inline-size: none;
-    justify-self: stretch;
   }
 
   [data-action-label-long],

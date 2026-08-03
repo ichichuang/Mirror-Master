@@ -41,21 +41,9 @@ export function createAvailableColorDialog(
     '[data-available-color-search]',
     'vaadin-text-field',
   );
-  const series = requiredVaadinElement(
-    content,
-    '[data-available-color-series]',
-    'vaadin-select',
-  );
-  const selectAll = requiredVaadinElement(
-    content,
-    '[data-select-all-colors]',
-    'vaadin-button',
-  );
-  const clearAll = requiredVaadinElement(
-    content,
-    '[data-clear-all-colors]',
-    'vaadin-button',
-  );
+  const series = requiredVaadinElement(content, '[data-available-color-series]', 'vaadin-select');
+  const selectAll = requiredVaadinElement(content, '[data-select-all-colors]', 'vaadin-button');
+  const clearAll = requiredVaadinElement(content, '[data-clear-all-colors]', 'vaadin-button');
   const closeButton = requiredVaadinElement(
     content,
     '[data-close-available-colors]',

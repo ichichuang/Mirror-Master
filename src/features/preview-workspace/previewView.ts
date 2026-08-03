@@ -42,6 +42,8 @@ export interface PreviewViewController {
     crop: CropPercent,
   ) => void;
   readonly applyCompareView: (view: 'adjust' | 'original' | 'pattern') => void;
+  readonly setMaskEditActive: (active: boolean) => void;
+  readonly isMaskEditActive: () => boolean;
 }
 
 export function createPreviewView(options: PreviewViewOptions): PreviewViewController {
@@ -63,10 +65,12 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
   const originalView = required(root, '[data-preview-original-view]') as HTMLElement;
   const originalCanvas = required(root, '[data-preview-original-canvas]') as HTMLCanvasElement;
   const adjustView = required(root, '[data-preview-adjust-view]') as HTMLElement;
+  const maskEditView = required(root, '[data-preview-mask-edit-view]') as HTMLElement;
   const patternView = required(root, '[data-preview-pattern-view]') as HTMLElement;
   let lastProject: BeadProject | null = null;
   let renderMode: PreviewRenderMode = DEFAULT_PREVIEW_RENDER_MODE;
   let activeView: 'adjust' | 'original' | 'pattern' = 'pattern';
+  let maskEditActive = false;
 
   return Object.freeze({
     setStatusText(
@@ -138,6 +142,9 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
     applyCompareView(view: 'adjust' | 'original' | 'pattern'): void {
       const viewChanged = activeView !== view;
       activeView = view;
+      if (maskEditActive) {
+        return;
+      }
       originalView.hidden = view !== 'original';
       patternView.hidden = view !== 'pattern';
       adjustView.hidden = view !== 'adjust';
@@ -150,6 +157,26 @@ export function createPreviewView(options: PreviewViewOptions): PreviewViewContr
         drawPreview(lastProject);
       }
     },
+    setMaskEditActive(active: boolean): void {
+      if (maskEditActive === active) {
+        return;
+      }
+      maskEditActive = active;
+      maskEditView.hidden = !active;
+      if (active) {
+        originalView.hidden = true;
+        patternView.hidden = true;
+        adjustView.hidden = true;
+        return;
+      }
+      originalView.hidden = activeView !== 'original';
+      patternView.hidden = activeView !== 'pattern';
+      adjustView.hidden = activeView !== 'adjust';
+      if (activeView === 'pattern') {
+        drawPreview(lastProject);
+      }
+    },
+    isMaskEditActive: () => maskEditActive,
   });
 
   function drawPreview(project: BeadProject | null): void {

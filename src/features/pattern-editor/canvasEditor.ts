@@ -616,13 +616,7 @@ export function mountPatternCanvas(
           point.row - active.start.row,
           point.column - active.start.column,
         );
-        setSelection(
-          translateSelectionRect(
-            source,
-            bounded.deltaRow,
-            bounded.deltaColumn,
-          ),
-        );
+        setSelection(translateSelectionRect(source, bounded.deltaRow, bounded.deltaColumn));
       }
     }
     active.last = point;
@@ -657,18 +651,8 @@ export function mountPatternCanvas(
         deltaColumn,
       );
       const result = active.copySelection
-        ? copySelectedCells(
-            cells,
-            active.selectionBefore,
-            bounded.deltaRow,
-            bounded.deltaColumn,
-          )
-        : moveSelectedCells(
-            cells,
-            active.selectionBefore,
-            bounded.deltaRow,
-            bounded.deltaColumn,
-          );
+        ? copySelectedCells(cells, active.selectionBefore, bounded.deltaRow, bounded.deltaColumn)
+        : moveSelectedCells(cells, active.selectionBefore, bounded.deltaRow, bounded.deltaColumn);
       setSelectionTransferMode(null);
       applySelectionResult(
         result,
@@ -798,12 +782,7 @@ export function mountPatternCanvas(
       return;
     }
     const transactionStartedAt = now();
-    const bounded = boundSelectionTranslation(
-      cells,
-      selection,
-      deltaRow,
-      deltaColumn,
-    );
+    const bounded = boundSelectionTranslation(cells, selection, deltaRow, deltaColumn);
     const result =
       operation === 'copy'
         ? copySelectedCells(cells, selection, bounded.deltaRow, bounded.deltaColumn)

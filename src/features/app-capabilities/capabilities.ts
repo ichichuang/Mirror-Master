@@ -10,6 +10,16 @@ export type AppGridMirrorAxis = 'horizontal' | 'vertical';
 export type BackgroundRemovalUnavailableReason =
   'MODEL_MISSING' | 'MODEL_INVALID' | 'ENGINE_INITIALIZATION_FAILED';
 
+export interface BackgroundRemovalInteractiveCapability {
+  readonly contractVersion: '1.0';
+  readonly available: boolean;
+  readonly refinement: 'grabcut';
+  readonly maximumStrokesPerRequest: number;
+  readonly maximumStrokePointsPerRequest: number;
+  readonly minimumBrushRadiusPx: number;
+  readonly maximumBrushRadiusPx: number;
+}
+
 export interface BackgroundRemovalCapability {
   readonly contractVersion: '1.0';
   readonly available: boolean;
@@ -17,6 +27,7 @@ export interface BackgroundRemovalCapability {
   readonly maximumDecodedPixels: number;
   readonly maximumConcurrentInferences: number;
   readonly unavailableReason: BackgroundRemovalUnavailableReason | null;
+  readonly interactive: BackgroundRemovalInteractiveCapability;
 }
 
 export interface AppBoardSize {
@@ -117,6 +128,16 @@ const BACKGROUND_REMOVAL_UNAVAILABLE_REASONS = [
   'ENGINE_INITIALIZATION_FAILED',
 ] as const;
 
+const UNAVAILABLE_INTERACTIVE_CAPABILITY: BackgroundRemovalInteractiveCapability = Object.freeze({
+  contractVersion: '1.0',
+  available: false,
+  refinement: 'grabcut',
+  maximumStrokesPerRequest: 64,
+  maximumStrokePointsPerRequest: 8192,
+  minimumBrushRadiusPx: 1,
+  maximumBrushRadiusPx: 512,
+});
+
 const UNAVAILABLE_BACKGROUND_REMOVAL_CAPABILITY: BackgroundRemovalCapability = Object.freeze({
   contractVersion: '1.0',
   available: false,
@@ -124,6 +145,7 @@ const UNAVAILABLE_BACKGROUND_REMOVAL_CAPABILITY: BackgroundRemovalCapability = O
   maximumDecodedPixels: 12_000_000,
   maximumConcurrentInferences: 1,
   unavailableReason: 'MODEL_MISSING',
+  interactive: UNAVAILABLE_INTERACTIVE_CAPABILITY,
 });
 
 export const FALLBACK_APP_CAPABILITIES: AppCapabilities = Object.freeze({
@@ -344,12 +366,53 @@ function readBackgroundRemovalCapability(value: unknown): BackgroundRemovalCapab
       maximumDecodedPixels: readPositiveInteger(capability.maximumDecodedPixels),
       maximumConcurrentInferences: readPositiveInteger(capability.maximumConcurrentInferences),
       unavailableReason,
+      interactive: readInteractiveCapability(capability.interactive, available),
     });
   } catch {
     return Object.freeze({
       ...UNAVAILABLE_BACKGROUND_REMOVAL_CAPABILITY,
       unavailableReason: 'MODEL_INVALID',
     });
+  }
+}
+
+function readInteractiveCapability(
+  value: unknown,
+  serviceAvailable: boolean,
+): BackgroundRemovalInteractiveCapability {
+  // interactive 对象缺失或合同不兼容时按不可用处理，前端回退到一键直出流程。
+  if (!serviceAvailable || value === undefined) {
+    return UNAVAILABLE_INTERACTIVE_CAPABILITY;
+  }
+  try {
+    const interactive = readRecord(value);
+    if (
+      interactive.contractVersion !== '1.0' ||
+      interactive.refinement !== 'grabcut' ||
+      !readBoolean(interactive.available)
+    ) {
+      return UNAVAILABLE_INTERACTIVE_CAPABILITY;
+    }
+    const maximumStrokesPerRequest = readPositiveInteger(interactive.maximumStrokesPerRequest);
+    const maximumStrokePointsPerRequest = readPositiveInteger(
+      interactive.maximumStrokePointsPerRequest,
+    );
+    const minimumBrushRadiusPx = readPositiveInteger(interactive.minimumBrushRadiusPx);
+    const maximumBrushRadiusPx = readPositiveInteger(interactive.maximumBrushRadiusPx);
+    if (minimumBrushRadiusPx > maximumBrushRadiusPx) {
+      return UNAVAILABLE_INTERACTIVE_CAPABILITY;
+    }
+    return Object.freeze({
+      contractVersion: '1.0',
+      available: true,
+      refinement: 'grabcut',
+      maximumStrokesPerRequest,
+      maximumStrokePointsPerRequest,
+      minimumBrushRadiusPx,
+      maximumBrushRadiusPx,
+    });
+  } catch {
+    return UNAVAILABLE_INTERACTIVE_CAPABILITY;
   }
 }
 

@@ -25,6 +25,15 @@ const VALID_CAPABILITIES = {
     maximumDecodedPixels: 12_000_000,
     maximumConcurrentInferences: 1,
     unavailableReason: null,
+    interactive: {
+      contractVersion: '1.0',
+      available: true,
+      refinement: 'grabcut',
+      maximumStrokesPerRequest: 64,
+      maximumStrokePointsPerRequest: 8192,
+      minimumBrushRadiusPx: 1,
+      maximumBrushRadiusPx: 512,
+    },
   },
   grid: {
     minimumRows: 1,
@@ -83,6 +92,15 @@ test('capabilities parser returns a typed versioned contract', () => {
     maximumDecodedPixels: 12_000_000,
     maximumConcurrentInferences: 1,
     unavailableReason: null,
+    interactive: {
+      contractVersion: '1.0',
+      available: true,
+      refinement: 'grabcut',
+      maximumStrokesPerRequest: 64,
+      maximumStrokePointsPerRequest: 8192,
+      minimumBrushRadiusPx: 1,
+      maximumBrushRadiusPx: 512,
+    },
   });
   assert.equal(capabilities.beads.pitchMustNotBeSmallerThanDiameter, true);
   assert.deepEqual(capabilities.boards.fixedPresets.standardSquare, {
@@ -102,7 +120,30 @@ test('missing background removal capability disables only that feature', () => {
 
   assert.equal(capabilities.backgroundRemoval.available, false);
   assert.equal(capabilities.backgroundRemoval.unavailableReason, 'MODEL_MISSING');
+  assert.equal(capabilities.backgroundRemoval.interactive.available, false);
   assert.equal(capabilities.upload.maximumBytes, 20 * 1024 * 1024);
+});
+
+test('missing or incompatible interactive capability falls back to one-shot removal', () => {
+  const { interactive: _interactive, ...withoutInteractive } = VALID_CAPABILITIES.backgroundRemoval;
+  const missingInteractive = parseAppCapabilities({
+    ...VALID_CAPABILITIES,
+    backgroundRemoval: withoutInteractive,
+  });
+  assert.equal(missingInteractive.backgroundRemoval.available, true);
+  assert.equal(missingInteractive.backgroundRemoval.interactive.available, false);
+
+  const incompatible = parseAppCapabilities({
+    ...VALID_CAPABILITIES,
+    backgroundRemoval: {
+      ...VALID_CAPABILITIES.backgroundRemoval,
+      interactive: {
+        ...VALID_CAPABILITIES.backgroundRemoval.interactive,
+        contractVersion: '2.0',
+      },
+    },
+  });
+  assert.equal(incompatible.backgroundRemoval.interactive.available, false);
 });
 
 test('invalid background removal capability disables only that feature', () => {

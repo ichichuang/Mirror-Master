@@ -12,6 +12,12 @@ export class ImageTransformApiError extends Error {
 
 export type BackgroundRemovalFetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
+export interface MaskRefineStroke {
+  readonly mode: 'keep' | 'remove';
+  readonly radius: number;
+  readonly points: readonly (readonly [number, number])[];
+}
+
 export async function removeImageBackground(
   file: File,
   signal?: AbortSignal,
@@ -19,10 +25,54 @@ export async function removeImageBackground(
 ): Promise<Blob> {
   const form = new FormData();
   form.set('file', file);
+  return postImageRequest('/api/image/remove-background', form, signal, fetcher);
+}
 
+export async function fetchBackgroundMask(
+  file: File,
+  signal?: AbortSignal,
+  fetcher: BackgroundRemovalFetcher = globalThis.fetch,
+): Promise<Blob> {
+  const form = new FormData();
+  form.set('file', file);
+  return postImageRequest('/api/image/remove-background/mask', form, signal, fetcher);
+}
+
+export async function refineBackgroundMask(
+  file: File,
+  mask: Blob,
+  strokes: readonly MaskRefineStroke[],
+  signal?: AbortSignal,
+  fetcher: BackgroundRemovalFetcher = globalThis.fetch,
+): Promise<Blob> {
+  const form = new FormData();
+  form.set('file', file);
+  form.set('mask', mask, 'mask.png');
+  form.set('strokes', JSON.stringify({ strokes }));
+  return postImageRequest('/api/image/remove-background/refine', form, signal, fetcher);
+}
+
+export async function applyBackgroundMask(
+  file: File,
+  mask: Blob,
+  signal?: AbortSignal,
+  fetcher: BackgroundRemovalFetcher = globalThis.fetch,
+): Promise<Blob> {
+  const form = new FormData();
+  form.set('file', file);
+  form.set('mask', mask, 'mask.png');
+  return postImageRequest('/api/image/remove-background/apply', form, signal, fetcher);
+}
+
+async function postImageRequest(
+  endpoint: string,
+  form: FormData,
+  signal: AbortSignal | undefined,
+  fetcher: BackgroundRemovalFetcher,
+): Promise<Blob> {
   let response: Response;
   try {
-    response = await fetcher('/api/image/remove-background', {
+    response = await fetcher(endpoint, {
       method: 'POST',
       body: form,
       ...(signal ? { signal } : {}),

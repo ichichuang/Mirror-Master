@@ -276,11 +276,12 @@ def test_hash_mismatch_is_rejected_as_stale(
     assert_structured_chinese_error(response, "GRID_IMAGE_HASH_MISMATCH")
 
 
-def test_declared_mime_must_match_decoded_format(
+def test_mismatched_declared_mime_is_accepted_when_content_supported(
     client: TestClient,
     generated_rgba_image: Image.Image,
     png_bytes,
 ) -> None:
+    # 声明类型（可能来自扩展名）与实际内容不符时，以实际解码格式为准。
     image_bytes = png_bytes(generated_rgba_image)
     contract = generated_contract(image_bytes)
 
@@ -288,12 +289,11 @@ def test_declared_mime_must_match_decoded_format(
         client, image_bytes, contract, mime_type="image/jpeg"
     )
 
-    assert_structured_chinese_error(
-        response, "IMAGE_MIME_MISMATCH", expected_status=415
-    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
 
 
-def test_unsupported_declared_mime_is_rejected_without_decoding(
+def test_supported_content_with_unsupported_declared_mime_is_accepted(
     client: TestClient,
     generated_rgba_image: Image.Image,
     png_bytes,
@@ -306,6 +306,23 @@ def test_unsupported_declared_mime_is_rejected_without_decoding(
         image_bytes,
         contract,
         mime_type="application/octet-stream",
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+
+def test_unsupported_decoded_format_is_rejected(
+    client: TestClient,
+    generated_rgba_image: Image.Image,
+) -> None:
+    buffer = io.BytesIO()
+    generated_rgba_image.convert("RGB").save(buffer, format="GIF")
+    image_bytes = buffer.getvalue()
+    contract = generated_contract(image_bytes)
+
+    response = post_mirror(
+        client, image_bytes, contract, mime_type="image/gif"
     )
 
     assert_structured_chinese_error(

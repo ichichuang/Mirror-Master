@@ -27,11 +27,7 @@ from app.models import (
     GridPoint,
 )
 
-ALLOWED_IMAGE_FORMATS = {
-    "image/jpeg": {"JPEG"},
-    "image/png": {"PNG"},
-    "image/webp": {"WEBP"},
-}
+SUPPORTED_DECODED_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 
 
 def _reject_nonstandard_json_constant(value: str) -> None:
@@ -96,13 +92,8 @@ def parse_contract(contract_text: str) -> GridContract | GridContractV2:
 
 
 async def read_upload(upload: UploadFile) -> bytes:
-    if upload.content_type not in ALLOWED_IMAGE_FORMATS:
-        raise ApiError(
-            415,
-            "IMAGE_MIME_UNSUPPORTED",
-            "仅支持 JPEG、PNG 或 WebP 图片。",
-        )
-
+    # 不信任声明的 Content-Type（可能来自扩展名，与实际内容不符）；
+    # 实际格式在 decode_normalized_rgba 中按解码结果校验。
     content = bytearray()
     while chunk := await upload.read(limits.UPLOAD_READ_CHUNK_BYTES):
         content.extend(chunk)
@@ -137,11 +128,13 @@ def decode_normalized_rgba(
     )
     try:
         with Image.open(io.BytesIO(image_bytes)) as decoded:
-            if decoded.format not in ALLOWED_IMAGE_FORMATS[declared_mime]:
+            # 以实际解码格式为准：声明类型（declared_mime）可能与内容不符，
+            # 只要内容本身是受支持的图片格式就接受。
+            if decoded.format not in SUPPORTED_DECODED_FORMATS:
                 raise ApiError(
                     415,
-                    "IMAGE_MIME_MISMATCH",
-                    "声明的图片类型与实际解码格式不一致。",
+                    "IMAGE_MIME_UNSUPPORTED",
+                    "仅支持 JPEG、PNG 或 WebP 图片。",
                 )
             width, height = decoded.size
             if width * height > pixel_limit:
