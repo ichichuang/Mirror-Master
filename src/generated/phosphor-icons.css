@@ -43,6 +43,7 @@
 .ph-hand-pointing::before { content: "\E29A"; }
 .ph-image::before { content: "\E2CA"; }
 .ph-image-square::before { content: "\E2CC"; }
+.ph-info::before { content: "\E2CE"; }
 .ph-link::before { content: "\E2E2"; }
 .ph-minus::before { content: "\E32A"; }
 .ph-number-circle-one::before { content: "\E36A"; }

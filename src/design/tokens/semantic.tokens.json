@@ -4,7 +4,11 @@
       "primary": { "$type": "color", "$value": "{theme.color.action.primary}" },
       "primaryHover": { "$type": "color", "$value": "{theme.color.action.primaryHover}" },
       "primarySoft": { "$type": "color", "$value": "{theme.color.action.primarySoft}" },
-      "primaryText": { "$type": "color", "$value": "{theme.color.action.primaryText}" }
+      "primaryText": { "$type": "color", "$value": "{theme.color.action.primaryText}" },
+      "primaryForeground": {
+        "$type": "color",
+        "$value": "{theme.color.action.primaryForeground}"
+      }
     },
     "background": {
       "page": { "$type": "color", "$value": "{theme.color.background.page}" },

@@ -1,9 +1,9 @@
 import type { PreviewRenderMode } from '../preview-workspace/previewMode';
 
-export type PngExportPreset = 'pure' | 'annotated' | 'numbered' | 'rounded' | 'ring';
+export type PngExportPreset = 'pure' | 'annotated' | 'numbered' | 'rounded';
 export type PngExportPresetMatch = PngExportPreset | 'custom';
 export type PngExportBackground = 'transparent' | 'white';
-export type PngExportAppearance = 'bead' | 'solidSquare' | 'roundedSquare' | 'ring';
+export type PngExportAppearance = 'bead' | 'solidSquare' | 'roundedSquare';
 export type PngExportContentOption =
   | 'includeGrid'
   | 'includeCoordinates'
@@ -95,21 +95,6 @@ export const PNG_EXPORT_PRESETS: readonly PngExportPresetDefinition[] = Object.f
       includeColorLegend: false,
     }),
   }),
-  Object.freeze({
-    id: 'ring',
-    label: '圆环豆粒',
-    description: '模拟带中心孔的实体拼豆外观',
-    configuration: configuration({
-      background: 'white',
-      appearance: 'ring',
-      includeGrid: false,
-      includeCoordinates: false,
-      includeCellCodes: false,
-      includeStatistics: false,
-      includeMaterialCounts: false,
-      includeColorLegend: false,
-    }),
-  }),
 ]);
 
 const CONFIGURATION_KEYS = Object.freeze([
@@ -132,7 +117,9 @@ export function configurationForPngExportPreset(preset: PngExportPreset): PngExp
 }
 
 export function configurationForPreviewMode(mode: PreviewRenderMode): PngExportConfiguration {
-  return configurationForPngExportPreset(mode);
+  // “圆环豆粒”是屏幕专属预览样式，不进入 PNG 导出模板；
+  // 从圆环豆粒预览进入导出时回退到最接近的可导出“纯图案”。
+  return configurationForPngExportPreset(mode === 'ring' ? 'pure' : mode);
 }
 
 export function resolvePngExportPreset(value: PngExportConfiguration): PngExportPresetMatch {
@@ -178,6 +165,5 @@ export function describePngExportConfiguration(value: PngExportConfiguration): s
 function appearanceLabel(appearance: PngExportAppearance): string {
   if (appearance === 'solidSquare') return '实心方格';
   if (appearance === 'roundedSquare') return '圆角方格';
-  if (appearance === 'ring') return '圆环豆粒';
   return '标准拼豆';
 }

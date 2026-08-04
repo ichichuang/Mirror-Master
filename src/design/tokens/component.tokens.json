@@ -3,7 +3,7 @@
     "primary": {
       "background": { "$type": "color", "$value": "{color.action.primary}" },
       "backgroundHover": { "$type": "color", "$value": "{color.action.primaryHover}" },
-      "foreground": { "$type": "color", "$value": "{color.text.onPrimary}" }
+      "foreground": { "$type": "color", "$value": "{color.action.primaryForeground}" }
     }
   },
   "sheet": {

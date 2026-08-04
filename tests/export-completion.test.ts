@@ -7,6 +7,7 @@ import {
   closeExportCompletion,
   completeExport,
   createExportCompletionState,
+  exportDownloadActionLabel,
   failExport,
   openExportCompletion,
   parseExportPngTemplate,
@@ -15,6 +16,13 @@ import {
   setExportPngTemplate,
 } from '../src/features/export-completion/exportState';
 import { configurationForPngExportPreset } from '../src/features/export-completion/pngExportConfiguration';
+
+test('every export task exposes a concrete download action', () => {
+  assert.deepEqual(
+    EXPORT_TASKS.map(({ id }) => exportDownloadActionLabel(id)),
+    ['下载分享图片', '下载打印制作', '下载材料清单', '下载项目文件'],
+  );
+});
 
 test('completion exposes exactly four customer tasks with four PNG templates only for sharing', () => {
   assert.deepEqual(
@@ -69,10 +77,10 @@ test('completion state owns one immutable composable PNG configuration', () => {
   const initial = createExportCompletionState();
   assert.deepEqual(initial.pngConfiguration, configurationForPngExportPreset('annotated'));
 
-  const ring = setExportPngConfiguration(initial, configurationForPngExportPreset('ring'));
-  assert.deepEqual(ring.pngConfiguration, configurationForPngExportPreset('ring'));
-  assert.equal(ring.status.phase, 'idle');
-  assert.notEqual(ring, initial);
+  const rounded = setExportPngConfiguration(initial, configurationForPngExportPreset('rounded'));
+  assert.deepEqual(rounded.pngConfiguration, configurationForPngExportPreset('rounded'));
+  assert.equal(rounded.status.phase, 'idle');
+  assert.notEqual(rounded, initial);
 });
 
 test('task and PNG template changes are explicit and a non-PNG task cannot retain template UI state', () => {

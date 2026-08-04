@@ -151,6 +151,7 @@ import {
   closeExportCompletion,
   completeExport,
   createExportCompletionState,
+  exportDownloadActionLabel,
   exportTaskDefinition,
   failExport,
   openExportCompletion,
@@ -237,6 +238,7 @@ import {
   type PreviewRenderMode,
 } from './features/preview-workspace/previewMode';
 import { formatPreviewDoneStatus } from './features/preview-workspace/previewSummary';
+import { createPreviewSettingsIntroductionSession } from './features/preview-workspace/previewSettingsIntroduction';
 import {
   createPreviewView,
   type PreviewViewController,
@@ -345,12 +347,19 @@ const selectionDescription = required(
   HTMLElement,
 );
 const firstUseHint = required(patternWorkspace, '[data-first-use-hint]', HTMLElement);
+const importedProjectNotice = required(
+  patternWorkspace,
+  '[data-imported-project-notice]',
+  HTMLElement,
+);
+let importedProjectNoticeVisible = false;
 const workspaceSurfaceRoots = Object.freeze([workspaceInspector, workspaceSheet]);
 let workspacePanelControllers: readonly WorkspacePanelsController[] = Object.freeze([]);
 
 const objectUrls = createObjectUrlStore();
 const recommendationRequests = createLatestSourceRequest();
 const firstUseHintSession = createFirstUseHintSession();
+const previewSettingsIntroductionSession = createPreviewSettingsIntroductionSession();
 const previewColorHexById: ReadonlyMap<string, string> = new Map(
   PALETTE_COLORS.map((color) => [color.id, color.displayHex]),
 );
@@ -2051,6 +2060,7 @@ async function openProjectFile(file: File): Promise<void> {
     history = new MatrixHistory(project.cells, 100, project.revision);
     currentSelection = null;
     openPatternEditor(project);
+    showImportedProjectNotice();
     projectFileStatus.textContent = `已打开 ${file.name}，可以继续编辑。`;
     projectFileStatus.dataset.state = 'ready';
     sessionStatus.textContent = '项目已恢复';
@@ -2223,6 +2233,7 @@ function setupPreview(): void {
     if (event.detail !== 0) {
       return;
     }
+    previewSettingsIntroductionSession.recordUserInteraction();
     setPreviewSheetState(nextSheetState(previewSheetState));
   });
   previewSheetDragRegion.addEventListener('pointerdown', (event) => {
@@ -2234,6 +2245,7 @@ function setupPreview(): void {
     if (interactive && !panelToggle.contains(interactive)) {
       return;
     }
+    previewSettingsIntroductionSession.recordUserInteraction();
     const currentHeight =
       previewSheetMotionState?.height ?? previewControlSurface.getBoundingClientRect().height;
     previewSheetGesture = {
@@ -2349,6 +2361,7 @@ function setupPreview(): void {
       return;
     }
     event.preventDefault();
+    previewSettingsIntroductionSession.recordUserInteraction();
     setPreviewSheetState('peek');
     panelToggle.focus({ preventScroll: true });
   });
@@ -3032,9 +3045,19 @@ function handlePreviewCoordinatorEvent(event: PreviewCoordinatorEvent): void {
     result.statistics.usedColorCount,
   );
   setPreviewStatusText(doneStatus);
-  announce(doneStatus);
   if (stage === 'preview') {
     syncPreviewResult();
+    const introduction = previewSettingsIntroductionSession.onPreviewSucceeded({
+      mobile: workspaceLayoutMode !== 'desktop',
+      sheetState: previewSheetState,
+      completionStatus: doneStatus,
+    });
+    if (introduction.expandToHalf) {
+      setPreviewSheetState('half');
+    }
+    announce(introduction.announcement);
+  } else {
+    announce(doneStatus);
   }
 }
 
@@ -3283,6 +3306,10 @@ function setupPatternWorkspace(): void {
     }
     if (target.closest('[data-dismiss-first-use-hint]')) {
       dismissFirstUseHint();
+      return;
+    }
+    if (target.closest('[data-dismiss-imported-project-notice]')) {
+      dismissImportedProjectNotice();
       return;
     }
     if (target.closest('[data-sheet-open-tools]')) {
@@ -3974,6 +4001,21 @@ function syncFirstUseHint(): void {
   firstUseHint.hidden = stage !== 'editor' || !firstUseHintSession.visible;
 }
 
+function showImportedProjectNotice(): void {
+  importedProjectNoticeVisible = true;
+  syncImportedProjectNotice();
+}
+
+function dismissImportedProjectNotice(): void {
+  importedProjectNoticeVisible = false;
+  syncImportedProjectNotice();
+}
+
+function syncImportedProjectNotice(): void {
+  importedProjectNotice.hidden =
+    stage !== 'editor' || !importedProjectNoticeVisible || activeSourceImage() !== null;
+}
+
 function schedulePerformanceCapture(): void {
   window.requestAnimationFrame(() => {
     const snapshot = canvasController?.getPerformanceSnapshot();
@@ -4298,13 +4340,7 @@ function pngExportPreviewStatusMessage(): string {
 }
 
 function isPngExportPreset(value: string): value is PngExportPreset {
-  return (
-    value === 'pure' ||
-    value === 'annotated' ||
-    value === 'numbered' ||
-    value === 'rounded' ||
-    value === 'ring'
-  );
+  return value === 'pure' || value === 'annotated' || value === 'numbered' || value === 'rounded';
 }
 
 function isPngExportBackground(value: string): value is PngExportBackground {
@@ -4312,9 +4348,7 @@ function isPngExportBackground(value: string): value is PngExportBackground {
 }
 
 function isPngExportAppearance(value: string): value is PngExportAppearance {
-  return (
-    value === 'bead' || value === 'solidSquare' || value === 'roundedSquare' || value === 'ring'
-  );
+  return value === 'bead' || value === 'solidSquare' || value === 'roundedSquare';
 }
 
 function isPngExportContentOption(value: string | undefined): value is PngExportContentOption {
@@ -4479,10 +4513,7 @@ function syncExportCompletionUi(): void {
     required(panel, '[data-export-preview-status]', HTMLElement).textContent =
       pngExportPreviewStatusMessage();
     const runButton = required(panel, '[data-export-run]', HTMLButtonElement);
-    runButton.textContent =
-      exportCompletionState.selectedTask === 'saveProject'
-        ? '保存项目文件'
-        : `下载${definition.label}`;
+    runButton.textContent = exportDownloadActionLabel(exportCompletionState.selectedTask);
     runButton.disabled =
       exportCompletionState.status.phase === 'running' ||
       (isPngTask
@@ -4912,6 +4943,7 @@ function showStage(nextStage: AppStage): void {
   }
   stage = nextStage;
   shell.dataset.stage = nextStage;
+  syncImportedProjectNotice();
   startWorkspace.hidden = nextStage !== 'start';
   previewWorkspace.hidden = nextStage !== 'preview';
   patternWorkspace.hidden = nextStage !== 'editor';

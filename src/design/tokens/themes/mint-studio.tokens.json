@@ -6,7 +6,11 @@
         "primary": { "$type": "color", "$value": "{color.orange.500}" },
         "primaryHover": { "$type": "color", "$value": "{color.orange.600}" },
         "primarySoft": { "$type": "color", "$value": "{color.orange.100}" },
-        "primaryText": { "$type": "color", "$value": "{color.orange.700}" }
+        "primaryText": { "$type": "color", "$value": "{color.orange.700}" },
+        "primaryForeground": {
+          "$type": "color",
+          "$value": "{color.brand.buttonPrimaryForeground}"
+        }
       },
       "background": {
         "page": { "$type": "color", "$value": "{color.neutral.50}" },
@@ -17,7 +21,7 @@
       "text": {
         "primary": { "$type": "color", "$value": "{color.neutral.800}" },
         "secondary": { "$type": "color", "$value": "{color.neutral.600}" },
-        "onPrimary": { "$type": "color", "$value": "{color.neutral.900}" }
+        "onPrimary": { "$type": "color", "$value": "{color.brand.onPrimary}" }
       },
       "border": {
         "default": { "$type": "color", "$value": "{color.neutral.200}" },

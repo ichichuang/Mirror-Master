@@ -1,4 +1,5 @@
 .pytest_cache/
+artifacts/
 backend/.pytest_cache/
 backend/.venv/
 backend/**/__pycache__/

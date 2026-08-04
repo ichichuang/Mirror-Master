@@ -137,6 +137,25 @@ function renderPatternWorkspace(): string {
             <i class="ph ph-x" aria-hidden="true"></i>
           </button>
         </div>
+        <div
+          class="first-use-hint imported-project-notice"
+          data-imported-project-notice
+          role="status"
+          hidden
+        >
+          <i class="ph ph-info" aria-hidden="true"></i>
+          <span>
+            此项目来自文件，不包含原始图片；你可以继续编辑和导出，如需重新生成请重新选择图片。
+          </span>
+          <button
+            class="icon-button"
+            type="button"
+            data-dismiss-imported-project-notice
+            aria-label="关闭项目来源说明"
+          >
+            <i class="ph ph-x" aria-hidden="true"></i>
+          </button>
+        </div>
         <div class="pattern-canvas-frame">
           <form
             id="canvas-jump-panel"
@@ -525,9 +544,6 @@ function renderExportCompletionPanel(surface: 'desktop' | 'mobile'): string {
             </vaadin-radio-button>
             <vaadin-radio-button value="roundedSquare">
               <label slot="label">圆角方格</label>
-            </vaadin-radio-button>
-            <vaadin-radio-button value="ring">
-              <label slot="label">圆环豆粒</label>
             </vaadin-radio-button>
           </vaadin-radio-group>
         </div>

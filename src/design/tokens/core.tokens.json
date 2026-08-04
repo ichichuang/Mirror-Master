@@ -6,6 +6,10 @@
       "600": { "$type": "color", "$value": "#D96920" },
       "700": { "$type": "color", "$value": "#B84E0A" }
     },
+    "brand": {
+      "onPrimary": { "$type": "color", "$value": "#f0ffcf" },
+      "buttonPrimaryForeground": { "$type": "color", "$value": "#cef1f5" }
+    },
     "neutral": {
       "0": { "$type": "color", "$value": "#FFFFFF" },
       "50": { "$type": "color", "$value": "#F7F8F5" },

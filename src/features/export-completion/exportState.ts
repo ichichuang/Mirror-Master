@@ -53,7 +53,7 @@ export const EXPORT_TASKS: readonly ExportTaskDefinition[] = Object.freeze([
     label: '保存项目',
     format: 'json',
     fileLabel: '项目',
-    description: '保存可继续编辑的项目文件。',
+    description: '下载可继续编辑的项目文件。',
   }),
 ]);
 
@@ -216,6 +216,11 @@ export function exportTaskDefinition(task: ExportTaskId): ExportTaskDefinition {
     throw new Error('未知导出任务。');
   }
   return definition;
+}
+
+export function exportDownloadActionLabel(task: ExportTaskId): string {
+  const definition = exportTaskDefinition(task);
+  return `下载${task === 'saveProject' ? '项目文件' : definition.label}`;
 }
 
 function freezeState(state: ExportCompletionState): ExportCompletionState {

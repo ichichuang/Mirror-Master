@@ -369,7 +369,8 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.equal(countMatches(markup, /data-export-preset="annotated"/g), 2);
   assert.equal(countMatches(markup, /data-export-preset="numbered"/g), 2);
   assert.equal(countMatches(markup, /data-export-preset="rounded"/g), 2);
-  assert.equal(countMatches(markup, /data-export-preset="ring"/g), 2);
+  assert.equal(countMatches(markup, /data-export-preset="ring"/g), 0);
+  assert.equal(countMatches(markup, /value="ring"/g), 0);
   assert.equal(countMatches(markup, /data-export-background-options/g), 2);
   assert.equal(countMatches(markup, /data-export-appearance-options/g), 2);
   assert.equal(countMatches(markup, /data-export-content-option=/g), 12);
@@ -384,10 +385,13 @@ test('editor exposes palette filters, same-layer export, and flow action hooks',
   assert.doesNotMatch(markup, /data-export-preview-button/u);
   assert.match(markup, /色号图纸[\s\S]*每格显示色号，并附材料数量清单/u);
   assert.match(markup, /圆角方格[\s\S]*圆角小方格清晰分隔，适合放大分享/u);
-  assert.match(markup, /圆环豆粒[\s\S]*模拟带中心孔的实体拼豆外观/u);
+  assert.doesNotMatch(sectionMarkup('data-export-preset-options', 'data-export-run'), /圆环豆粒/u);
   assert.match(markup, /data-return-prepare/u);
   assert.match(markup, /data-edit-pattern/u);
   assert.match(markup, /data-return-editor/u);
+  assert.match(markup, /imported-project-notice"[^>]*data-imported-project-notice[^>]*hidden/u);
+  assert.match(markup, /data-dismiss-imported-project-notice/u);
+  assert.match(markup, /不包含原始图片；你可以继续编辑和导出/u);
   assert.match(markup, /data-selection-action="move"/u);
   assert.match(markup, /data-selection-action="copy"/u);
   assert.match(markup, /data-selection-action="clear"/u);

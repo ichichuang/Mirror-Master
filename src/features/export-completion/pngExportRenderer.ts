@@ -308,7 +308,7 @@ function drawCellAppearance(
   context.beginPath();
   context.arc(centerX, centerY, size * 0.43, 0, Math.PI * 2);
   context.fill();
-  const holeRadius = appearance === 'ring' ? size * 0.2 : size * 0.09;
+  const holeRadius = size * 0.09;
   context.save();
   if (background === 'transparent') {
     context.globalCompositeOperation = 'destination-out';

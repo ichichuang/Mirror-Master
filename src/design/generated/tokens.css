@@ -6,6 +6,8 @@
   --color-orange-500: #E77B35;
   --color-orange-600: #D96920;
   --color-orange-700: #B84E0A;
+  --color-brand-on-primary: #f0ffcf;
+  --color-brand-button-primary-foreground: #cef1f5;
   --color-neutral-0: #FFFFFF;
   --color-neutral-50: #F7F8F5;
   --color-neutral-100: #EEF2EF;
@@ -39,6 +41,7 @@
   --color-action-primary-hover: #D96920;
   --color-action-primary-soft: #FFF4EC;
   --color-action-primary-text: #B84E0A;
+  --color-action-primary-foreground: #cef1f5;
   --color-background-page: #F7F8F5;
   --color-background-panel: #FFFFFF;
   --color-background-subtle: #EEF2EF;
@@ -53,7 +56,7 @@
   --color-focus-ring: #B84E0A;
   --button-primary-background: #E77B35;
   --button-primary-background-hover: #D96920;
-  --button-primary-foreground: #17201D;
+  --button-primary-foreground: #cef1f5;
   --sheet-background: #FFFFFF;
   --toolbar-background: #FFFFFF;
   --canvas-background: #E7E3DA;

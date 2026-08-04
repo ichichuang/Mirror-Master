@@ -9,7 +9,7 @@ import {
   updatePngExportConfiguration,
 } from '../src/features/export-completion/pngExportConfiguration';
 
-test('five presets map to the approved independent PNG configuration', () => {
+test('four presets map to the approved independent PNG configuration', () => {
   assert.deepEqual(configurationForPngExportPreset('pure'), {
     background: 'transparent',
     appearance: 'bead',
@@ -50,16 +50,6 @@ test('five presets map to the approved independent PNG configuration', () => {
     includeMaterialCounts: false,
     includeColorLegend: false,
   });
-  assert.deepEqual(configurationForPngExportPreset('ring'), {
-    background: 'white',
-    appearance: 'ring',
-    includeGrid: false,
-    includeCoordinates: false,
-    includeCellCodes: false,
-    includeStatistics: false,
-    includeMaterialCounts: false,
-    includeColorLegend: false,
-  });
 });
 
 test('a changed preset becomes custom and matching the preset again restores its name', () => {
@@ -73,20 +63,21 @@ test('a changed preset becomes custom and matching the preset again restores its
   );
 });
 
-test('every preview mode resolves to an exportable PNG preset', () => {
-  for (const mode of ['pure', 'annotated', 'numbered', 'rounded', 'ring'] as const) {
+test('every preview mode resolves to an exportable PNG configuration', () => {
+  for (const mode of ['pure', 'annotated', 'numbered', 'rounded'] as const) {
     assert.deepEqual(configurationForPreviewMode(mode), configurationForPngExportPreset(mode));
   }
+  // 屏幕专属的“圆环豆粒”预览样式不是导出模板，进入导出时回退到“纯图案”。
+  assert.deepEqual(configurationForPreviewMode('ring'), configurationForPngExportPreset('pure'));
 });
 
 test('configuration descriptions name the selected visual and optional content', () => {
   assert.equal(
     describePngExportConfiguration({
-      ...configurationForPngExportPreset('ring'),
-      background: 'transparent',
+      ...configurationForPngExportPreset('pure'),
       includeCoordinates: true,
       includeStatistics: true,
     }),
-    '透明背景 · 圆环豆粒 · 行列坐标 · 图纸统计',
+    '透明背景 · 标准拼豆 · 行列坐标 · 图纸统计',
   );
 });
