@@ -16,6 +16,13 @@ export function renderStartWorkspace(): string {
 
       <div class="upload-secondary-actions">
         <span>或</span>
+        <button class="secondary-upload" type="button" data-xhs-import-entry>
+          <i class="ph ph-link" aria-hidden="true"></i>
+          <span>
+            <strong>从小红书提取图片</strong>
+            <small>请先在小红书分享并复制文章链接</small>
+          </span>
+        </button>
         <label class="secondary-upload" for="project-file-input" data-open-project>
           <i class="ph ph-brackets-curly" aria-hidden="true"></i>
           <span>
@@ -44,7 +51,7 @@ export function renderStartWorkspace(): string {
 
       <p class="privacy-note">
         <i class="ph ph-shield-check" aria-hidden="true"></i>
-        图片只用于生成当前图纸，不会发送给第三方图片服务。
+        本地图片只在本服务处理；链接提取会访问小红书公开图片，链接和图片不会持久化。
       </p>
       <p class="file-status" data-file-status role="status"></p>
       <p

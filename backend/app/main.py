@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Body, FastAPI, File, Form, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,10 +27,15 @@ from app.generated_palettes import (
     PALETTES,
     PALETTE_SOURCE_VERSION,
 )
-from app.models import PatternExportRequest
+from app.models import (
+    PatternExportRequest,
+    XhsDownloadRequest,
+    XhsExtractionRequest,
+)
 from app.pattern import create_pattern_project
 from app.pattern_export import create_pattern_export
 from app.service import create_detection_contract, create_mirror_png
+from app import xhs_import
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} Backend",
@@ -134,6 +141,81 @@ async def palettes() -> dict[str, object]:
         "palettes": PALETTES,
         "colors": PALETTE_COLORS,
     }
+
+
+@app.post("/api/xhs/extractions")
+async def create_xhs_extraction(
+    request: Annotated[XhsExtractionRequest, Body()],
+) -> JSONResponse:
+    extraction_id, image_urls = await xhs_import.create_extraction(
+        request.share_text
+    )
+    return JSONResponse(
+        {
+            "extractionId": extraction_id,
+            "images": [
+                {
+                    "id": image_id,
+                    "previewUrl": (
+                        f"/api/xhs/extractions/{extraction_id}/images/{image_id}"
+                    ),
+                }
+                for image_id in range(len(image_urls))
+            ],
+        }
+    )
+
+
+@app.get("/api/xhs/extractions/{extraction_id}/images/{image_id}")
+async def get_xhs_extraction_image(
+    extraction_id: str,
+    image_id: int,
+    download: Annotated[bool, Query()] = False,
+) -> Response:
+    image_url = xhs_import.extraction_image_url(extraction_id, image_id)
+    image = await xhs_import.fetch_image_bytes(image_url)
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = (
+            f'attachment; filename="xiaohongshu-{image_id + 1:02d}.{image.extension}"'
+        )
+    return Response(image.content, media_type=image.mime_type, headers=headers)
+
+
+@app.post("/api/xhs/extractions/{extraction_id}/download")
+async def download_xhs_extraction_images(
+    extraction_id: str,
+    request: Annotated[XhsDownloadRequest, Body()],
+) -> Response:
+    images = await xhs_import.fetch_download_images(
+        extraction_id,
+        request.image_ids,
+    )
+    if len(images) == 1:
+        image = images[0]
+        return Response(
+            image.content,
+            media_type=image.mime_type,
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="xiaohongshu-01.{image.extension}"'
+                )
+            },
+        )
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for index, image in enumerate(images, start=1):
+            archive.writestr(
+                f"xiaohongshu-{index:02d}.{image.extension}",
+                image.content,
+            )
+    return Response(
+        output.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="xiaohongshu-images.zip"'
+        },
+    )
 
 
 @app.post("/api/pattern/generate")

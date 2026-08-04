@@ -79,4 +79,7 @@ def test_no_unrequested_api_routes_exist(client: TestClient) -> None:
         "/api/image/remove-background/apply",
         "/api/grid/detect",
         "/api/grid/mirror",
+        "/api/xhs/extractions",
+        "/api/xhs/extractions/{extraction_id}/images/{image_id}",
+        "/api/xhs/extractions/{extraction_id}/download",
     }

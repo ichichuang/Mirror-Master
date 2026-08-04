@@ -5,6 +5,7 @@ import { PNG_EXPORT_PRESETS } from './features/export-completion/pngExportConfig
 import { FIRST_USE_HINT_MESSAGE } from './features/pattern-editor/firstUseHint';
 import { renderPreviewWorkspace } from './features/preview-workspace/previewWorkspace';
 import { renderStartWorkspace } from './features/start-workspace/startWorkspace';
+import { renderXhsImportWorkspace } from './features/xhs-import/xhsImportWorkspace';
 
 export function renderApp(): string {
   return `
@@ -52,6 +53,7 @@ export function renderApp(): string {
         />
 
         ${renderStartWorkspace()}
+        ${renderXhsImportWorkspace()}
         ${renderPreviewWorkspace()}
         ${renderPatternWorkspace()}
         ${renderChartWorkspace()}

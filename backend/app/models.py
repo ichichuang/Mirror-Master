@@ -3,7 +3,15 @@ from __future__ import annotations
 import math
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from app import limits
 from app.generated_palettes import PALETTE_COLORS, PALETTE_SOURCE_VERSION
@@ -82,6 +90,35 @@ class GridGeometry(BaseModel):
         ):
             raise ValueError("grid bounds must be complete")
         return self
+
+
+class XhsExtractionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    share_text: Annotated[str, Field(alias="shareText", min_length=1, max_length=4096)]
+
+
+class XhsExtractionImage(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: Annotated[StrictInt, Field(ge=0)]
+    preview_url: str = Field(alias="previewUrl")
+
+
+class XhsDownloadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    image_ids: Annotated[
+        list[Annotated[StrictInt, Field(ge=0)]],
+        Field(alias="imageIds", min_length=1, max_length=20),
+    ]
+
+    @field_validator("image_ids")
+    @classmethod
+    def validate_unique_image_ids(cls, value: list[int]) -> list[int]:
+        if len(set(value)) != len(value):
+            raise ValueError("image ids must be unique")
+        return value
 
 
 class GridContract(GridGeometry):

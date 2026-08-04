@@ -145,6 +145,52 @@ backend/.venv/bin/python scripts/fetch-background-removal-model.py
 校正，在规范化平面重排完整单元，再只把四边形 mask 内逆投影回原图；四边形外逐像素
 不变。成功响应直接返回内存中的 `image/png`。
 
+## 小红书公开图文图片提取
+
+该能力复用公开分享页 HTML 中的图片元数据，不接收登录 Cookie，不调用第三方解析服务，也不执行验证码或风控绕过。
+
+### `POST /api/xhs/extractions`
+
+请求为 JSON：
+
+```json
+{
+  "shareText": "小红书分享文字或链接"
+}
+```
+
+成功响应只返回临时 UUID 和同源预览地址，不返回小红书 CDN URL：
+
+```json
+{
+  "extractionId": "123e4567-e89b-12d3-a456-426614174000",
+  "images": [
+    {
+      "id": 0,
+      "previewUrl": "/api/xhs/extractions/123e4567-e89b-12d3-a456-426614174000/images/0"
+    }
+  ]
+}
+```
+
+### `GET /api/xhs/extractions/{extraction_id}/images/{image_id}`
+
+按需代理一张已验证的 JPEG、PNG 或 WebP。`download=true` 时增加附件文件名；默认用于同源预览和“作为拼豆图纸”。
+
+### `POST /api/xhs/extractions/{extraction_id}/download`
+
+请求为 JSON：
+
+```json
+{
+  "imageIds": [0, 2]
+}
+```
+
+单张直接返回图片，多张返回 `xiaohongshu-images.zip`。一次最多 20 张，单图最多 20 MiB，总下载最多 100 MiB。
+
+提取会话只保存在当前 Uvicorn 进程内存中，10 分钟后过期，最多 128 个。当前实现要求单 worker；多 worker 部署必须提供粘滞会话或共享短期存储。服务重启后用户可重新识别链接。只支持无需登录的公开图文笔记；视频、实况视频、私密、删除、过期或受风控限制的页面会返回结构化错误，并提示改用本地上传。
+
 ## 错误与隐私
 
 错误为中文结构化 JSON，不回显文件名、哈希、边界或请求内容：
@@ -158,7 +204,7 @@ backend/.venv/bin/python scripts/fetch-background-removal-model.py
 }
 ```
 
-图片上传到用户控制的 Mirror Master 服务，仅在内存中处理，不写入持久目录，也不发送给第三方。请求结束会关闭 `UploadFile`；服务不记录文件名、请求体、图片哈希、图片字节或边界数组；所有响应设置 `Cache-Control: no-store`。
+本地图片上传到用户控制的 Mirror Master 服务，仅在内存中处理，不写入持久目录，也不发送给第三方图片服务。使用小红书链接提取时，服务会访问对应的公开分享页和 `xhscdn.com` 图片；分享文本不持久化，上游 URL 只保留在 10 分钟进程内会话中，图片字节不缓存。请求结束会关闭 `UploadFile`；服务不记录文件名、请求体、完整分享链接、图片哈希、图片字节或边界数组；所有响应设置 `Cache-Control: no-store`。
 
 ## 验证
 

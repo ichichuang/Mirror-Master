@@ -36,7 +36,10 @@ test('start workspace exposes one dominant image entry and demotes every other t
   assert.match(start, /选择图片/u);
   assert.match(start, /data-open-project/u);
   assert.match(start, /打开已保存项目/u);
-  assert.match(start, /图片只用于生成当前图纸，不会发送给第三方图片服务。/u);
+  assert.match(
+    start,
+    /本地图片只在本服务处理；链接提取会访问小红书公开图片，链接和图片不会持久化。/u,
+  );
   assert.doesNotMatch(start, /data-customer-task/u);
   assert.doesNotMatch(start, /<vaadin-radio-group\b/u);
   assert.doesNotMatch(start, /value="photo"/u);
@@ -51,6 +54,46 @@ test('start workspace exposes one dominant image entry and demotes every other t
   assert.match(moreWays, /data-mirror-existing-chart/u);
   assert.match(moreWays, /镜像已有图纸/u);
   assert.match(moreWays, /只翻转拼豆格，保留坐标和图例。/u);
+});
+
+test('xiaohongshu extraction is a secondary entry with its own selection workspace', () => {
+  const start = sectionMarkup('data-start-workspace', 'data-xhs-import-workspace');
+  assert.match(start, /data-xhs-import-entry/u);
+  assert.match(start, /从小红书提取图片/u);
+  assert.match(start, /请先在小红书分享并复制文章链接/u);
+  assert.ok(start.indexOf('data-new-pattern-entry') < start.indexOf('data-xhs-import-entry'));
+  assert.ok(start.indexOf('data-xhs-import-entry') < start.indexOf('data-open-project'));
+  assert.match(
+    start,
+    /本地图片只在本服务处理；链接提取会访问小红书公开图片，链接和图片不会持久化。/u,
+  );
+
+  const workspace = sectionMarkup('data-xhs-import-workspace', 'data-preview-workspace');
+  for (const hook of [
+    'data-xhs-import-back',
+    'data-xhs-share-text',
+    'data-xhs-read-clipboard',
+    'data-xhs-extract-submit',
+    'data-xhs-image-grid',
+    'data-xhs-toggle-all',
+    'data-xhs-save-selected',
+    'data-xhs-save-all',
+    'data-xhs-use-as-pattern',
+  ]) {
+    assert.match(workspace, new RegExp(hook, 'u'));
+  }
+  assert.match(workspace, /只能选择 1 张图片/u);
+});
+
+test('xiaohongshu image rows grow with content before the sticky action bar', () => {
+  const workspaceRule = pageCss.match(/\.xhs-import-workspace\s*\{([^}]*)\}/u)?.[1] ?? '';
+  assert.match(workspaceRule, /grid-template-rows:\s*auto auto auto auto auto;/u);
+  assert.doesNotMatch(workspaceRule, /minmax\(0,\s*1fr\)/u);
+  assert.match(pageCss, /\.xhs-action-bar\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0;/u);
+  assert.match(
+    pageCss,
+    /\.xhs-import-workspace:has\(\.xhs-action-bar:not\(\[hidden\]\)\) \.xhs-image-grid\s*\{[^}]*padding-bottom:\s*calc\(var\(--space-7\) \+ var\(--space-4\)\);/u,
+  );
 });
 
 test('preview workspace keeps one collapsed professional surface for every expert control', () => {

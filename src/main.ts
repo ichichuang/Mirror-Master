@@ -270,8 +270,9 @@ import {
   type WorkspacePanelsController,
   type WorkspacePanelsView,
 } from './features/workspace-panels/workspacePanels';
+import { createXhsImportController } from './features/xhs-import/controller';
 
-type AppStage = 'start' | 'preview' | 'editor' | 'chart';
+type AppStage = 'start' | 'xhs' | 'preview' | 'editor' | 'chart';
 type InspectorPanel = 'tools' | 'palette' | 'materials' | 'settings';
 
 interface CropPercent {
@@ -306,6 +307,7 @@ app.innerHTML = renderApp();
 
 const shell = required(app, '[data-app-shell]', HTMLElement);
 const startWorkspace = required(app, '[data-start-workspace]', HTMLElement);
+const xhsImportWorkspace = required(app, '[data-xhs-import-workspace]', HTMLElement);
 const previewWorkspace = required(app, '[data-preview-workspace]', HTMLElement);
 const patternWorkspace = required(app, '[data-pattern-workspace]', HTMLElement);
 const chartWorkspace = required(app, '[data-chart-workspace]', HTMLElement);
@@ -329,6 +331,16 @@ const confirmationDialog = requiredVaadinElement(
   '[data-confirmation-dialog]',
   'vaadin-confirm-dialog',
 );
+const xhsImportController = createXhsImportController({
+  root: xhsImportWorkspace,
+  onBack() {
+    showStage('start');
+  },
+  async onUseImage(file) {
+    showStage('start');
+    await acceptFiles([file]);
+  },
+});
 const workspaceToolRail = required(patternWorkspace, '[data-tool-rail]', HTMLElement);
 const workspaceInspector = required(patternWorkspace, '[data-workspace-inspector]', HTMLElement);
 const workspaceSheet = required(patternWorkspace, '[data-workspace-sheet]', HTMLElement);
@@ -1791,6 +1803,11 @@ function setupStart(): void {
   required(app, '[data-mirror-existing-chart]', HTMLButtonElement).addEventListener('click', () => {
     mirrorChartIntent = true;
     fileInput.click();
+  });
+  required(app, '[data-xhs-import-entry]', HTMLButtonElement).addEventListener('click', () => {
+    xhsImportController.reset();
+    showStage('xhs');
+    xhsImportController.open();
   });
 
   fileInput.addEventListener('change', () => {
@@ -4921,11 +4938,13 @@ function showStage(nextStage: AppStage): void {
     const currentStage =
       stage === 'start'
         ? startWorkspace
-        : stage === 'preview'
-          ? previewWorkspace
-          : stage === 'editor'
-            ? patternWorkspace
-            : chartWorkspace;
+        : stage === 'xhs'
+          ? xhsImportWorkspace
+          : stage === 'preview'
+            ? previewWorkspace
+            : stage === 'editor'
+              ? patternWorkspace
+              : chartWorkspace;
     moveFocusBeforeHiding([currentStage], mainWorkspace);
   }
   if (stage === 'preview' && nextStage !== 'preview') {
@@ -4945,19 +4964,27 @@ function showStage(nextStage: AppStage): void {
   shell.dataset.stage = nextStage;
   syncImportedProjectNotice();
   startWorkspace.hidden = nextStage !== 'start';
+  xhsImportWorkspace.hidden = nextStage !== 'xhs';
   previewWorkspace.hidden = nextStage !== 'preview';
   patternWorkspace.hidden = nextStage !== 'editor';
   chartWorkspace.hidden = nextStage !== 'chart';
-  headerReplace.hidden = nextStage === 'start';
+  headerReplace.hidden = nextStage === 'start' || nextStage === 'xhs';
   headerContext.textContent =
     nextStage === 'start'
       ? brandConfig.shortName
-      : nextStage === 'preview'
-        ? '预览图纸'
-        : nextStage === 'editor'
-          ? '编辑拼豆图纸'
-          : '镜像已有图纸';
-  sessionStatus.textContent = nextStage === 'start' ? '仅保存在本次会话' : '本次会话';
+      : nextStage === 'xhs'
+        ? '小红书图片'
+        : nextStage === 'preview'
+          ? '预览图纸'
+          : nextStage === 'editor'
+            ? '编辑拼豆图纸'
+            : '镜像已有图纸';
+  sessionStatus.textContent =
+    nextStage === 'start'
+      ? '仅保存在本次会话'
+      : nextStage === 'xhs'
+        ? '提取结果临时保存'
+        : '本次会话';
   mainWorkspace.focus({ preventScroll: true });
 }
 
@@ -5494,6 +5521,7 @@ function cleanup(): void {
   for (const controller of exportBackgroundRadioControllers) controller.destroy();
   for (const controller of exportAppearanceRadioControllers) controller.destroy();
   for (const controller of editorSeriesSelectControllers) controller.destroy();
+  xhsImportController.destroy();
   confirmationDialogController?.destroy();
   responsiveWorkspaceMount.destroy();
   for (const controller of workspacePanelControllers) controller.destroy();
