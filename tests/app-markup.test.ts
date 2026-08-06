@@ -528,7 +528,7 @@ test('RadioGroups use one checked child default without a static group value', (
   const groups = [
     ...markup.matchAll(/<vaadin-radio-group\b([^>]*)>([\s\S]*?)<\/vaadin-radio-group>/gu),
   ];
-  assert.equal(groups.length, 16);
+  assert.equal(groups.length, 15);
   for (const [, attributes = '', children = ''] of groups) {
     assert.doesNotMatch(attributes, /\bvalue=/u);
     assert.equal(countMatches(children, /<vaadin-radio-button\b[^>]*\bchecked\b/gu), 1);
@@ -816,6 +816,30 @@ test('preview image actions stay touch-safe while responsive labels and status s
     pageCss,
     /@media \(min-width:\s*768px\)[\s\S]*\[data-action-label-short\],[\s\S]*\[data-background-removal-label-short\]\s*\{[^}]*display:\s*none;/u,
   );
+});
+
+test('background removal uses an independent fullscreen image workspace', () => {
+  assert.match(markup, /data-mask-editor-title>去背景选区</u);
+  assert.match(markup, /data-mask-tool="remove"[^>]*aria-pressed="true"/u);
+  assert.match(markup, /data-mask-tool="keep"[^>]*aria-pressed="false"/u);
+  assert.match(markup, /data-mask-zoom-out/u);
+  assert.match(markup, /data-mask-zoom-value/u);
+  assert.match(markup, /data-mask-zoom-in/u);
+  assert.match(markup, /data-mask-zoom-fit/u);
+  assert.match(markup, /data-mask-zoom-actual/u);
+  assert.match(
+    pageCss,
+    /\.preview-mask-edit-view\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*z-index:\s*20;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.preview-workspace\[data-mask-editing='true'\] \.preview-canvas-column,[\s\S]*\.preview-workspace\[data-mask-editing='true'\] \.preview-canvas-slot\s*\{[^}]*overflow:\s*visible;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.mask-edit-tool-button\s*\{[^}]*min-width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/u,
+  );
+  assert.match(mainSource, /addEventListener\(\s*'wheel',[\s\S]*\{\s*passive:\s*false\s*\}/u);
 });
 
 test('mobile preview keeps the comparison, canvas, and settings choices visually compact', () => {

@@ -169,79 +169,111 @@ export function renderPreviewWorkspace(): string {
                 </div>
               </div>
               <div class="preview-mask-edit-view" data-preview-mask-edit-view hidden>
-                <div class="mask-edit-frame" data-mask-edit-frame>
-                  <canvas
-                    class="mask-edit-canvas"
-                    data-mask-edit-canvas
-                    role="img"
-                    aria-label="去背景选区：橙色区域将被去除，可涂抹调整"
-                  ></canvas>
-                  <p
-                    class="mask-edit-status"
-                    data-mask-edit-status
-                    role="status"
-                    aria-live="polite"
-                  ></p>
-                </div>
-                <div class="mask-edit-controls">
-                  <vaadin-radio-group
-                    class="mask-brush-mode"
-                    aria-label="选择涂抹方式"
-                    data-mask-brush-mode
-                  >
-                    <vaadin-radio-button value="remove" checked>
-                      <label slot="label">涂抹去除</label>
-                    </vaadin-radio-button>
-                    <vaadin-radio-button value="keep">
-                      <label slot="label">涂抹恢复</label>
-                    </vaadin-radio-button>
-                  </vaadin-radio-group>
-                  <label class="mask-brush-size-field">
-                    <span>笔刷大小</span>
-                    <input
-                      type="range"
-                      min="1"
-                      max="100"
-                      step="1"
-                      value="20"
-                      aria-label="笔刷大小"
-                      data-mask-brush-size
-                    />
-                  </label>
-                  <div
-                    class="mask-highlight-control"
-                    role="group"
-                    aria-label="高亮颜色"
-                    data-mask-highlight-control
-                  >
-                    <span class="mask-highlight-label">高亮</span>
-                    ${renderHighlightSwatches()}
-                    <label class="mask-highlight-custom" aria-label="自定义高亮颜色">
-                      <input
-                        type="color"
-                        value="#E77B35"
-                        aria-label="自定义高亮颜色"
-                        data-mask-highlight-custom
-                      />
-                    </label>
-                  </div>
-                  <button
-                    class="icon-button"
-                    type="button"
-                    data-mask-edit-undo
-                    disabled
-                    aria-label="撤销涂抹"
-                  >
-                    <i class="ph ph-arrow-u-up-left" aria-hidden="true"></i>
+                <header class="mask-edit-header">
+                  <button class="secondary-button" type="button" data-mask-edit-cancel>
+                    <i class="ph ph-arrow-left" aria-hidden="true"></i>
+                    取消
                   </button>
-                  <span class="mask-edit-actions">
-                    <button class="secondary-button" type="button" data-mask-edit-cancel>
-                      取消
+                  <div class="mask-edit-heading">
+                    <strong data-mask-editor-title>去背景选区</strong>
+                    <small>橙色区域将被去除</small>
+                  </div>
+                  <div class="mask-edit-header-actions">
+                    <button
+                      class="icon-button"
+                      type="button"
+                      data-mask-edit-undo
+                      disabled
+                      aria-label="撤销涂抹"
+                    >
+                      <i class="ph ph-arrow-u-up-left" aria-hidden="true"></i>
                     </button>
                     <button class="primary-button" type="button" data-mask-edit-apply>
                       完成去背景
                     </button>
-                  </span>
+                  </div>
+                </header>
+                <div class="mask-edit-stage">
+                  <aside class="mask-edit-tools" aria-label="去背景工具">
+                    <div class="mask-edit-tool-group" role="group" aria-label="笔刷模式">
+                      <button
+                        class="mask-edit-tool-button"
+                        type="button"
+                        data-mask-tool="remove"
+                        aria-pressed="true"
+                      >
+                        <i class="ph ph-eraser" aria-hidden="true"></i>
+                        <span>涂抹去除</span>
+                      </button>
+                      <button
+                        class="mask-edit-tool-button"
+                        type="button"
+                        data-mask-tool="keep"
+                        aria-pressed="false"
+                      >
+                        <i class="ph ph-paint-brush" aria-hidden="true"></i>
+                        <span>涂抹恢复</span>
+                      </button>
+                    </div>
+                    <label class="mask-brush-size-field">
+                      <span>笔刷大小</span>
+                      <input
+                        type="range"
+                        min="1"
+                        max="100"
+                        step="1"
+                        value="20"
+                        aria-label="笔刷大小"
+                        data-mask-brush-size
+                      />
+                    </label>
+                    <div
+                      class="mask-highlight-control"
+                      role="group"
+                      aria-label="高亮颜色"
+                      data-mask-highlight-control
+                    >
+                      <span class="mask-highlight-label">高亮</span>
+                      ${renderHighlightSwatches()}
+                      <label class="mask-highlight-custom" aria-label="自定义高亮颜色">
+                        <input
+                          type="color"
+                          value="#E77B35"
+                          aria-label="自定义高亮颜色"
+                          data-mask-highlight-custom
+                        />
+                      </label>
+                    </div>
+                  </aside>
+                  <div class="mask-edit-frame" data-mask-edit-frame>
+                    <canvas
+                      class="mask-edit-canvas"
+                      data-mask-edit-canvas
+                      role="img"
+                      tabindex="0"
+                      aria-label="去背景选区画布。使用笔刷调整选区，滚轮缩放，按住空格拖动画布。"
+                    ></canvas>
+                    <p
+                      class="mask-edit-status"
+                      data-mask-edit-status
+                      role="status"
+                      aria-live="polite"
+                    ></p>
+                  </div>
+                  <div class="mask-edit-zoom" role="group" aria-label="画布缩放">
+                    <button type="button" data-mask-zoom-out aria-label="缩小画布">
+                      <i class="ph ph-minus" aria-hidden="true"></i>
+                    </button>
+                    <output data-mask-zoom-value aria-live="polite">100%</output>
+                    <button type="button" data-mask-zoom-in aria-label="放大画布">
+                      <i class="ph ph-plus" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" data-mask-zoom-fit>
+                      <i class="ph ph-arrows-out" aria-hidden="true"></i>
+                      适应窗口
+                    </button>
+                    <button type="button" data-mask-zoom-actual>100%</button>
+                  </div>
                 </div>
               </div>
             </div>

@@ -49,12 +49,29 @@ import {
   type MaskEditSession,
   type MaskStroke,
 } from './features/mask-editor/maskEditSession';
+import { brushSizeToImageRadius } from './features/mask-editor/maskEditGeometry';
 import {
-  brushSizeToImageRadius,
-  clientPointToImagePoint,
-  fitMaskFrame,
-  imageRadiusToScreen,
-} from './features/mask-editor/maskEditGeometry';
+  actualSizeMaskViewport,
+  createFittedMaskViewport,
+  maskViewportImageRect,
+  maskViewportPointToImage,
+  maskViewportScaleLimits,
+  panMaskViewport,
+  resizeMaskViewport,
+  zoomMaskViewportAt,
+  type MaskViewport,
+} from './features/mask-editor/maskViewport';
+import {
+  createMaskGestureState,
+  reduceMaskGesture,
+  type MaskGesturePointer,
+  type MaskGestureState,
+  type MaskGestureTransition,
+} from './features/mask-editor/maskEditGesture';
+import {
+  createMaskRevisionGuard,
+  type MaskRevisionGuard,
+} from './features/mask-editor/maskRevision';
 import {
   buildHighlightOverlay,
   highlightColorFromHex,
@@ -456,7 +473,6 @@ let previewCompareRadioController: VaadinRadioGroupController;
 let paletteScopeRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let exportPresetRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let exportBackgroundRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
-let maskBrushModeController: VaadinRadioGroupController;
 let exportAppearanceRadioControllers: readonly VaadinRadioGroupController[] = Object.freeze([]);
 let responsiveWorkspaceMount: ResponsiveWorkspaceMount;
 let gridController: GridEditorController;
@@ -740,12 +756,12 @@ interface MaskEditRuntime {
   readonly session: MaskEditSession<HTMLCanvasElement>;
   readonly maskCanvas: HTMLCanvasElement;
   readonly overlayCanvas: HTMLCanvasElement;
+  readonly revisionGuard: MaskRevisionGuard;
   highlightColor: HighlightColor;
-  /** 图片在显示画布内的实际绘制区域（CSS 像素，保持宽高比居中）。 */
-  drawRect: { dx: number; dy: number; width: number; height: number };
+  viewport: MaskViewport | null;
+  gesture: MaskGestureState;
   refineController: AbortController | null;
   applyController: AbortController | null;
-  paintingPointerId: number | null;
   cursorClientPoint: { readonly x: number; readonly y: number } | null;
   destroyed: boolean;
 }
@@ -755,6 +771,7 @@ let maskEditSequence = 0;
 let maskFetchController: AbortController | null = null;
 let maskEditRedrawScheduled = false;
 let maskHighlightColor: HighlightColor = { ...MASK_HIGHLIGHT_COLOR };
+let maskEditFocusReturnTarget: HTMLElement | null = null;
 let lastAppliedMask: {
   readonly sourceSessionId: number;
   readonly canvas: HTMLCanvasElement;
@@ -768,6 +785,9 @@ function interactiveBackgroundRemovalAvailable(): boolean {
 }
 
 async function startInteractiveBackgroundRemoval(session: SourceImageSession): Promise<void> {
+  if (document.activeElement instanceof HTMLElement) {
+    maskEditFocusReturnTarget = document.activeElement;
+  }
   destroyMaskEdit();
   maskFetchController?.abort();
   const controller = new AbortController();
@@ -825,11 +845,17 @@ async function startInteractiveBackgroundRemoval(session: SourceImageSession): P
     if (maskFetchController === controller) {
       maskFetchController = null;
     }
+    if (maskEdit === null) {
+      maskEditFocusReturnTarget = null;
+    }
     syncBackgroundRemovalAction();
   }
 }
 
 function enterMaskEdit(session: SourceImageSession, maskSource: CanvasImageSource): void {
+  if (maskEditFocusReturnTarget === null && document.activeElement instanceof HTMLElement) {
+    maskEditFocusReturnTarget = document.activeElement;
+  }
   destroyMaskEdit();
   const { width, height } = session.original;
   const maskCanvas = document.createElement('canvas');
@@ -851,20 +877,30 @@ function enterMaskEdit(session: SourceImageSession, maskSource: CanvasImageSourc
     session: createMaskEditSession({ maxUndo: MASK_EDIT_MAX_UNDO }),
     maskCanvas,
     overlayCanvas,
+    revisionGuard: createMaskRevisionGuard(),
     highlightColor: { ...maskHighlightColor },
-    drawRect: { dx: 0, dy: 0, width: 1, height: 1 },
+    viewport: null,
+    gesture: createMaskGestureState(),
     refineController: null,
     applyController: null,
-    paintingPointerId: null,
     cursorClientPoint: null,
     destroyed: false,
   };
   rebuildMaskOverlay(maskCanvas, overlayCanvas, maskEdit.highlightColor);
   previewWorkspace.dataset.maskEditing = 'true';
   previewView.setMaskEditActive(true);
-  drawMaskEditCanvas();
+  syncMaskGestureCanvas(
+    required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement),
+    maskEdit.gesture,
+  );
+  scheduleMaskEditRedraw();
   syncMaskEditControls();
   syncMaskHighlightControl();
+  requestAnimationFrame(() => {
+    previewWorkspace
+      .querySelector<HTMLButtonElement>('[data-mask-tool="remove"][aria-pressed="true"]')
+      ?.focus();
+  });
 }
 
 function destroyMaskEdit(): void {
@@ -884,6 +920,9 @@ function destroyMaskEdit(): void {
   setMaskEditStatus('');
   syncMaskEditControls();
   syncBackgroundRemovalAction();
+  const focusTarget = maskEditFocusReturnTarget;
+  maskEditFocusReturnTarget = null;
+  requestAnimationFrame(() => focusTarget?.focus());
 }
 
 function cancelMaskEdit(): void {
@@ -988,40 +1027,25 @@ function currentBrushRadiusPx(edit: MaskEditRuntime): number {
   );
 }
 
-function maskEditImagePoint(edit: MaskEditRuntime, event: PointerEvent): { x: number; y: number } {
-  const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
-  const rect = canvas.getBoundingClientRect();
-  const draw = edit.drawRect;
-  return clientPointToImagePoint(
-    event.clientX,
-    event.clientY,
-    {
-      left: rect.left + draw.dx,
-      top: rect.top + draw.dy,
-      width: draw.width,
-      height: draw.height,
-    },
-    edit.imageWidth,
-    edit.imageHeight,
-  );
-}
-
 let maskEditLastPoint: { x: number; y: number } | null = null;
 
 function handleMaskEditPointerDown(event: PointerEvent): void {
   const edit = maskEdit;
-  if (!edit || edit.destroyed || edit.paintingPointerId !== null) return;
+  if (!edit || edit.destroyed) return;
   const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
   event.preventDefault();
-  canvas.setPointerCapture(event.pointerId);
-  const point = maskEditImagePoint(edit, event);
-  const radius = currentBrushRadiusPx(edit);
-  edit.session.pushUndo(snapshotMaskCanvas(edit.maskCanvas));
-  edit.session.beginStroke(point.x, point.y, radius);
-  paintMaskSegment(edit, point, point, edit.session.brushMode(), radius);
-  edit.paintingPointerId = event.pointerId;
+  canvas.focus({ preventScroll: true });
+  const transition = reduceMaskGesture(edit.gesture, {
+    type: 'pointerDown',
+    pointer: maskGesturePointer(edit, canvas, event),
+  });
+  edit.gesture = transition.state;
+  applyMaskGestureTransition(edit, transition);
+  if (edit.gesture.pointers.has(event.pointerId)) {
+    canvas.setPointerCapture(event.pointerId);
+  }
   edit.cursorClientPoint = { x: event.clientX, y: event.clientY };
-  maskEditLastPoint = point;
+  syncMaskGestureCanvas(canvas, edit.gesture);
   scheduleMaskEditRedraw();
 }
 
@@ -1029,35 +1053,147 @@ function handleMaskEditPointerMove(event: PointerEvent): void {
   const edit = maskEdit;
   if (!edit || edit.destroyed) return;
   edit.cursorClientPoint = { x: event.clientX, y: event.clientY };
-  if (edit.paintingPointerId !== event.pointerId) {
-    scheduleMaskEditRedraw();
-    return;
+  const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
+  const pointer = maskGesturePointer(edit, canvas, event);
+  const transition = reduceMaskGesture(edit.gesture, {
+    type: 'pointerMove',
+    pointer,
+  });
+  edit.gesture = transition.state;
+  if (transition.intent.type !== 'none') {
+    event.preventDefault();
   }
-  const point = maskEditImagePoint(edit, event);
-  const lastPoint = maskEditLastPoint;
-  edit.session.extendStroke(point.x, point.y);
-  if (lastPoint && (lastPoint.x !== point.x || lastPoint.y !== point.y)) {
-    paintMaskSegment(edit, lastPoint, point, edit.session.brushMode(), currentBrushRadiusPx(edit));
+  applyMaskGestureTransition(edit, transition);
+  if (edit.gesture.mode === 'paint' && !pointer.insideImage) {
+    maskEditLastPoint = null;
   }
-  maskEditLastPoint = point;
+  syncMaskGestureCanvas(canvas, edit.gesture);
   scheduleMaskEditRedraw();
 }
 
 function handleMaskEditPointerEnd(event: PointerEvent): void {
   const edit = maskEdit;
-  if (!edit || edit.paintingPointerId !== event.pointerId) return;
-  edit.paintingPointerId = null;
-  maskEditLastPoint = null;
+  if (!edit || edit.destroyed) return;
   const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
+  const transition = reduceMaskGesture(edit.gesture, {
+    type: event.type === 'pointercancel' ? 'pointerCancel' : 'pointerUp',
+    pointerId: event.pointerId,
+  });
+  edit.gesture = transition.state;
+  applyMaskGestureTransition(edit, transition);
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
   }
-  const completed = edit.session.endStroke();
-  syncMaskEditControls();
+  syncMaskGestureCanvas(canvas, edit.gesture);
   scheduleMaskEditRedraw();
-  if (completed) {
-    scheduleMaskRefine();
+}
+
+function maskGesturePointer(
+  edit: MaskEditRuntime,
+  canvas: HTMLCanvasElement,
+  event: PointerEvent,
+): MaskGesturePointer {
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const pointerType: MaskGesturePointer['pointerType'] =
+    event.pointerType === 'touch' || event.pointerType === 'pen' ? event.pointerType : 'mouse';
+  return {
+    id: event.pointerId,
+    pointerType,
+    x,
+    y,
+    button: event.button,
+    insideImage:
+      edit.applyController === null &&
+      edit.viewport !== null &&
+      maskViewportPointToImage(edit.viewport, x, y) !== null,
+  };
+}
+
+function applyMaskGestureTransition(
+  edit: MaskEditRuntime,
+  transition: MaskGestureTransition,
+): void {
+  const intent = transition.intent;
+  if (intent.type === 'paintStart') {
+    const point = edit.viewport
+      ? maskViewportPointToImage(edit.viewport, intent.x, intent.y)
+      : null;
+    if (!point) return;
+    const radius = currentBrushRadiusPx(edit);
+    edit.revisionGuard.advance();
+    edit.session.pushUndo(snapshotMaskCanvas(edit.maskCanvas));
+    edit.session.beginStroke(point.x, point.y, radius);
+    paintMaskSegment(edit, point, point, edit.session.brushMode(), radius);
+    maskEditLastPoint = point;
+    return;
   }
+  if (intent.type === 'paintMove') {
+    const point = edit.viewport
+      ? maskViewportPointToImage(edit.viewport, intent.x, intent.y)
+      : null;
+    if (!point) return;
+    const lastPoint = maskEditLastPoint;
+    edit.session.extendStroke(point.x, point.y);
+    if (!lastPoint) {
+      paintMaskSegment(edit, point, point, edit.session.brushMode(), currentBrushRadiusPx(edit));
+    } else if (lastPoint.x !== point.x || lastPoint.y !== point.y) {
+      paintMaskSegment(
+        edit,
+        lastPoint,
+        point,
+        edit.session.brushMode(),
+        currentBrushRadiusPx(edit),
+      );
+    }
+    maskEditLastPoint = point;
+    return;
+  }
+  if (intent.type === 'paintEnd') {
+    maskEditLastPoint = null;
+    const completed = edit.session.endStroke();
+    if (completed) {
+      scheduleMaskRefine();
+    }
+    syncMaskEditControls();
+    return;
+  }
+  if (intent.type === 'paintCancel') {
+    cancelActiveMaskStroke(edit);
+    return;
+  }
+  if (intent.type === 'pan' && edit.viewport) {
+    edit.viewport = panMaskViewport(edit.viewport, intent.deltaX, intent.deltaY);
+    return;
+  }
+  if (intent.type === 'pinch' && edit.viewport) {
+    const panned = panMaskViewport(edit.viewport, intent.deltaX, intent.deltaY);
+    edit.viewport = zoomMaskViewportAt(
+      panned,
+      panned.scale * intent.scale,
+      intent.centerX,
+      intent.centerY,
+    );
+  }
+}
+
+function cancelActiveMaskStroke(edit: MaskEditRuntime): void {
+  edit.session.cancelStroke();
+  maskEditLastPoint = null;
+  const snapshot = edit.session.popUndo();
+  if (snapshot) {
+    const context = edit.maskCanvas.getContext('2d');
+    context?.clearRect(0, 0, edit.imageWidth, edit.imageHeight);
+    context?.drawImage(snapshot, 0, 0);
+    rebuildMaskOverlay(edit.maskCanvas, edit.overlayCanvas, edit.highlightColor);
+  }
+  syncMaskEditControls();
+}
+
+function syncMaskGestureCanvas(canvas: HTMLCanvasElement, gesture: MaskGestureState): void {
+  canvas.dataset.gesture = gesture.mode;
+  canvas.dataset.spacePan = String(gesture.spacePressed);
 }
 
 function paintMaskSegment(
@@ -1122,69 +1258,90 @@ function drawMaskEditCanvas(): void {
   const canvas = required(previewWorkspace, '[data-mask-edit-canvas]', HTMLCanvasElement);
   const context = canvas.getContext('2d');
   if (!context) return;
-  const cssWidth = Math.max(1, Math.floor(canvas.clientWidth));
-  const cssHeight = Math.max(1, Math.floor(canvas.clientHeight));
+  const cssWidth = Math.floor(canvas.clientWidth);
+  const cssHeight = Math.floor(canvas.clientHeight);
+  if (cssWidth <= 0 || cssHeight <= 0) return;
   const pixelRatio = Math.max(1, globalThis.devicePixelRatio || 1);
   const backingWidth = Math.max(1, Math.round(cssWidth * pixelRatio));
   const backingHeight = Math.max(1, Math.round(cssHeight * pixelRatio));
   if (canvas.width !== backingWidth) canvas.width = backingWidth;
   if (canvas.height !== backingHeight) canvas.height = backingHeight;
 
-  // 保持原图宽高比，在画布内居中留白绘制，绝不变形。
-  const fit = fitMaskFrame(cssWidth, cssHeight, edit.imageWidth, edit.imageHeight);
-  const dx = Math.floor((cssWidth - fit.width) / 2);
-  const dy = Math.floor((cssHeight - fit.height) / 2);
-  edit.drawRect = { dx, dy, width: fit.width, height: fit.height };
+  if (edit.viewport === null) {
+    edit.viewport = createFittedMaskViewport({
+      canvasWidth: cssWidth,
+      canvasHeight: cssHeight,
+      imageWidth: edit.imageWidth,
+      imageHeight: edit.imageHeight,
+    });
+  } else if (edit.viewport.canvasWidth !== cssWidth || edit.viewport.canvasHeight !== cssHeight) {
+    edit.viewport = resizeMaskViewport(edit.viewport, cssWidth, cssHeight);
+  }
+  const imageRect = maskViewportImageRect(edit.viewport);
 
   context.save();
   context.scale(pixelRatio, pixelRatio);
   context.clearRect(0, 0, cssWidth, cssHeight);
-  context.drawImage(edit.sourceImage, dx, dy, fit.width, fit.height);
-  context.drawImage(edit.overlayCanvas, dx, dy, fit.width, fit.height);
+  context.drawImage(
+    edit.sourceImage,
+    imageRect.left,
+    imageRect.top,
+    imageRect.width,
+    imageRect.height,
+  );
+  context.drawImage(
+    edit.overlayCanvas,
+    imageRect.left,
+    imageRect.top,
+    imageRect.width,
+    imageRect.height,
+  );
   if (edit.cursorClientPoint) {
     const rect = canvas.getBoundingClientRect();
-    const radius = imageRadiusToScreen(
-      currentBrushRadiusPx(edit),
-      {
-        left: 0,
-        top: 0,
-        width: fit.width,
-        height: fit.height,
-      },
-      edit.imageWidth,
-    );
     const x = edit.cursorClientPoint.x - rect.left;
     const y = edit.cursorClientPoint.y - rect.top;
-    context.beginPath();
-    context.arc(x, y, Math.max(2, radius), 0, Math.PI * 2);
-    context.strokeStyle = 'rgba(31, 41, 51, 0.85)';
-    context.lineWidth = 2;
-    context.stroke();
-    context.beginPath();
-    context.arc(x, y, Math.max(2, radius), 0, Math.PI * 2);
-    context.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    context.lineWidth = 1;
-    context.stroke();
+    if (
+      edit.gesture.mode !== 'pan' &&
+      edit.gesture.mode !== 'pinch' &&
+      maskViewportPointToImage(edit.viewport, x, y) !== null
+    ) {
+      const radius = currentBrushRadiusPx(edit) * edit.viewport.scale;
+      context.beginPath();
+      context.arc(x, y, Math.max(2, radius), 0, Math.PI * 2);
+      context.strokeStyle = 'rgba(31, 41, 51, 0.85)';
+      context.lineWidth = 2;
+      context.stroke();
+      context.beginPath();
+      context.arc(x, y, Math.max(2, radius), 0, Math.PI * 2);
+      context.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      context.lineWidth = 1;
+      context.stroke();
+    }
   }
   context.restore();
+  syncMaskViewportControls(edit);
 }
 
 function scheduleMaskRefine(): void {
   const edit = maskEdit;
-  if (!edit || edit.destroyed || edit.refineController !== null) return;
+  if (!edit || edit.destroyed || edit.refineController !== null || edit.applyController !== null) {
+    return;
+  }
   const strokes = edit.session.takePendingForRefine();
   if (strokes.length === 0) return;
   const controller = new AbortController();
+  const requestRevision = edit.revisionGuard.capture();
   edit.refineController = controller;
   setMaskEditStatus('正在对齐边缘…');
   edit.maskCanvas.toBlob((maskBlob) => {
-    void settleMaskRefine(edit, controller, strokes, maskBlob);
+    void settleMaskRefine(edit, controller, requestRevision, strokes, maskBlob);
   }, 'image/png');
 }
 
 async function settleMaskRefine(
   edit: MaskEditRuntime,
   controller: AbortController,
+  requestRevision: number,
   strokes: readonly MaskStroke[],
   maskBlob: Blob | null,
 ): Promise<void> {
@@ -1215,6 +1372,10 @@ async function settleMaskRefine(
     if (edit.destroyed || maskEdit !== edit) {
       return;
     }
+    if (!edit.revisionGuard.accepts(requestRevision)) {
+      edit.session.acknowledgeRefine();
+      return;
+    }
     const maskContext = edit.maskCanvas.getContext('2d');
     if (maskContext) {
       maskContext.clearRect(0, 0, edit.imageWidth, edit.imageHeight);
@@ -1222,15 +1383,7 @@ async function settleMaskRefine(
     }
     rebuildMaskOverlay(edit.maskCanvas, edit.overlayCanvas, edit.highlightColor);
     edit.session.acknowledgeRefine();
-    for (const pending of edit.session.pendingStrokes()) {
-      replayMaskStroke(edit, pending);
-    }
     scheduleMaskEditRedraw();
-    if (edit.session.pendingStrokes().length > 0) {
-      edit.refineController = null;
-      scheduleMaskRefine();
-      return;
-    }
     setMaskEditStatus('');
   } catch (error) {
     if (isAbortError(error) || controller.signal.aborted) {
@@ -1244,24 +1397,23 @@ async function settleMaskRefine(
     if (edit.refineController === controller) {
       edit.refineController = null;
     }
-  }
-}
-
-function replayMaskStroke(edit: MaskEditRuntime, stroke: MaskStroke): void {
-  for (let index = 0; index < stroke.points.length; index += 1) {
-    const from = stroke.points[Math.max(0, index - 1)];
-    const to = stroke.points[index];
-    if (!from || !to) continue;
-    paintMaskSegment(edit, from, to, stroke.mode, stroke.radius);
+    if (maskEdit === edit && edit.session.pendingStrokes().length > 0) {
+      scheduleMaskRefine();
+    }
   }
 }
 
 function undoMaskEditStroke(): void {
   const edit = maskEdit;
-  if (!edit || edit.destroyed) return;
+  if (!edit || edit.destroyed || edit.applyController !== null) return;
   const snapshot = edit.session.popUndo();
   if (!snapshot) return;
+  const activeRefine = edit.refineController;
+  edit.refineController = null;
+  activeRefine?.abort();
+  edit.session.requeueInFlight();
   edit.session.dropLastPending();
+  edit.revisionGuard.advance();
   const maskContext = edit.maskCanvas.getContext('2d');
   if (maskContext) {
     maskContext.clearRect(0, 0, edit.imageWidth, edit.imageHeight);
@@ -1271,6 +1423,7 @@ function undoMaskEditStroke(): void {
   scheduleMaskEditRedraw();
   syncMaskEditControls();
   setMaskEditStatus('已撤销上一次涂抹。');
+  scheduleMaskRefine();
 }
 
 async function applyMaskEdit(): Promise<void> {
@@ -1278,6 +1431,10 @@ async function applyMaskEdit(): Promise<void> {
   if (!edit || edit.destroyed || edit.applyController !== null) return;
   const sourceSession = sourceImageSession;
   if (!sourceSession || sourceSession.id !== edit.sourceSessionId) return;
+  const activeRefine = edit.refineController;
+  edit.refineController = null;
+  activeRefine?.abort();
+  edit.session.requeueInFlight();
   const controller = new AbortController();
   edit.applyController = controller;
   syncMaskEditControls();
@@ -1353,6 +1510,9 @@ async function applyMaskEdit(): Promise<void> {
       edit.applyController = null;
     }
     syncMaskEditControls();
+    if (maskEdit === edit && edit.session.pendingStrokes().length > 0) {
+      scheduleMaskRefine();
+    }
   }
 }
 
@@ -1370,21 +1530,94 @@ function setupMaskEditInteractions(): void {
   canvas.addEventListener('pointerup', handleMaskEditPointerEnd);
   canvas.addEventListener('pointercancel', handleMaskEditPointerEnd);
   canvas.addEventListener('lostpointercapture', (event) => {
-    if (maskEdit && maskEdit.paintingPointerId === event.pointerId) {
+    if (maskEdit?.gesture.pointers.has(event.pointerId)) {
       handleMaskEditPointerEnd(event);
     }
   });
   canvas.addEventListener('pointerleave', () => {
-    if (maskEdit && maskEdit.paintingPointerId === null) {
+    if (maskEdit && maskEdit.gesture.mode === 'idle') {
       maskEdit.cursorClientPoint = null;
       scheduleMaskEditRedraw();
     }
+  });
+  canvas.addEventListener(
+    'wheel',
+    (event) => {
+      const edit = maskEdit;
+      if (!edit?.viewport) return;
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const factor = Math.exp(-event.deltaY * 0.0015);
+      edit.viewport = zoomMaskViewportAt(
+        edit.viewport,
+        edit.viewport.scale * factor,
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+      );
+      scheduleMaskEditRedraw();
+    },
+    { passive: false },
+  );
+  canvas.addEventListener('keydown', (event) => {
+    if (event.code !== 'Space' || !maskEdit) return;
+    event.preventDefault();
+    maskEdit.gesture = reduceMaskGesture(maskEdit.gesture, {
+      type: 'space',
+      pressed: true,
+    }).state;
+    syncMaskGestureCanvas(canvas, maskEdit.gesture);
+  });
+  canvas.addEventListener('keyup', (event) => {
+    if (event.code !== 'Space' || !maskEdit) return;
+    event.preventDefault();
+    maskEdit.gesture = reduceMaskGesture(maskEdit.gesture, {
+      type: 'space',
+      pressed: false,
+    }).state;
+    syncMaskGestureCanvas(canvas, maskEdit.gesture);
+  });
+  canvas.addEventListener('blur', () => {
+    if (!maskEdit) return;
+    maskEdit.gesture = reduceMaskGesture(maskEdit.gesture, {
+      type: 'space',
+      pressed: false,
+    }).state;
+    syncMaskGestureCanvas(canvas, maskEdit.gesture);
   });
   const brushSize = required(previewWorkspace, '[data-mask-brush-size]', HTMLInputElement);
   brushSize.addEventListener('input', () => {
     maskEdit?.session.setBrushSize(Number(brushSize.value));
     scheduleMaskEditRedraw();
   });
+  for (const button of previewWorkspace.querySelectorAll<HTMLButtonElement>('[data-mask-tool]')) {
+    button.addEventListener('click', () => {
+      const edit = maskEdit;
+      if (!edit || edit.applyController !== null) return;
+      edit.session.setBrushMode(button.dataset.maskTool === 'keep' ? 'keep' : 'remove');
+      syncMaskEditControls();
+      announce(button.dataset.maskTool === 'keep' ? '已切换到涂抹恢复。' : '已切换到涂抹去除。');
+    });
+  }
+  required(previewWorkspace, '[data-mask-zoom-out]', HTMLButtonElement).addEventListener(
+    'click',
+    () => {
+      zoomMaskEditBy(1 / 1.25);
+    },
+  );
+  required(previewWorkspace, '[data-mask-zoom-in]', HTMLButtonElement).addEventListener(
+    'click',
+    () => {
+      zoomMaskEditBy(1.25);
+    },
+  );
+  required(previewWorkspace, '[data-mask-zoom-fit]', HTMLButtonElement).addEventListener(
+    'click',
+    fitMaskEditViewport,
+  );
+  required(previewWorkspace, '[data-mask-zoom-actual]', HTMLButtonElement).addEventListener(
+    'click',
+    actualSizeMaskEditViewport,
+  );
   for (const swatch of previewWorkspace.querySelectorAll<HTMLButtonElement>(
     '[data-mask-highlight]',
   )) {
@@ -1419,14 +1652,65 @@ function setupMaskEditInteractions(): void {
   );
 }
 
+function zoomMaskEditBy(factor: number): void {
+  const edit = maskEdit;
+  if (!edit?.viewport) return;
+  edit.viewport = zoomMaskViewportAt(
+    edit.viewport,
+    edit.viewport.scale * factor,
+    edit.viewport.canvasWidth / 2,
+    edit.viewport.canvasHeight / 2,
+  );
+  scheduleMaskEditRedraw();
+}
+
+function fitMaskEditViewport(): void {
+  const edit = maskEdit;
+  if (!edit?.viewport) return;
+  edit.viewport = createFittedMaskViewport({
+    canvasWidth: edit.viewport.canvasWidth,
+    canvasHeight: edit.viewport.canvasHeight,
+    imageWidth: edit.imageWidth,
+    imageHeight: edit.imageHeight,
+  });
+  scheduleMaskEditRedraw();
+}
+
+function actualSizeMaskEditViewport(): void {
+  const edit = maskEdit;
+  if (!edit?.viewport) return;
+  edit.viewport = actualSizeMaskViewport(edit.viewport);
+  scheduleMaskEditRedraw();
+}
+
+function syncMaskViewportControls(edit: MaskEditRuntime): void {
+  if (!edit.viewport) return;
+  const limits = maskViewportScaleLimits(edit.viewport);
+  const zoomValue = previewWorkspace.querySelector<HTMLOutputElement>('[data-mask-zoom-value]');
+  if (zoomValue) zoomValue.value = `${String(Math.round(edit.viewport.scale * 100))}%`;
+  const zoomOut = previewWorkspace.querySelector<HTMLButtonElement>('[data-mask-zoom-out]');
+  const zoomIn = previewWorkspace.querySelector<HTMLButtonElement>('[data-mask-zoom-in]');
+  if (zoomOut) zoomOut.disabled = edit.viewport.scale <= limits.min + 0.0001;
+  if (zoomIn) zoomIn.disabled = edit.viewport.scale >= limits.max - 0.0001;
+}
+
 function syncMaskEditControls(): void {
+  const edit = maskEdit;
+  const applying = edit?.applyController !== null && edit?.applyController !== undefined;
   const undoButton = previewWorkspace.querySelector<HTMLButtonElement>('[data-mask-edit-undo]');
   if (undoButton) {
-    undoButton.disabled = (maskEdit?.session.undoDepth() ?? 0) === 0;
+    undoButton.disabled = applying || (edit?.session.undoDepth() ?? 0) === 0;
   }
   const applyButton = previewWorkspace.querySelector<HTMLButtonElement>('[data-mask-edit-apply]');
   if (applyButton) {
-    applyButton.disabled = maskEdit === null || maskEdit.applyController !== null;
+    applyButton.disabled = edit === null || applying;
+  }
+  const brushSize = previewWorkspace.querySelector<HTMLInputElement>('[data-mask-brush-size]');
+  if (brushSize) brushSize.disabled = applying;
+  for (const button of previewWorkspace.querySelectorAll<HTMLButtonElement>('[data-mask-tool]')) {
+    const active = button.dataset.maskTool === edit?.session.brushMode();
+    button.setAttribute('aria-pressed', String(active));
+    button.disabled = applying;
   }
 }
 
@@ -1626,14 +1910,6 @@ async function initializeRadioGroupControllers(): Promise<void> {
   exportPresetRadioControllers = Object.freeze(nextExportPresetControllers);
   exportBackgroundRadioControllers = Object.freeze(nextExportBackgroundControllers);
   exportAppearanceRadioControllers = Object.freeze(nextExportAppearanceControllers);
-  maskBrushModeController = await createVaadinRadioGroupController({
-    element: requiredVaadinElement(
-      previewWorkspace,
-      '[data-mask-brush-mode]',
-      'vaadin-radio-group',
-    ),
-    initialValue: 'remove',
-  });
 }
 
 async function initializeCapabilities(): Promise<void> {
@@ -2195,9 +2471,6 @@ function setupPreview(): void {
     requestMaskReedit,
   );
   setupMaskEditInteractions();
-  maskBrushModeController.subscribe((value) => {
-    maskEdit?.session.setBrushMode(value === 'keep' ? 'keep' : 'remove');
-  });
   for (const button of previewWorkspace.querySelectorAll<HTMLButtonElement>(
     '[data-preview-mode]',
   )) {
@@ -3187,6 +3460,7 @@ function currentPreviewCompareValue(): 'original' | 'pattern' {
 
 function setupPreviewCanvasResize(): void {
   const slot = required(previewWorkspace, '[data-preview-canvas-slot]', HTMLElement);
+  const maskFrame = required(previewWorkspace, '[data-mask-edit-frame]', HTMLElement);
   if (typeof ResizeObserver === 'undefined') {
     return;
   }
@@ -3202,6 +3476,7 @@ function setupPreviewCanvasResize(): void {
     }
   });
   observer.observe(slot);
+  observer.observe(maskFrame);
 }
 
 function buildGenerationSettings(): PatternGenerationSettings {
@@ -5507,7 +5782,6 @@ function cleanup(): void {
   uploadPrepareRadioControllers.modePreference.destroy();
   samplingRadioController.destroy();
   previewCompareRadioController.destroy();
-  maskBrushModeController.destroy();
   for (const controller of [
     preparePresetRadioGroupControllers.patternSize,
     preparePresetRadioGroupControllers.beadSize,

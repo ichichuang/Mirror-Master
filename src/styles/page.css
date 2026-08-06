@@ -776,8 +776,7 @@
 
 .preview-pattern-view,
 .preview-original-view,
-.preview-adjust-view,
-.preview-mask-edit-view {
+.preview-adjust-view {
   position: relative;
   display: grid;
   grid-area: 1 / 1;
@@ -802,15 +801,124 @@
 }
 
 .preview-mask-edit-view {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--color-surface);
+  animation: mask-editor-in 160ms ease-out both;
+}
+
+.mask-edit-header {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  min-width: 0;
+  min-height: 4rem;
+  grid-template-columns: minmax(7rem, 1fr) auto minmax(7rem, 1fr);
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-strong);
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-3);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-panel);
+}
+
+.mask-edit-header > .secondary-button {
+  justify-self: start;
+}
+
+.mask-edit-heading {
+  display: grid;
+  justify-items: center;
+  gap: 0.1rem;
+  text-align: center;
+}
+
+.mask-edit-heading strong {
+  color: var(--color-ink);
+  font-size: 0.94rem;
+}
+
+.mask-edit-heading small {
+  color: var(--color-ink-muted);
+  font-size: 0.72rem;
+}
+
+.mask-edit-header-actions {
+  display: flex;
+  justify-self: end;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mask-edit-stage {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: 13rem minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
+  background: color-mix(in srgb, var(--color-text-primary) 92%, black);
+}
+
+.mask-edit-tools {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-column: 1;
+  grid-row: 1 / -1;
+  align-content: start;
+  border-right: 1px solid var(--color-border-strong);
+  padding: var(--space-3);
+  gap: var(--space-3);
+  background: var(--color-surface);
+  overflow: auto;
+}
+
+.mask-edit-tool-group {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.mask-edit-tool-button {
+  display: flex;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-medium);
+  padding: 0 var(--space-2);
+  gap: var(--space-2);
+  color: var(--color-ink-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.mask-edit-tool-button[aria-pressed='true'] {
+  border-color: var(--color-primary-text);
+  color: var(--color-primary-text);
+  background: var(--color-primary-soft);
+}
+
+.mask-edit-tool-button:focus-visible,
+.mask-edit-zoom button:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 .mask-edit-frame {
   position: relative;
-  width: 100%;
-  height: 100%;
   min-width: 0;
   min-height: 0;
+  grid-column: 2;
+  grid-row: 1;
   overflow: hidden;
 }
 
@@ -820,6 +928,16 @@
   height: 100%;
   touch-action: none;
   cursor: crosshair;
+  outline: none;
+}
+
+.mask-edit-canvas[data-gesture='pan'],
+.mask-edit-canvas[data-space-pan='true'] {
+  cursor: grab;
+}
+
+.mask-edit-canvas[data-gesture='pan'] {
+  cursor: grabbing;
 }
 
 /* 处理提示以覆盖层徽标呈现，绝不参与文档流、不影响整体排版 */
@@ -850,53 +968,69 @@
   display: none;
 }
 
-.mask-edit-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  padding-block: var(--space-2);
-  padding-inline: var(--space-3);
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-border-strong);
-}
-
-.mask-brush-mode {
-  flex: 0 0 auto;
-}
-
-.mask-brush-mode::part(group-field) {
-  display: flex;
-  flex-direction: row;
-  gap: var(--space-2);
-}
-
 .mask-brush-size-field {
   display: flex;
-  flex: 1 1 9rem;
-  align-items: center;
+  align-items: start;
+  flex-direction: column;
   gap: var(--space-2);
-  min-width: 7rem;
-  max-width: 16rem;
+  min-width: 0;
   color: var(--color-ink-muted);
   font-size: 0.78rem;
   white-space: nowrap;
 }
 
 .mask-brush-size-field input[type='range'] {
-  flex: 1 1 auto;
+  width: 100%;
   min-height: 2.75rem;
 }
 
-.mask-edit-actions {
+.mask-edit-zoom {
   display: flex;
+  min-height: 3.75rem;
+  grid-column: 2;
+  grid-row: 2;
   align-items: center;
+  justify-content: center;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-strong) 42%, transparent);
+  padding: var(--space-2) var(--space-3);
   gap: var(--space-2);
-  margin-left: auto;
+  color: var(--color-text-on-primary);
+  background: color-mix(in srgb, var(--color-text-primary) 96%, black);
+}
+
+.mask-edit-zoom button {
+  display: inline-flex;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, white 20%, transparent);
+  border-radius: var(--radius-medium);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  color: white;
+  background: color-mix(in srgb, white 8%, transparent);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.mask-edit-zoom button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.mask-edit-zoom output {
+  min-width: 3.6rem;
+  color: white;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  text-align: center;
 }
 
 .mask-highlight-control {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.15rem;
 }
@@ -966,6 +1100,122 @@
     0 0 0 4px var(--color-primary);
 }
 
+@media (max-width: 767px) {
+  .mask-edit-header {
+    min-height: 3.5rem;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding-inline: var(--space-2);
+    gap: var(--space-1);
+  }
+
+  .mask-edit-header > .secondary-button {
+    min-width: 2.75rem;
+    padding-inline: var(--space-2);
+    font-size: 0;
+  }
+
+  .mask-edit-header > .secondary-button i {
+    font-size: 1rem;
+  }
+
+  .mask-edit-heading small {
+    display: none;
+  }
+
+  .mask-edit-header-actions {
+    gap: var(--space-1);
+  }
+
+  .mask-edit-header-actions .primary-button {
+    min-height: 2.75rem;
+    padding-inline: var(--space-2);
+    font-size: 0.78rem;
+  }
+
+  .mask-edit-stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+
+  .mask-edit-frame {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .mask-edit-tools {
+    display: flex;
+    min-height: auto;
+    grid-column: 1;
+    grid-row: 2;
+    align-items: center;
+    border-top: 1px solid var(--color-border-strong);
+    border-right: 0;
+    padding: var(--space-1) var(--space-2);
+    gap: var(--space-2);
+    overflow-x: auto;
+  }
+
+  .mask-edit-tool-group {
+    display: flex;
+    flex: none;
+  }
+
+  .mask-edit-tool-button {
+    padding-inline: var(--space-2);
+  }
+
+  .mask-edit-tool-button span {
+    display: none;
+  }
+
+  .mask-brush-size-field {
+    width: min(11rem, 38vw);
+    flex: none;
+    gap: 0;
+  }
+
+  .mask-brush-size-field > span {
+    font-size: 0.68rem;
+  }
+
+  .mask-highlight-control {
+    display: none;
+  }
+
+  .mask-edit-zoom {
+    min-height: 3.5rem;
+    grid-column: 1;
+    grid-row: 3;
+    justify-content: stretch;
+    padding: var(--space-1) var(--space-2) calc(var(--space-1) + var(--safe-bottom));
+    gap: var(--space-1);
+  }
+
+  .mask-edit-zoom button {
+    min-width: 2.75rem;
+    flex: 1 1 auto;
+    padding-inline: var(--space-1);
+  }
+
+  .mask-edit-zoom output {
+    min-width: 3.2rem;
+  }
+
+  .mask-edit-zoom [data-mask-zoom-actual] {
+    display: none;
+  }
+}
+
+@keyframes mask-editor-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 /* 去背景选区编辑期间，隐藏与当前任务无关的对比与样式控件 */
 .preview-workspace[data-mask-editing='true'] .compare-switch,
 .preview-workspace[data-mask-editing='true'] [data-hold-original],
@@ -973,6 +1223,12 @@
 .preview-workspace[data-mask-editing='true'] [data-background-removal-control],
 .preview-workspace[data-mask-editing='true'] .preview-mode-control {
   display: none;
+}
+
+/* 选区画布以 preview-layout 为定位基准，编辑时允许它越过原预览槽并覆盖整个工作区。 */
+.preview-workspace[data-mask-editing='true'] .preview-canvas-column,
+.preview-workspace[data-mask-editing='true'] .preview-canvas-slot {
+  overflow: visible;
 }
 
 .preview-adjust-view .crop-frame {
@@ -3947,6 +4203,7 @@ select {
 
 @media (prefers-reduced-motion: reduce) {
   .stage-panel,
+  .preview-mask-edit-view,
   .workspace-sheet,
   .preview-control-surface,
   .advanced-settings summary > i,

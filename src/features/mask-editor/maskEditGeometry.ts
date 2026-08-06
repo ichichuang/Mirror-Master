@@ -34,9 +34,17 @@ export function clientPointToImagePoint(
   frame: MaskEditRect,
   imageWidth: number,
   imageHeight: number,
-): { readonly x: number; readonly y: number } {
+): { readonly x: number; readonly y: number } | null {
   if (frame.width <= 0 || frame.height <= 0) {
-    return { x: 0, y: 0 };
+    return null;
+  }
+  if (
+    clientX < frame.left ||
+    clientY < frame.top ||
+    clientX > frame.left + frame.width ||
+    clientY > frame.top + frame.height
+  ) {
+    return null;
   }
   const x = ((clientX - frame.left) / frame.width) * imageWidth;
   const y = ((clientY - frame.top) / frame.height) * imageHeight;

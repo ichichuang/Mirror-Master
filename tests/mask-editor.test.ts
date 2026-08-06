@@ -8,6 +8,19 @@ import {
   imageRadiusToScreen,
 } from '../src/features/mask-editor/maskEditGeometry';
 import {
+  actualSizeMaskViewport,
+  createFittedMaskViewport,
+  maskViewportPointToImage,
+  panMaskViewport,
+  resizeMaskViewport,
+  zoomMaskViewportAt,
+} from '../src/features/mask-editor/maskViewport';
+import {
+  createMaskGestureState,
+  reduceMaskGesture,
+} from '../src/features/mask-editor/maskEditGesture';
+import { createMaskRevisionGuard } from '../src/features/mask-editor/maskRevision';
+import {
   clampBrushSize,
   createMaskEditSession,
   MASK_EDIT_DEFAULT_BRUSH_SIZE,
@@ -28,11 +41,99 @@ test('fitMaskFrame 按图片宽高比适配显示区域', () => {
   assert.deepEqual(fitMaskFrame(0, 600, 300, 400), { width: 0, height: 0 });
 });
 
-test('clientPointToImagePoint 把客户端坐标换算为图片像素坐标并裁剪', () => {
+test('clientPointToImagePoint 只换算图片范围内的客户端坐标', () => {
   const frame = { left: 100, top: 50, width: 400, height: 300 };
   assert.deepEqual(clientPointToImagePoint(300, 200, frame, 800, 600), { x: 400, y: 300 });
-  assert.deepEqual(clientPointToImagePoint(0, 0, frame, 800, 600), { x: 0, y: 0 });
-  assert.deepEqual(clientPointToImagePoint(9999, 9999, frame, 800, 600), { x: 800, y: 600 });
+  assert.equal(clientPointToImagePoint(0, 0, frame, 800, 600), null);
+  assert.equal(clientPointToImagePoint(9999, 9999, frame, 800, 600), null);
+});
+
+test('mask viewport fits portrait images and keeps pointer anchored while zooming', () => {
+  const portrait = createFittedMaskViewport({
+    canvasWidth: 1200,
+    canvasHeight: 700,
+    imageWidth: 720,
+    imageHeight: 1280,
+  });
+  assert.equal(portrait.scale, 700 / 1280);
+  assert.deepEqual(maskViewportPointToImage(portrait, 600, 350), { x: 360, y: 640 });
+  assert.equal(maskViewportPointToImage(portrait, 0, 0), null);
+
+  const before = maskViewportPointToImage(portrait, 600, 350);
+  const zoomed = zoomMaskViewportAt(portrait, portrait.scale * 2, 600, 350);
+  assert.deepEqual(maskViewportPointToImage(zoomed, 600, 350), before);
+});
+
+test('mask viewport constrains panning, supports actual size, and preserves center on resize', () => {
+  const fitted = createFittedMaskViewport({
+    canvasWidth: 800,
+    canvasHeight: 600,
+    imageWidth: 1600,
+    imageHeight: 900,
+  });
+  const actual = actualSizeMaskViewport(fitted);
+  assert.equal(actual.scale, 1);
+  const panned = panMaskViewport(actual, 10000, -10000);
+  assert.equal(panned.offsetX, 0);
+  assert.equal(panned.offsetY, 600 - 900);
+  const centerBefore = maskViewportPointToImage(actual, 400, 300);
+  const resized = resizeMaskViewport(actual, 1000, 700);
+  assert.deepEqual(maskViewportPointToImage(resized, 500, 350), centerBefore);
+});
+
+test('mask gesture separates paint, space pan, and two-pointer pinch', () => {
+  let state = createMaskGestureState();
+  let transition = reduceMaskGesture(state, {
+    type: 'pointerDown',
+    pointer: {
+      id: 1,
+      pointerType: 'touch',
+      x: 10,
+      y: 10,
+      button: 0,
+      insideImage: true,
+    },
+  });
+  assert.equal(transition.intent.type, 'paintStart');
+  state = transition.state;
+  transition = reduceMaskGesture(state, {
+    type: 'pointerDown',
+    pointer: {
+      id: 2,
+      pointerType: 'touch',
+      x: 30,
+      y: 30,
+      button: 0,
+      insideImage: true,
+    },
+  });
+  assert.equal(transition.intent.type, 'paintCancel');
+  assert.equal(transition.state.mode, 'pinch');
+
+  state = reduceMaskGesture(createMaskGestureState(), { type: 'space', pressed: true }).state;
+  transition = reduceMaskGesture(state, {
+    type: 'pointerDown',
+    pointer: {
+      id: 3,
+      pointerType: 'mouse',
+      x: 50,
+      y: 50,
+      button: 0,
+      insideImage: false,
+    },
+  });
+  assert.equal(transition.state.mode, 'pan');
+});
+
+test('mask revision guard rejects results captured before paint or undo', () => {
+  const guard = createMaskRevisionGuard();
+  const beforePaint = guard.capture();
+  guard.advance();
+  const beforeUndo = guard.capture();
+  guard.advance();
+  assert.equal(guard.accepts(beforePaint), false);
+  assert.equal(guard.accepts(beforeUndo), false);
+  assert.equal(guard.accepts(guard.capture()), true);
 });
 
 test('brushSizeToImageRadius 按滑杆映射到图片像素半径', () => {
